@@ -947,7 +947,10 @@ async fn help_handler(State(state): State<AppState>, headers: HeaderMap) -> Resp
             "get_config": format!("curl -H 'Authorization: Bearer <super-admin-key>' '{origin}/api/config'"),
             "put_config": format!("curl -X PUT -H 'Authorization: Bearer <super-admin-key>' -H 'Content-Type: application/json' --data @config.json '{origin}/api/config'"),
             "list": format!("curl -H 'Authorization: Bearer <key>' '{origin}/{}?list-type=2&delimiter=/&prefix=public/'", state.bucket),
-            "read": format!("curl -H 'Authorization: Bearer <key>' '{origin}/{}/public/example.txt'", state.bucket)
+            "upload": format!("curl -X PUT -H 'Authorization: Bearer <key>' -H 'Content-Type: text/plain' --data-binary @./example.txt '{origin}/{}/public/example.txt'", state.bucket),
+            "upload_with_curl_T": format!("curl -H 'Authorization: Bearer <key>' -T ./example.txt '{origin}/{}/public/example.txt'", state.bucket),
+            "read": format!("curl -H 'Authorization: Bearer <key>' '{origin}/{}/public/example.txt'", state.bucket),
+            "delete": format!("curl -X DELETE -H 'Authorization: Bearer <key>' '{origin}/{}/public/example.txt'", state.bucket)
         }
     }))
     .into_response()
@@ -2541,5 +2544,7 @@ mod tests {
         assert!(body.contains("\"service\":\"quark-s3-demo\""));
         assert!(body.contains("GET /api/config"));
         assert!(body.contains("GET /{bucket}?list-type=2"));
+        assert!(body.contains("--data-binary @./example.txt"));
+        assert!(body.contains("-T ./example.txt"));
     }
 }

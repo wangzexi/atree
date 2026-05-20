@@ -558,7 +558,11 @@ Suggested response content:
   "examples": {
     "get_config": "curl -H 'Authorization: Bearer <super-admin-key>' '<origin>/api/config'",
     "put_config": "curl -X PUT -H 'Authorization: Bearer <super-admin-key>' -H 'Content-Type: application/json' --data @config.json '<origin>/api/config'",
-    "list": "curl -H 'Authorization: Bearer <key>' '<origin>/quark?list-type=2&delimiter=/&prefix=public/'"
+    "list": "curl -H 'Authorization: Bearer <key>' '<origin>/quark?list-type=2&delimiter=/&prefix=public/'",
+    "upload": "curl -X PUT -H 'Authorization: Bearer <key>' -H 'Content-Type: text/plain' --data-binary @./example.txt '<origin>/quark/public/example.txt'",
+    "upload_with_curl_T": "curl -H 'Authorization: Bearer <key>' -T ./example.txt '<origin>/quark/public/example.txt'",
+    "read": "curl -H 'Authorization: Bearer <key>' '<origin>/quark/public/example.txt'",
+    "delete": "curl -X DELETE -H 'Authorization: Bearer <key>' '<origin>/quark/public/example.txt'"
   }
 }
 ```
