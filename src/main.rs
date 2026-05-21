@@ -1,13 +1,14 @@
 use std::{
     collections::HashMap,
-    env, fs,
+    env,
     net::SocketAddr,
-    path::{Path as FsPath, PathBuf},
+    path::PathBuf,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
 mod config;
+mod mounts;
 mod ui;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -25,10 +26,9 @@ use config::{
     parse_config_yaml, save_config_to_db,
 };
 use futures_util::TryStreamExt;
-use reqwest::{Client, Proxy, Url};
+use reqwest::{Client, Proxy};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
-use serde_yaml::Value as YamlValue;
 use sha1::{Digest, Sha1};
 use sha2::Sha256;
 use tokio::{
@@ -38,6 +38,11 @@ use tokio::{
 };
 use tracing::{info, warn};
 use ui::{file_browser_html, wants_html};
+use crate::mounts::{
+    backend_from_mount, github_client, is_fnnas_quark_refresh_url, persist_quark_open_config,
+    quark_client, quark_open_client, resolve_explicit_mount, resolve_mount, resolve_remote_key,
+    GithubReleasesConfig, QuarkOpenConfig, ResolvedMount,
+};
 
 const QUARK_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch";
 const REFERER: &str = "https://pan.quark.cn";
@@ -54,28 +59,6 @@ struct AppState {
     multipart_dir: PathBuf,
 }
 
-#[derive(Debug, Clone)]
-enum ResolvedMount {
-    Quark {
-        remote_key: String,
-        cookie: String,
-        root_fid: String,
-    },
-    QuarkOpen {
-        remote_key: String,
-        config: QuarkOpenConfig,
-    },
-    SystemConfig,
-    UrlTree {
-        url: String,
-        proxy: Option<String>,
-    },
-    GithubReleases {
-        rest: String,
-        config: GithubReleasesConfig,
-    },
-}
-
 #[derive(Clone)]
 struct QuarkClient {
     http: Client,
@@ -83,30 +66,10 @@ struct QuarkClient {
     root_fid: String,
 }
 
-#[derive(Debug, Clone)]
-struct QuarkOpenConfig {
-    oauth_file: Option<PathBuf>,
-    access_token: String,
-    refresh_token: String,
-    app_id: String,
-    sign_key: String,
-    refresh_url: String,
-    root_fid: String,
-}
-
 #[derive(Clone)]
 struct QuarkOpenClient {
     http: Client,
     config: Arc<Mutex<QuarkOpenConfig>>,
-}
-
-#[derive(Debug, Clone)]
-struct GithubReleasesConfig {
-    repo: String,
-    token: Option<String>,
-    proxy: Option<String>,
-    show_source_code: bool,
-    asset_allow: Vec<String>,
 }
 
 enum QuarkBackend {
@@ -1407,38 +1370,6 @@ async fn state_bucket(state: &AppState) -> String {
     state.config.read().await.s3.bucket.clone()
 }
 
-fn quark_client(cookie: String, root_fid: String) -> Result<QuarkClient> {
-    if cookie.trim().is_empty() {
-        bail!("quark_cookie mount needs options.cookie in config.yaml");
-    }
-    QuarkClient::new(cookie, root_fid)
-}
-
-fn quark_open_client(config: QuarkOpenConfig) -> Result<QuarkOpenClient> {
-    if config.refresh_token.trim().is_empty() {
-        bail!("quark_open mount needs options.refresh_token or options.oauth_file");
-    }
-    let http = Client::builder()
-        .user_agent("atree/quark-open")
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .build()?;
-    Ok(QuarkOpenClient {
-        http,
-        config: Arc::new(Mutex::new(config)),
-    })
-}
-
-fn github_client(config: &GithubReleasesConfig) -> Result<Client> {
-    let mut builder = Client::builder()
-        .user_agent("atree/github-releases")
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .timeout(Duration::from_secs(120));
-    if let Some(proxy_url) = config.proxy.as_deref() {
-        builder = builder.proxy(Proxy::all(proxy_url)?);
-    }
-    Ok(builder.build()?)
-}
-
 fn build_app(state: AppState, max_upload_bytes: usize) -> Router {
     Router::new()
         .route("/", any(root_handler))
@@ -2650,263 +2581,6 @@ fn resource_matches(pattern: &str, resource: &str) -> bool {
     pattern.trim_end_matches('/') == resource.trim_end_matches('/')
 }
 
-#[cfg(test)]
-fn resolve_remote_key(config: &ServiceConfig, virtual_path: &str) -> Option<String> {
-    match resolve_mount(config, virtual_path)? {
-        ResolvedMount::Quark { remote_key, .. } => Some(remote_key),
-        _ => None,
-    }
-}
-
-fn resolve_mount(config: &ServiceConfig, virtual_path: &str) -> Option<ResolvedMount> {
-    resolve_mount_inner(config, virtual_path, true)
-}
-
-fn resolve_explicit_mount(config: &ServiceConfig, virtual_path: &str) -> Option<ResolvedMount> {
-    resolve_mount_inner(config, virtual_path, false)
-}
-
-fn resolve_mount_inner(
-    config: &ServiceConfig,
-    virtual_path: &str,
-    include_root_mount: bool,
-) -> Option<ResolvedMount> {
-    let path = normalize_virtual_path(virtual_path);
-    let mount = config.mounts.iter().rev().find(|mount| {
-        mount.enabled
-            && (include_root_mount || normalize_virtual_path(&mount.mount_path) != "/")
-            && mount_matches_for_type(mount, &path)
-    })?;
-    match mount.mount_type.as_str() {
-        "quark_cookie" => {
-            let rest = strip_mount_path(&mount.mount_path, &path);
-            Some(ResolvedMount::Quark {
-                remote_key: join_remote_path(&mount.root_path, rest),
-                cookie: mount_option_string(&mount.options, "cookie").unwrap_or_default(),
-                root_fid: mount_option_string(&mount.options, "root_fid")
-                    .unwrap_or_else(|| "0".to_string()),
-            })
-        }
-        "quark_open" => {
-            let rest = strip_mount_path(&mount.mount_path, &path);
-            Some(ResolvedMount::QuarkOpen {
-                remote_key: join_remote_path(&mount.root_path, rest),
-                config: quark_open_config_from_options(&mount.options)?,
-            })
-        }
-        "system_config" => Some(ResolvedMount::SystemConfig),
-        "url_tree" => {
-            let rest = strip_mount_path(&mount.mount_path, &path);
-            Some(ResolvedMount::UrlTree {
-                url: join_url_path(&mount.root_path, rest)?,
-                proxy: mount
-                    .options
-                    .get("proxy")
-                    .and_then(|value| value.as_str())
-                    .filter(|value| !value.trim().is_empty())
-                    .map(ToString::to_string),
-            })
-        }
-        "github_releases" => {
-            let rest = strip_mount_path(&mount.mount_path, &path);
-            Some(ResolvedMount::GithubReleases {
-                rest: rest.to_string(),
-                config: github_releases_config_from_mount(mount)?,
-            })
-        }
-        _ => None,
-    }
-}
-
-fn backend_from_mount(mount: ResolvedMount) -> Option<(String, QuarkBackend)> {
-    match mount {
-        ResolvedMount::Quark {
-            remote_key,
-            cookie,
-            root_fid,
-        } => Some((
-            remote_key,
-            QuarkBackend::Cookie(quark_client(cookie, root_fid).ok()?),
-        )),
-        ResolvedMount::QuarkOpen { remote_key, config } => Some((
-            remote_key,
-            QuarkBackend::Open(quark_open_client(config).ok()?),
-        )),
-        _ => None,
-    }
-}
-
-fn mount_option_string(options: &Value, key: &str) -> Option<String> {
-    options
-        .get(key)
-        .and_then(|value| value.as_str())
-        .filter(|value| !value.trim().is_empty())
-        .map(ToString::to_string)
-}
-
-fn mount_option_bool(options: &Value, key: &str) -> bool {
-    options
-        .get(key)
-        .and_then(|value| {
-            value.as_bool().or_else(|| {
-                value
-                    .as_str()
-                    .map(|value| matches!(value, "true" | "yes" | "1"))
-            })
-        })
-        .unwrap_or(false)
-}
-
-fn mount_option_string_list(options: &Value, key: &str) -> Vec<String> {
-    match options.get(key) {
-        Some(Value::Array(values)) => values
-            .iter()
-            .filter_map(|value| value.as_str())
-            .filter(|value| !value.trim().is_empty())
-            .map(ToString::to_string)
-            .collect(),
-        Some(Value::String(value)) if !value.trim().is_empty() => value
-            .lines()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-fn github_releases_config_from_mount(mount: &config::MountConfig) -> Option<GithubReleasesConfig> {
-    let repo = mount_option_string(&mount.options, "repo").or_else(|| {
-        let root = mount.root_path.trim().trim_matches('/');
-        (!root.is_empty()).then(|| root.to_string())
-    })?;
-    Some(GithubReleasesConfig {
-        repo,
-        token: mount_option_string(&mount.options, "token"),
-        proxy: mount_option_string(&mount.options, "proxy"),
-        show_source_code: mount_option_bool(&mount.options, "show_source_code"),
-        asset_allow: mount_option_string_list(&mount.options, "asset_allow"),
-    })
-}
-
-fn quark_open_config_from_options(options: &Value) -> Option<QuarkOpenConfig> {
-    let oauth_file = mount_option_string(options, "oauth_file").map(PathBuf::from);
-    let oauth = oauth_file.as_deref().and_then(read_quark_open_oauth_file);
-    Some(QuarkOpenConfig {
-        oauth_file,
-        access_token: mount_option_string(options, "access_token")
-            .or_else(|| {
-                oauth
-                    .as_ref()
-                    .and_then(|value| yaml_string(value, &["tokens", "access_token"]))
-            })
-            .unwrap_or_default(),
-        refresh_token: mount_option_string(options, "refresh_token").or_else(|| {
-            oauth
-                .as_ref()
-                .and_then(|value| yaml_string(value, &["tokens", "refresh_token"]))
-        })?,
-        app_id: mount_option_string(options, "app_id")
-            .or_else(|| {
-                oauth
-                    .as_ref()
-                    .and_then(|value| yaml_string(value, &["app_id"]))
-            })
-            .or_else(|| {
-                oauth
-                    .as_ref()
-                    .and_then(|value| yaml_string(value, &["application", "client_id"]))
-            })
-            .unwrap_or_default(),
-        sign_key: mount_option_string(options, "sign_key")
-            .or_else(|| {
-                oauth
-                    .as_ref()
-                    .and_then(|value| yaml_string(value, &["sign_key"]))
-            })
-            .or_else(|| {
-                oauth
-                    .as_ref()
-                    .and_then(|value| yaml_string(value, &["application", "sign_key"]))
-            })
-            .unwrap_or_default(),
-        refresh_url: mount_option_string(options, "refresh_url")
-            .or_else(|| {
-                oauth
-                    .as_ref()
-                    .and_then(|value| yaml_string(value, &["source", "refresh_url"]))
-            })
-            .unwrap_or_else(|| "https://api.oplist.org/quarkyun/renewapi".to_string()),
-        root_fid: mount_option_string(options, "root_fid").unwrap_or_else(|| "0".to_string()),
-    })
-}
-
-fn read_quark_open_oauth_file(path: &FsPath) -> Option<YamlValue> {
-    let bytes = fs::read(path).ok()?;
-    serde_yaml::from_slice(&bytes).ok()
-}
-
-fn is_fnnas_quark_refresh_url(refresh_url: &str) -> bool {
-    let Ok(url) = Url::parse(refresh_url) else {
-        return false;
-    };
-    matches!(url.host_str(), Some("oauth.fnnas.com")) && url.path() == "/api/v1/oauth/refreshToken"
-}
-
-fn yaml_string(value: &YamlValue, path: &[&str]) -> Option<String> {
-    let mut current = value;
-    for key in path {
-        current = current.get(YamlValue::String((*key).to_string()))?;
-    }
-    current.as_str().map(ToString::to_string)
-}
-
-fn persist_quark_open_config(config: &QuarkOpenConfig) -> Result<()> {
-    let Some(path) = &config.oauth_file else {
-        return Ok(());
-    };
-    let mut value =
-        read_quark_open_oauth_file(path).unwrap_or(YamlValue::Mapping(Default::default()));
-    set_yaml_string(
-        &mut value,
-        &["tokens", "access_token"],
-        &config.access_token,
-    );
-    set_yaml_string(
-        &mut value,
-        &["tokens", "refresh_token"],
-        &config.refresh_token,
-    );
-    if !config.app_id.is_empty() {
-        set_yaml_string(&mut value, &["application", "client_id"], &config.app_id);
-        set_yaml_string(&mut value, &["app_id"], &config.app_id);
-    }
-    if !config.sign_key.is_empty() {
-        set_yaml_string(&mut value, &["application", "sign_key"], &config.sign_key);
-        set_yaml_string(&mut value, &["sign_key"], &config.sign_key);
-    }
-    fs::write(path, serde_yaml::to_string(&value)?)?;
-    Ok(())
-}
-
-fn set_yaml_string(value: &mut YamlValue, path: &[&str], new_value: &str) {
-    if path.is_empty() {
-        *value = YamlValue::String(new_value.to_string());
-        return;
-    }
-    if !value.is_mapping() {
-        *value = YamlValue::Mapping(Default::default());
-    }
-    let mapping = value
-        .as_mapping_mut()
-        .expect("mapping was just initialized");
-    let key = YamlValue::String(path[0].to_string());
-    let entry = mapping
-        .entry(key)
-        .or_insert_with(|| YamlValue::Mapping(Default::default()));
-    set_yaml_string(entry, &path[1..], new_value);
-}
-
 fn generate_open_req_sign(
     method: &str,
     pathname: &str,
@@ -2947,64 +2621,6 @@ fn proof_code(body: &Bytes, proof_seed: &str) -> Result<String> {
     let index = u64::from_str_radix(&seed_md5[..16], 16)? as usize % body.len();
     let end = (index + 8).min(body.len());
     Ok(general_purpose::STANDARD.encode(&body[index..end]))
-}
-
-fn mount_matches_for_type(mount: &config::MountConfig, path: &str) -> bool {
-    if mount.mount_type == "system_config" {
-        return normalize_virtual_path(&mount.mount_path) == path;
-    }
-    mount_matches(&mount.mount_path, path)
-}
-
-fn mount_matches(mount_path: &str, path: &str) -> bool {
-    let mount_path = normalize_virtual_path(mount_path);
-    if mount_path == "/" {
-        return true;
-    }
-    path == mount_path || path.starts_with(&format!("{mount_path}/"))
-}
-
-fn strip_mount_path<'a>(mount_path: &str, path: &'a str) -> &'a str {
-    let mount_path = normalize_virtual_path(mount_path);
-    if mount_path == "/" {
-        return path.trim_start_matches('/');
-    }
-    path.strip_prefix(&mount_path)
-        .unwrap_or("")
-        .trim_start_matches('/')
-}
-
-fn join_remote_path(root_path: &str, rest: &str) -> String {
-    let root = root_path.trim_matches('/');
-    let rest = rest.trim_matches('/');
-    match (root.is_empty(), rest.is_empty()) {
-        (true, true) => String::new(),
-        (true, false) => rest.to_string(),
-        (false, true) => root.to_string(),
-        (false, false) => format!("{root}/{rest}"),
-    }
-}
-
-fn join_url_path(root_url: &str, rest: &str) -> Option<String> {
-    let mut url = Url::parse(root_url).ok()?;
-    if !rest.trim_matches('/').is_empty() {
-        let mut path = url.path().trim_end_matches('/').to_string();
-        for segment in rest.trim_matches('/').split('/') {
-            path.push('/');
-            path.push_str(segment);
-        }
-        url.set_path(&path);
-    }
-    Some(url.to_string())
-}
-
-fn normalize_virtual_path(path: &str) -> String {
-    let path = format!("/{}", path.trim_matches('/'));
-    if path == "/" {
-        path
-    } else {
-        path.trim_end_matches('/').to_string()
-    }
 }
 
 fn bearer_token(headers: &HeaderMap) -> Option<String> {
