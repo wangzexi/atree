@@ -37,8 +37,8 @@ DELETE /{bucket}/{key}?uploadId=<id>
 Config routes:
 
 ```text
-GET  /api/config
-PUT  /api/config
+GET  /api/config.yaml
+PUT  /api/config.yaml
 GET  /api/help
 ```
 
@@ -266,17 +266,17 @@ The API should not expose separate endpoints for keys, public rules, cache setti
 Use:
 
 ```text
-GET /api/config
-PUT /api/config
+GET /api/config.yaml
+PUT /api/config.yaml
 ```
 
-The config API supports both JSON and YAML. JSON remains the machine-stable default. YAML is useful for human and AI editing because `GET /api/config?format=yaml` or `Accept: application/yaml` can include explanatory comments, and `PUT` with `Content-Type: application/yaml` ignores those comments naturally.
+The config API is YAML-only at the HTTP boundary. `GET /api/config.yaml` returns explanatory comments for humans and AI agents, and `PUT /api/config.yaml` ignores those comments naturally. This path behaves like a special system file mount: reading it requires `GetObject` on `/api/config.yaml`, and updating it requires `PutObject` on `/api/config.yaml`. The environment super-admin key is only a bootstrap and recovery credential.
 
 To add a key, remove a key, or change permissions:
 
-1. `GET /api/config`
-2. edit the config JSON
-3. `PUT /api/config`
+1. `GET /api/config.yaml`
+2. edit the config YAML
+3. `PUT /api/config.yaml`
 
 This is simple for humans, scripts, and AI agents.
 
@@ -411,7 +411,7 @@ Docs:
   API explanation
 ```
 
-Even if SQLite is the source of truth, `GET /api/config` should return a readable JSON document, and later it can support export/import as TOML or JSON.
+Even if SQLite stores the normalized runtime state internally, `GET /api/config.yaml` should expose the user-facing config as readable YAML with comments.
 
 ## Super Admin
 
@@ -433,60 +433,42 @@ The super-admin key should not be stored in the normal config.
 
 ## Example Config
 
-The effective config returned by `GET /api/config` can look like:
+The effective config returned by `GET /api/config.yaml` can look like:
 
-```json
-{
-  "mounts": [
-    {
-      "mount_path": "/",
-      "type": "quark_cookie",
-      "root_path": "/",
-      "enabled": true,
-      "options": {
-        "order_by": "none",
-        "order_direction": "asc"
-      }
-    }
-  ],
-  "auth": {
-    "keys": [
-      {
-        "name": "admin",
-        "key_hash": "sha256:...",
-        "key_hint": "adm_...abcd",
-        "enabled": true
-      },
-      {
-        "name": "reader",
-        "key_hash": "sha256:...",
-        "key_hint": "rdr_...wxyz",
-        "enabled": true
-      }
-    ],
-    "rules": [
-      {
-        "principal": "anonymous",
-        "actions": ["HeadObject", "GetObject"],
-        "resources": ["/public/*"]
-      },
-      {
-        "principal": "key:reader",
-        "actions": ["ListBucket", "HeadObject", "GetObject"],
-        "resources": ["/public/*", "/share/*"]
-      }
-    ]
-  },
-  "cache": {
-    "enabled": true,
-    "max_bytes": 53687091200
-  }
-}
+```yaml
+mounts:
+  - mount_path: /
+    type: quark_cookie
+    root_path: /
+    enabled: true
+    options:
+      order_by: none
+      order_direction: asc
+auth:
+  keys:
+    - name: admin
+      key_hash: sha256:...
+      key_hint: adm_...abcd
+      enabled: true
+    - name: reader
+      key_hash: sha256:...
+      key_hint: rdr_...wxyz
+      enabled: true
+  rules:
+    - principal: anonymous
+      actions: [HeadObject, GetObject]
+      resources: [/public/*]
+    - principal: key:reader
+      actions: [ListBucket, HeadObject, GetObject]
+      resources: [/public/*, /share/*]
+cache:
+  enabled: true
+  max_bytes: 53687091200
 ```
 
 Keys should not be stored in plaintext. Store hashes and hints. If the service later generates a key, show the plaintext key only once.
 
-For manual config updates, `PUT /api/config` can accept a temporary `plain_key` field on a key. The service hashes it, stores only `key_hash` and `key_hint`, and never returns `plain_key`.
+For manual config updates, `PUT /api/config.yaml` can accept a temporary `plain_key` field on a key. The service hashes it, stores only `key_hash` and `key_hint`, and never returns `plain_key`.
 
 ## Policy Model
 
@@ -547,9 +529,9 @@ Suggested response content:
     "admin_header": "Authorization: Bearer <super-admin-key>"
   },
   "config": {
-    "get": "GET /api/config",
-    "put": "PUT /api/config",
-    "note": "Config is one document. Edit mounts, keys, rules, and cache together."
+    "get": "GET /api/config.yaml",
+    "put": "PUT /api/config.yaml",
+    "note": "Config is one YAML document. Edit mounts, keys, rules, and cache together."
   },
   "s3": {
     "list": "GET /{bucket}?list-type=2&delimiter=/&prefix=<path>",
@@ -558,8 +540,8 @@ Suggested response content:
     "delete": "DELETE /{bucket}/{key}"
   },
   "examples": {
-    "get_config": "curl -H 'Authorization: Bearer <super-admin-key>' '<origin>/api/config'",
-    "put_config": "curl -X PUT -H 'Authorization: Bearer <super-admin-key>' -H 'Content-Type: application/json' --data @config.json '<origin>/api/config'",
+    "get_config": "curl -H 'Authorization: Bearer <super-admin-key>' '<origin>/api/config.yaml'",
+    "put_config": "curl -X PUT -H 'Authorization: Bearer <super-admin-key>' --data @config.yaml '<origin>/api/config.yaml'",
     "list": "curl -H 'Authorization: Bearer <key>' '<origin>/quark?list-type=2&delimiter=/&prefix=public/'",
     "upload": "curl -X PUT -H 'Authorization: Bearer <key>' -H 'Content-Type: text/plain' --data-binary @./example.txt '<origin>/quark/public/example.txt'",
     "upload_with_curl_T": "curl -H 'Authorization: Bearer <key>' -T ./example.txt '<origin>/quark/public/example.txt'",
@@ -628,7 +610,7 @@ else:
 
 1. Add config model in SQLite.
 2. Add `QUARK_S3_SUPER_ADMIN_KEY`.
-3. Add `GET /api/config`, `PUT /api/config`, and `GET /api/help`.
+3. Add `GET /api/config.yaml`, `PUT /api/config.yaml`, and `GET /api/help`.
 4. Add policy checks to existing S3 routes.
 5. Add browser detection for directory paths and return an HTML shell.
 6. Add directory index file lookup for browser directory requests.

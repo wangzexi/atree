@@ -166,12 +166,8 @@ pub(crate) fn normalize_config(mut config: ServiceConfig) -> Result<ServiceConfi
     Ok(config)
 }
 
-pub(crate) fn parse_config_bytes(bytes: &[u8], is_yaml: bool) -> Result<ServiceConfig> {
-    if is_yaml {
-        Ok(serde_yaml::from_slice(bytes)?)
-    } else {
-        Ok(serde_json::from_slice(bytes)?)
-    }
+pub(crate) fn parse_config_yaml(bytes: &[u8]) -> Result<ServiceConfig> {
+    Ok(serde_yaml::from_slice(bytes)?)
 }
 
 pub(crate) fn commented_yaml(config: &ServiceConfig) -> Result<String> {
@@ -181,7 +177,6 @@ pub(crate) fn commented_yaml(config: &ServiceConfig) -> Result<String> {
 
 const CONFIG_YAML_COMMENTS: &str = r#"# quark-s3-demo config
 # This YAML is meant for humans and AI agents. Comments are ignored on PUT.
-# You can also use JSON: GET /api/config and PUT with Content-Type: application/json.
 #
 # mounts: ordered mount table. Later mounts have higher priority.
 # mounts[].mount_path: service path, must start with /. Example: /public

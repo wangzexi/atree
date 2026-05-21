@@ -22,7 +22,7 @@ use axum::{
 use base64::{Engine as _, engine::general_purpose};
 use config::{
     ServiceConfig, commented_yaml, config_db_path, hash_key, load_or_init_config, normalize_config,
-    parse_config_bytes, save_config_to_db,
+    parse_config_yaml, save_config_to_db,
 };
 use futures_util::TryStreamExt;
 use reqwest::Client;
@@ -595,7 +595,7 @@ async fn main() -> Result<()> {
     let config = load_or_init_config(&db_path)?;
     let super_admin_key = env::var("QUARK_S3_SUPER_ADMIN_KEY").ok();
     if super_admin_key.is_none() {
-        warn!("QUARK_S3_SUPER_ADMIN_KEY is not set; /api/config will be unavailable");
+        warn!("QUARK_S3_SUPER_ADMIN_KEY is not set; /api/config.yaml will be unavailable");
     }
     let max_upload_bytes = env::var("MAX_UPLOAD_BYTES")
         .ok()
@@ -623,7 +623,7 @@ async fn main() -> Result<()> {
 fn build_app(state: AppState, max_upload_bytes: usize) -> Router {
     Router::new()
         .route("/", any(root_handler))
-        .route("/api/config", any(config_handler))
+        .route("/api/config.yaml", any(config_handler))
         .route("/api/help", any(help_handler))
         .route("/{bucket}", any(bucket_handler))
         .route("/{bucket}/", any(bucket_handler))
@@ -659,28 +659,26 @@ async fn root_handler(
 
 async fn config_handler(
     State(state): State<AppState>,
-    RawQuery(raw_query): RawQuery,
     method: Method,
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !is_super_admin(&state, &headers) {
-        return json_error(StatusCode::UNAUTHORIZED, "super admin key is required");
-    }
     match method {
         Method::GET => {
+            if !is_authorized(&state, &headers, "GetObject", "/api/config.yaml").await {
+                return access_denied(&headers, &state.bucket);
+            }
             let config = state.config.read().await.clone();
-            if wants_yaml_config(raw_query.as_deref().unwrap_or_default(), &headers) {
-                match commented_yaml(&config) {
-                    Ok(yaml) => yaml_response(StatusCode::OK, yaml),
-                    Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
-                }
-            } else {
-                Json(config).into_response()
+            match commented_yaml(&config) {
+                Ok(yaml) => yaml_response(StatusCode::OK, yaml),
+                Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
             }
         }
         Method::PUT => {
-            let config: ServiceConfig = match parse_config_bytes(&body, is_yaml_content(&headers)) {
+            if !is_authorized(&state, &headers, "PutObject", "/api/config.yaml").await {
+                return access_denied(&headers, &state.bucket);
+            }
+            let config: ServiceConfig = match parse_config_yaml(&body) {
                 Ok(config) => config,
                 Err(err) => return json_error(StatusCode::BAD_REQUEST, &err.to_string()),
             };
@@ -692,7 +690,10 @@ async fn config_handler(
                 return json_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string());
             }
             *state.config.write().await = config.clone();
-            Json(json!({"ok": true, "config": config})).into_response()
+            match commented_yaml(&config) {
+                Ok(yaml) => yaml_response(StatusCode::OK, yaml),
+                Err(err) => json_error(StatusCode::INTERNAL_SERVER_ERROR, &err.to_string()),
+            }
         }
         _ => json_error(
             StatusCode::METHOD_NOT_ALLOWED,
@@ -714,11 +715,9 @@ async fn help_handler(State(state): State<AppState>, headers: HeaderMap) -> Resp
             "admin_header": "Authorization: Bearer <super-admin-key>"
         },
         "config": {
-            "get": "GET /api/config",
-            "get_yaml": "GET /api/config?format=yaml or Accept: application/yaml",
-            "put": "PUT /api/config",
-            "put_yaml": "PUT /api/config with Content-Type: application/yaml",
-            "note": "Config is one document. JSON remains supported; YAML GET includes comments for humans/AI and YAML PUT ignores comments. Edit mounts, auth.keys, auth.rules, and cache together. PUT rejects invalid config and keeps the old one."
+            "get": "GET /api/config.yaml",
+            "put": "PUT /api/config.yaml",
+            "note": "Config is a YAML document exposed as a system file. GET requires GetObject on /api/config.yaml; PUT requires PutObject on /api/config.yaml. The bootstrap super-admin key is still allowed for first setup. PUT rejects invalid config and keeps the old one."
         },
         "s3": {
             "bucket": state.bucket,
@@ -733,10 +732,8 @@ async fn help_handler(State(state): State<AppState>, headers: HeaderMap) -> Resp
             "login": "The HTML UI stores the service access key in localStorage and sends it as Authorization: Bearer <key> for list/read requests."
         },
         "examples": {
-            "get_config": format!("curl -H 'Authorization: Bearer <super-admin-key>' '{origin}/api/config'"),
-            "get_config_yaml": format!("curl -H 'Authorization: Bearer <super-admin-key>' -H 'Accept: application/yaml' '{origin}/api/config'"),
-            "put_config": format!("curl -X PUT -H 'Authorization: Bearer <super-admin-key>' -H 'Content-Type: application/json' --data @config.json '{origin}/api/config'"),
-            "put_config_yaml": format!("curl -X PUT -H 'Authorization: Bearer <super-admin-key>' -H 'Content-Type: application/yaml' --data @config.yaml '{origin}/api/config'"),
+            "get_config": format!("curl -H 'Authorization: Bearer <super-admin-key>' '{origin}/api/config.yaml'"),
+            "put_config": format!("curl -X PUT -H 'Authorization: Bearer <super-admin-key>' --data @config.yaml '{origin}/api/config.yaml'"),
             "list": format!("curl -H 'Authorization: Bearer <key>' '{origin}/{}?list-type=2&delimiter=/&prefix=public/'", state.bucket),
             "upload": format!("curl -X PUT -H 'Authorization: Bearer <key>' -H 'Content-Type: text/plain' --data-binary @./example.txt '{origin}/{}/public/example.txt'", state.bucket),
             "upload_with_curl_T": format!("curl -H 'Authorization: Bearer <key>' -T ./example.txt '{origin}/{}/public/example.txt'", state.bucket),
@@ -1485,40 +1482,6 @@ fn aws_access_key(headers: &HeaderMap) -> Option<String> {
     credential.split('/').next().map(str::to_string)
 }
 
-fn is_super_admin(state: &AppState, headers: &HeaderMap) -> bool {
-    let Some(expected) = state.super_admin_key.as_deref() else {
-        return false;
-    };
-    bearer_token(headers).as_deref() == Some(expected)
-}
-
-fn wants_yaml_config(raw_query: &str, headers: &HeaderMap) -> bool {
-    let params = parse_query(raw_query);
-    params
-        .get("format")
-        .is_some_and(|format| format.eq_ignore_ascii_case("yaml"))
-        || headers
-            .get(header::ACCEPT)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(header_accepts_yaml)
-}
-
-fn is_yaml_content(headers: &HeaderMap) -> bool {
-    headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .is_some_and(header_accepts_yaml)
-}
-
-fn header_accepts_yaml(value: &str) -> bool {
-    value.split([';', ',']).map(str::trim).any(|part| {
-        matches!(
-            part,
-            "application/yaml" | "application/x-yaml" | "text/yaml" | "text/x-yaml"
-        )
-    })
-}
-
 fn list_xml(
     bucket: &str,
     prefix: &str,
@@ -2051,32 +2014,35 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_api_requires_admin_hashes_plain_key_and_rejects_invalid_config() {
-        let state = test_state();
-        let app = build_app(state, 1024 * 1024);
+    async fn config_api_yaml_requires_admin_hashes_plain_key_and_rejects_invalid_config() {
+        let app = build_app(test_state(), 1024 * 1024);
 
         let no_auth = app
             .clone()
             .oneshot(
                 Request::builder()
-                    .uri("/api/config")
+                    .uri("/api/config.yaml")
                     .body(Body::empty())
                     .unwrap(),
             )
             .await
             .unwrap();
-        assert_eq!(no_auth.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(no_auth.status(), StatusCode::FORBIDDEN);
 
         let bad = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::PUT)
-                    .uri("/api/config")
+                    .uri("/api/config.yaml")
                     .header(header::AUTHORIZATION, "Bearer admin-test-key")
-                    .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(
-                        r#"{"mounts":[{"mount_path":"bad","type":"quark_cookie","root_path":"/","enabled":true}]}"#,
+                        r#"mounts:
+  - mount_path: bad
+    type: quark_cookie
+    root_path: /
+    enabled: true
+"#,
                     ))
                     .unwrap(),
             )
@@ -2089,22 +2055,32 @@ mod tests {
                 .contains("mount_path must start with /")
         );
 
-        let good_config = r#"{
-          "mounts": [{"mount_path": "/", "type": "quark_cookie", "root_path": "/", "enabled": true}],
-          "auth": {
-            "keys": [{"name": "reader", "plain_key": "reader-test-key", "enabled": true}],
-            "rules": [{"principal": "key:reader", "actions": ["ListBucket"], "resources": ["/*"]}]
-          },
-          "cache": {"enabled": true, "max_bytes": 1048576}
-        }"#;
+        let good_config = r#"
+mounts:
+  - mount_path: /
+    type: quark_cookie
+    root_path: /
+    enabled: true
+auth:
+  keys:
+    - name: reader
+      plain_key: reader-test-key
+      enabled: true
+  rules:
+    - principal: key:reader
+      actions: [ListBucket]
+      resources: [/*]
+cache:
+  enabled: true
+  max_bytes: 1048576
+"#;
         let put = app
             .clone()
             .oneshot(
                 Request::builder()
                     .method(Method::PUT)
-                    .uri("/api/config")
+                    .uri("/api/config.yaml")
                     .header(header::AUTHORIZATION, "Bearer admin-test-key")
-                    .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(good_config))
                     .unwrap(),
             )
@@ -2112,15 +2088,15 @@ mod tests {
             .unwrap();
         assert_eq!(put.status(), StatusCode::OK);
         let put_body = response_text(put).await;
-        assert!(put_body.contains("\"ok\":true"));
-        assert!(put_body.contains("sha256:"));
+        assert!(put_body.contains("# mounts[].mount_path"));
+        assert!(put_body.contains("key_hash: sha256:"));
         assert!(!put_body.contains("reader-test-key"));
-        assert!(!put_body.contains("plain_key"));
+        assert!(!put_body.contains("\nplain_key:"));
 
         let get = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/config")
+                    .uri("/api/config.yaml")
                     .header(header::AUTHORIZATION, "Bearer admin-test-key")
                     .body(Body::empty())
                     .unwrap(),
@@ -2129,9 +2105,9 @@ mod tests {
             .unwrap();
         assert_eq!(get.status(), StatusCode::OK);
         let get_body = response_text(get).await;
-        assert!(get_body.contains("\"name\":\"reader\""));
+        assert!(get_body.contains("name: reader"));
         assert!(!get_body.contains("reader-test-key"));
-        assert!(!get_body.contains("plain_key"));
+        assert!(!get_body.contains("\nplain_key:"));
     }
 
     #[tokio::test]
@@ -2163,9 +2139,8 @@ cache:
             .oneshot(
                 Request::builder()
                     .method(Method::PUT)
-                    .uri("/api/config")
+                    .uri("/api/config.yaml")
                     .header(header::AUTHORIZATION, "Bearer admin-test-key")
-                    .header(header::CONTENT_TYPE, "application/yaml")
                     .body(Body::from(yaml_config))
                     .unwrap(),
             )
@@ -2179,7 +2154,7 @@ cache:
         let get = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/config?format=yaml")
+                    .uri("/api/config.yaml")
                     .header(header::AUTHORIZATION, "Bearer admin-test-key")
                     .body(Body::empty())
                     .unwrap(),
@@ -2199,6 +2174,86 @@ cache:
         assert!(body.contains("key_hash: sha256:"));
         assert!(!body.contains("yaml-reader-key"));
         assert!(!body.contains("\nplain_key:"));
+    }
+
+    #[tokio::test]
+    async fn config_yaml_can_be_delegated_with_normal_auth_rules() {
+        let app = build_app(test_state(), 1024 * 1024);
+        let bootstrap_config = r#"
+mounts:
+  - mount_path: /
+    type: quark_cookie
+    root_path: /
+    enabled: true
+auth:
+  keys:
+    - name: config-editor
+      plain_key: config-editor-key
+      enabled: true
+  rules:
+    - principal: key:config-editor
+      actions: [GetObject, PutObject]
+      resources: [/api/config.yaml]
+cache:
+  enabled: true
+  max_bytes: 1048576
+"#;
+        let bootstrap = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/config.yaml")
+                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .body(Body::from(bootstrap_config))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(bootstrap.status(), StatusCode::OK);
+
+        let delegated_get = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/config.yaml")
+                    .header(header::AUTHORIZATION, "Bearer config-editor-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delegated_get.status(), StatusCode::OK);
+        assert!(response_text(delegated_get).await.contains("config-editor"));
+
+        let delegated_put = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/api/config.yaml")
+                    .header(header::AUTHORIZATION, "Bearer config-editor-key")
+                    .body(Body::from(bootstrap_config))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(delegated_put.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn old_json_config_route_is_not_exposed() {
+        let app = build_app(test_state(), 1024 * 1024);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/config")
+                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -2238,8 +2293,7 @@ cache:
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
         assert!(body.contains("\"service\":\"quark-s3-demo\""));
-        assert!(body.contains("GET /api/config"));
-        assert!(body.contains("application/yaml"));
+        assert!(body.contains("GET /api/config.yaml"));
         assert!(body.contains("GET /{bucket}?list-type=2"));
         assert!(body.contains("--data-binary @./example.txt"));
         assert!(body.contains("-T ./example.txt"));
