@@ -13,7 +13,17 @@ Keep the service small. It has only two API families:
 
 The S3 URL space is also the file browser URL space.
 
-There should not be separate browser-only download/list endpoints such as `/api/files` or `/api/download`. A browser visiting an S3 path gets a file-browser HTML shell when appropriate. S3 clients and curl still get normal S3 XML/object responses.
+There should not be separate browser-only path families such as `/api/files` or `/api/download`. A browser visiting an S3 path gets a file-browser HTML shell when appropriate. S3 clients and curl still get normal S3 XML/object responses.
+
+The browser shell does use one internal same-path subrequest shape for directory listing:
+
+```text
+GET <same path>?atree-browser-list=1
+Accept: application/json
+Authorization: Bearer <key>
+```
+
+This is not a second public file API. It is just the browser asking the same path for structured directory entries.
 
 ## Route Model
 
@@ -118,14 +128,12 @@ can serve:
 
 The HTML file browser shell is only the fallback when there is no index file.
 
-If the fallback file browser shell is returned, it reads the key from `localStorage`, then requests the same S3 path with an API/S3-oriented accept header and auth header to render the listing.
-
-The file browser should not need a separate list API. It should call the same S3 listing URL:
+If the fallback file browser shell is returned, it reads the key from `localStorage`, then requests the same path with a browser-list query and auth header to render the listing:
 
 ```text
-GET /quark/public/?list-type=2&delimiter=/
+GET /quark/public/?atree-browser-list=1
 Authorization: Bearer <key>
-Accept: application/xml
+Accept: application/json
 ```
 
 If no key is stored, it tries anonymously. If the listing returns `AccessDenied`, the UI asks for a key, stores it in `localStorage`, then retries the same request with `Authorization: Bearer <key>`.
@@ -206,20 +214,12 @@ If a browser requests a file without permission, return a small HTML login/permi
 
 ### Root Path
 
-Browser request to `/` can show:
+Browser request to `/` returns the main HTML shell.
 
-- file browser entry
-- login/key input
-- concise API documentation
-- concise API documentation text on the page
+The shell is enough for normal human use:
 
-S3 request to `/` can still return ListBuckets XML.
-
-The browser homepage is the main HTML shell. It should be enough for normal human use:
-
-- browse files
+- browse files when the current key is allowed to list `/`
 - enter/save an access key
-- see current auth state
 - see the config entry command
 
 The config entry command should render inline using the current origin:
@@ -235,6 +235,15 @@ curl -H 'Authorization: Bearer <root-key>' 'http://127.0.0.1:9000/api/config.yam
 ```
 
 The copied command is for AI/Codex or shell use. The `config.yaml` header comments should explain how to read and write config, list objects, fetch files, and update auth rules.
+
+The root shell should not bypass auth. It follows the same rule as any other directory shell:
+
+```text
+GET /                     -> HTML shell
+GET /?atree-browser-list=1 -> requires ListBucket on /
+```
+
+If the current caller is not allowed to list `/`, the shell stays visible but the file list should not render.
 
 ## Browser Login Model
 
@@ -297,7 +306,7 @@ Fields:
 
 `mount_path` is the mount's unique identifier. A separate `name` field is not needed in the first version.
 
-`root_path` is a human-readable string. Do not require internal IDs such as Quark `fid` in config. Driver-specific internal IDs should be resolved at runtime and cached in SQLite.
+`root_path` is a human-readable string. Normal configs should not need internal IDs such as Quark `fid`. Driver-specific internal IDs should usually be resolved at runtime and cached in SQLite, though mounts may still expose optional fields such as `root_fid` for advanced cases.
 
 Example:
 
@@ -345,6 +354,8 @@ mounts:
     enabled: true
     options:
       proxy: http://127.0.0.1:1080
+      token: <github token>
+      show_source_code: true
       asset_allow:
         - Hiddify-Android-universal.apk
         - Hiddify-MacOS.dmg
@@ -454,7 +465,6 @@ SQLite:
 
 Environment:
   bootstrap root key
-  Quark cookie or Quark OAuth tokens
 
 Docs:
   design notes

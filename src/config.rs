@@ -1,4 +1,8 @@
-use std::{collections::HashSet, env, path::PathBuf};
+use std::{
+    collections::HashSet,
+    env,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context, Result, bail};
 use reqwest::Url;
@@ -162,7 +166,7 @@ pub(crate) fn config_db_path() -> Result<PathBuf> {
         .join("atree.sqlite"))
 }
 
-pub(crate) fn load_or_init_config(db_path: &PathBuf) -> Result<ServiceConfig> {
+pub(crate) fn load_or_init_config(db_path: &Path) -> Result<ServiceConfig> {
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -188,7 +192,7 @@ pub(crate) fn load_or_init_config(db_path: &PathBuf) -> Result<ServiceConfig> {
     Ok(config)
 }
 
-pub(crate) fn save_config_to_db(db_path: &PathBuf, config: &ServiceConfig) -> Result<()> {
+pub(crate) fn save_config_to_db(db_path: &Path, config: &ServiceConfig) -> Result<()> {
     let conn = Connection::open(db_path)?;
     let raw = serde_json::to_string_pretty(config)?;
     conn.execute(
@@ -235,8 +239,8 @@ const CONFIG_YAML_COMMENTS: &str = r#"# atree config
 # mounts[].root_path:
 #   quark_cookie: human-readable Quark path to expose at mount_path.
 #   quark_open: human-readable Quark path to expose at mount_path.
-#   system_config: keep as /; this mount exposes this config file at mount_path.
-#   url_tree: upstream http(s) URL prefix or file URL. Read-only.
+#   system_config: root_path must stay /; mount_path is where this config file is exposed.
+#   url_tree: upstream http(s) URL prefix. Read-only.
 #   github_releases: GitHub repo in owner/repo form. Read-only.
 # mounts[].enabled: false disables the mount without deleting it.
 # mounts[].options:
@@ -247,10 +251,13 @@ const CONFIG_YAML_COMMENTS: &str = r#"# atree config
 #   url_tree.proxy: optional outbound proxy URL, such as http://127.0.0.1:1080.
 #   github_releases.repo: owner/repo. If omitted, root_path can be owner/repo.
 #   github_releases.proxy: optional outbound proxy URL for API and downloads.
+#   github_releases.token: optional GitHub token for higher rate limits or private repos.
 #   github_releases.asset_allow: optional list of asset names or * globs.
+#   github_releases.show_source_code: optional boolean. Exposes GitHub's source zip/tarball links.
 #   use {} or null when unused.
 # system_config note:
 #   mount_path must end with /config.yaml, for example /api/config.yaml.
+#   if you move this path, auth.rules must target the new path; the old path will 404.
 #
 # auth.keys: named service keys. Do not store plaintext keys here.
 # auth.keys[].plain_key: allowed only in PUT; the service stores key_hash/key_hint and never returns plain_key.

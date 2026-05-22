@@ -1388,6 +1388,19 @@ async fn state_bucket(state: &AppState) -> String {
     state.config.read().await.s3.bucket.clone()
 }
 
+async fn state_config_path(state: &AppState) -> String {
+    state
+        .config
+        .read()
+        .await
+        .mounts
+        .iter()
+        .rev()
+        .find(|mount| mount.enabled && mount.mount_type == "system_config")
+        .map(|mount| mount.mount_path.clone())
+        .unwrap_or_else(|| "/api/config.yaml".to_string())
+}
+
 fn build_app(state: AppState, max_upload_bytes: usize) -> Router {
     Router::new()
         .route("/", any(root_handler))
@@ -1519,13 +1532,17 @@ async fn root_handler(
     headers: HeaderMap,
 ) -> Response {
     let bucket = state_bucket(&state).await;
+    let config_path = state_config_path(&state).await;
     let raw_query = raw_query.unwrap_or_default();
     let params = parse_query(&raw_query);
     if method == Method::GET && params.contains_key("atree-browser-list") {
         return browser_virtual_entries_response(&state, &headers, "/").await;
     }
     if method == Method::GET && wants_html(&headers) {
-        return html_response(StatusCode::OK, file_browser_html(&bucket, "/", "null", "null"));
+        return html_response(
+            StatusCode::OK,
+            file_browser_html(&bucket, &config_path, "null", "null"),
+        );
     }
     if method != Method::GET {
         return s3_error(
@@ -1592,19 +1609,6 @@ async fn config_handler(
     }
 }
 
-enum SystemFile {
-    ConfigYaml,
-    Unknown,
-}
-
-fn classify_system_file(path: &str) -> SystemFile {
-    if path.ends_with("/config.yaml") {
-        SystemFile::ConfigYaml
-    } else {
-        SystemFile::Unknown
-    }
-}
-
 async fn system_file_handler(
     state: &AppState,
     method: Method,
@@ -1612,9 +1616,10 @@ async fn system_file_handler(
     body: Bytes,
     virtual_path: &str,
 ) -> Response {
-    match classify_system_file(virtual_path) {
-        SystemFile::ConfigYaml => config_handler(state, method, headers, body, virtual_path).await,
-        SystemFile::Unknown => s3_error(StatusCode::NOT_FOUND, "NoSuchKey", "unknown system file"),
+    if virtual_path.ends_with("/config.yaml") {
+        config_handler(state, method, headers, body, virtual_path).await
+    } else {
+        s3_error(StatusCode::NOT_FOUND, "NoSuchKey", "unknown system file")
     }
 }
 
@@ -2626,10 +2631,11 @@ async fn browser_directory(
     synthetic: bool,
 ) -> Response {
     let bucket = state_bucket(state).await;
+    let config_path = state_config_path(state).await;
     let html = |error_json: &str| {
         html_response(
             StatusCode::OK,
-            file_browser_html(&bucket, virtual_path, "null", error_json),
+            file_browser_html(&bucket, &config_path, "null", error_json),
         )
     };
     if synthetic || virtual_path == "/" {
@@ -2932,7 +2938,7 @@ fn access_denied(headers: &HeaderMap, bucket: &str) -> Response {
     if wants_html(headers) {
         html_response(
             StatusCode::UNAUTHORIZED,
-            file_browser_html(bucket, "/", "null", r#""需要访问 key。""#),
+            file_browser_html(bucket, "/api/config.yaml", "null", r#""需要访问 key。""#),
         )
     } else {
         s3_error(StatusCode::FORBIDDEN, "AccessDenied", "access denied")

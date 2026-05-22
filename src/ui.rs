@@ -32,12 +32,13 @@ pub(crate) fn wants_html(headers: &HeaderMap) -> bool {
 
 pub(crate) fn file_browser_html(
     bucket: &str,
-    virtual_path: &str,
+    config_path: &str,
     directory_entries_json: &str,
     directory_error_json: &str,
 ) -> String {
     let bucket_json = serde_json::to_string(bucket).unwrap_or_else(|_| "\"quark\"".to_string());
-    let path_json = serde_json::to_string(virtual_path).unwrap_or_else(|_| "\"/\"".to_string());
+    let config_path_json =
+        serde_json::to_string(config_path).unwrap_or_else(|_| "\"/api/config.yaml\"".to_string());
     format!(
         r#"<!doctype html>
 <html lang="zh-CN">
@@ -104,7 +105,7 @@ pub(crate) fn file_browser_html(
   </main>
   <script>
     var BUCKET = {bucket_json};
-    var INITIAL_PATH = {path_json};
+    var CONFIG_PATH = {config_path_json};
     var DIRECTORY_ENTRIES = {directory_entries_json};
     var DIRECTORY_ERROR = {directory_error_json};
     var keyName = 'atree_key';
@@ -439,7 +440,7 @@ pub(crate) fn file_browser_html(
       return null;
     }}
     helpLine.innerHTML = "<code>curl -H 'Authorization: Bearer &lt;root-key&gt;' '"
-      + escapeHtml(location.origin) + "/api/config.yaml'</code>";
+      + escapeHtml(location.origin) + escapeHtml(CONFIG_PATH) + "'</code>";
     keyInput.addEventListener('blur', function() {{
       var next = keyInput.value.replace(/^\s+|\s+$/g, '');
       var prev = currentKey();

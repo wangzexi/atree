@@ -4,7 +4,7 @@
 
 它参考了 `refs/alist/drivers/quark_uc` 里的 AList 夸克驱动，目前实现：
 
-- `GET /`：浏览器返回文件界面，S3/curl 返回 bucket XML
+- `GET /`：浏览器返回文件界面壳，S3/curl 返回 bucket XML
 - `GET /quark?list-type=2&delimiter=/&prefix=...`：列对象和目录
 - `GET /quark/<key>`：下载对象
 - `HEAD /quark/<key>`：对象元信息
@@ -113,7 +113,7 @@ mounts:
     enabled: true
 ```
 
-外部只读文件可以用 `url_tree` 挂载。`root_path` 是上游 URL 前缀，`options.proxy` 只影响这个挂载，适合把 raw URL、固定版本下载地址等资源通过服务端和本机代理中转出来。这里的储存类型叫 `url_tree`，代理只是访问选项：
+外部只读文件可以用 `url_tree` 挂载。`root_path` 是上游 http(s) URL 前缀，`options.proxy` 只影响这个挂载，适合把 raw URL、固定版本下载地址等资源通过服务端和本机代理中转出来。这里的挂载类型叫 `url_tree`，代理只是访问选项：
 
 ```yaml
 mounts:
@@ -142,6 +142,8 @@ mounts:
     enabled: true
     options:
       proxy: http://127.0.0.1:1080
+      token: <github token>
+      show_source_code: true
       asset_allow:
         - Hiddify-Android-universal.apk
         - Hiddify-MacOS.dmg
@@ -223,7 +225,9 @@ const client = new Client({
 await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 ```
 
-浏览器打开 `http://127.0.0.1:9000/` 会进入单文件 HTML 界面。目录访问会优先寻找 `index*` 文件；没有 index 时返回文件列表界面。程序访问同一路径时仍然返回 S3 XML。
+浏览器打开 `http://127.0.0.1:9000/` 会进入内置文件浏览器壳。目录访问会优先寻找 `index*` 文件；没有 index 时返回文件浏览器壳，再由前端读取本地保存的 key 并请求同路径的列表接口。程序访问同一路径时仍然返回 S3 XML。
+
+浏览器目录页本身不绕过权限。即使是根路径 `/`，前端也会再请求同路径上的浏览器列表接口；如果当前 key 对该路径没有 `ListBucket` 权限，页面会显示“需要访问 key。”而不是偷偷列出内容。
 
 ## 配置项
 
@@ -251,7 +255,7 @@ await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 
 ## 后续 OAuth/Open API 方向
 
-当前服务走网页登录 Cookie。关于后续迁移到 OpenList `quark_open` / OAuth-style token 的记录见 `docs/oauth-notes.md`。
+当前服务同时支持网页登录 Cookie 和 `quark_open` OAuth。关于 OAuth/Open API 的历史记录和来源说明见 `docs/oauth-notes.md`。
 
 ## 本地缓存方向
 
