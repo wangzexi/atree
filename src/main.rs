@@ -958,6 +958,10 @@ impl QuarkOpenClient {
         let res = req.send().await?;
         let status = res.status();
         let bytes = res.bytes().await?;
+        let expired = quark_open_response_expired(status, &bytes)?;
+        if expired {
+            return Ok((bytes, true));
+        }
         if !status.is_success() {
             bail!(
                 "quark open api http {}: {}",
@@ -971,12 +975,6 @@ impl QuarkOpenClient {
                 String::from_utf8_lossy(&bytes)
             )
         })?;
-        let expired = api.status == -1
-            && (api.errno == 11001
-                || (api.errno == 14001 && api.error_info.contains("access_token")));
-        if expired {
-            return Ok((bytes, true));
-        }
         if api.status >= 400 || api.errno != 0 {
             bail!(
                 "quark open api error status={} errno={}: {}",
@@ -3311,6 +3309,29 @@ fn percent_decode_path(path: &str) -> String {
         .join("/")
 }
 
+fn quark_open_response_expired(status: StatusCode, bytes: &Bytes) -> Result<bool> {
+    let api: OpenStatus = match serde_json::from_slice(bytes) {
+        Ok(api) => api,
+        Err(err) => {
+            if !status.is_success() {
+                bail!(
+                    "quark open api http {}: {}",
+                    status,
+                    String::from_utf8_lossy(bytes)
+                );
+            }
+            return Err(err).with_context(|| {
+                format!(
+                    "invalid quark open response: {}",
+                    String::from_utf8_lossy(bytes)
+                )
+            });
+        }
+    };
+    Ok(api.status == -1
+        && (api.errno == 11001 || (api.errno == 14001 && api.error_info.contains("access_token"))))
+}
+
 fn split_key(key: &str) -> (&str, &str) {
     let key = key.trim_matches('/');
     key.rsplit_once('/').unwrap_or(("", key))
@@ -3582,6 +3603,22 @@ cache:
                     && proxy.as_deref() == Some("http://127.0.0.1:1080")
         ));
         assert!(!matches!(resolve_mount(&config, "/api/"), Some(ResolvedMount::SystemConfig { .. })));
+    }
+
+    #[test]
+    fn quark_open_expired_response_is_detected_even_on_http_400() {
+        let body =
+            Bytes::from(r#"{"status":-1,"errno":11001,"error_info":"Access Token无效"}"#);
+        assert!(quark_open_response_expired(StatusCode::BAD_REQUEST, &body).unwrap());
+    }
+
+    #[test]
+    fn quark_open_non_json_http_error_still_reports_http_failure() {
+        let body = Bytes::from_static(b"upstream exploded");
+        let err = quark_open_response_expired(StatusCode::BAD_GATEWAY, &body).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("quark open api http 502 Bad Gateway: upstream exploded"));
     }
 
     #[test]
