@@ -12,8 +12,7 @@
 - `DELETE /quark/<key>`：删除对象
 - `GET /quark/<key>` + `Range`：范围读取，供 restic 读取 pack 片段
 - S3 multipart upload 的最小流程：`POST ?uploads`、`PUT ?partNumber=&uploadId=`、`POST ?uploadId=`、`DELETE ?uploadId=`
-- `GET /api/help`（默认）：返回面向 curl/AI 的接口说明
-- `GET /api/config.yaml` / `PUT /api/config.yaml`：像修改一个系统文件一样管理 mount、key、权限和 cache，系统文件挂在 `system_config` 目录挂载点下（默认 `/api`）。
+- `GET /api/config.yaml` / `PUT /api/config.yaml`：像修改一个系统文件一样管理 mount、key、权限和 cache，系统文件通过 `system_config` 直接挂载到配置文件路径。
 - `GET` / `HEAD` 外部 HTTP 文件挂载：把 GitHub release/raw 等 URL 挂到服务文件树中，可按挂载单独配置代理
 
 这不是完整 S3 实现，暂时没有校验 AWS Signature。服务自己的访问控制由 `Authorization: Bearer <key>`、或 AWS SigV4 `Credential` 里的 access key 映射到本地 key 后完成。
@@ -22,7 +21,7 @@
 
 ```bash
 cd atree
-export ATREE_SUPER_ADMIN_KEY='换成你的管理 key'
+export ATREE_ROOT_KEY='换成你的 root key'
 cargo run
 ```
 
@@ -34,10 +33,10 @@ cargo run
 ~/.local/share/atree/atree.sqlite
 ```
 
-默认配置有两个 mount：`/` 指向夸克根目录，`/api` 作为系统目录（包含 `config.yaml` 与 `help` 两个系统文件）。默认没有匿名权限：
+默认配置有两个 mount：`/` 指向夸克根目录，`/api/config.yaml` 作为系统配置文件挂载点：
 
 ```bash
-curl -H 'Authorization: Bearer <super-admin-key>' \
+curl -H 'Authorization: Bearer <root-key>' \
   'http://127.0.0.1:9000/api/config.yaml' > config.yaml
 ```
 
@@ -45,14 +44,14 @@ curl -H 'Authorization: Bearer <super-admin-key>' \
 
 ```bash
 curl -X PUT \
-  -H 'Authorization: Bearer <super-admin-key>' \
+  -H 'Authorization: Bearer <root-key>' \
   --data @config.yaml \
   'http://127.0.0.1:9000/api/config.yaml'
 ```
 
 `auth.keys[]` 可以临时传 `plain_key`，服务会保存为 `key_hash` 和 `key_hint`，之后 `GET /api/config.yaml` 不会返回明文 key。
 
-`/api/config.yaml` 也走同一套权限模型：读取需要 `GetObject`，修改需要 `PutObject`，资源路径就是 `/api/config.yaml`。`ATREE_SUPER_ADMIN_KEY` 只是 bootstrap key，用来第一次写入配置或救援。
+`/api/config.yaml` 也走同一套权限模型：读取需要 `GetObject`，修改需要 `PutObject`，资源路径就是 `/api/config.yaml`。未命中任何 `auth.rules` 的请求，只有 `ATREE_ROOT_KEY` 对应的 `root` 身份还能访问，用作第一次写入配置或救援。
 
 夸克网页登录态放在对应 mount 的 `options.cookie` 里。`s3.bucket` 是 S3 path-style 客户端看到的 bucket 名：
 
@@ -100,7 +99,7 @@ tokens:
   refresh_token: '<private>'
 ```
 
-配置文件本身也是挂载树的一部分。`system_config` 是目录挂载，默认在 `/api`，也可以改到其它路径，但始终是目录挂载而不是文件挂载。例如：
+配置文件本身也是挂载树的一部分。`system_config` 直接挂到某个配置文件路径上，默认是 `/api/config.yaml`，也可以改到其它路径。例如：
 
 ```yaml
 mounts:
@@ -108,7 +107,7 @@ mounts:
     type: quark_cookie
     root_path: /
     enabled: true
-  - mount_path: /system/api
+  - mount_path: /system/config.yaml
     type: system_config
     root_path: /
     enabled: true
@@ -229,7 +228,7 @@ await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 ## 配置项
 
 - `ATREE_DB`：SQLite 配置库路径，默认 `~/.local/share/atree/atree.sqlite`。
-- `ATREE_SUPER_ADMIN_KEY`：配置接口的 bootstrap 管理 key。
+- `ATREE_ROOT_KEY`：root 恢复 key。未命中任何授权规则时，只有它仍可访问。
 - `ATREE_MULTIPART_DIR`：S3 multipart upload 的临时分片目录，默认系统临时目录下的 `atree/multipart`。
 - `BIND`：监听地址，默认 `127.0.0.1:9000`。
 ## 已知限制
@@ -260,4 +259,4 @@ await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 
 ## 鉴权和文件界面
 
-关于 API key、公开路径、浏览器 `localStorage` 登录和 Quark-backed file browser 的设计见 `docs/auth-and-file-ui.md`。
+关于 API key、公开路径、浏览器 `localStorage` 登录和 Quark-backed file browser 的设计见 `docs/auth-and-file-ui.md`。当前给 AI/脚本看的最小入口说明直接写在 `/api/config.yaml` 的头部注释里。

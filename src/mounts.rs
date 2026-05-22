@@ -84,6 +84,7 @@ pub(crate) fn github_client(config: &GithubReleasesConfig) -> Result<Client> {
     Ok(builder.build()?)
 }
 
+#[cfg(test)]
 pub(crate) fn resolve_remote_key(
     config: &config::ServiceConfig,
     virtual_path: &str,
@@ -354,43 +355,9 @@ fn set_yaml_string(value: &mut YamlValue, path: &[&str], new_value: &str) {
 
 fn mount_matches_for_type(mount: &config::MountConfig, path: &str) -> bool {
     if mount.mount_type == "system_config" {
-        let mount_path = normalize_virtual_path(&mount.mount_path);
-        let system_type = classify_system_path(&mount_path);
-        return match system_type {
-            Some(SystemFileType::Directory) => {
-                path == mount_path
-                    || (path.starts_with(&format!("{mount_path}/"))
-                        && matches!(
-                            classify_system_path(path),
-                            Some(SystemFileType::ConfigYaml | SystemFileType::Help)
-                        ))
-            }
-            Some(SystemFileType::ConfigYaml) | Some(SystemFileType::Help) => mount_path == path,
-            None => false,
-        };
+        return normalize_virtual_path(&mount.mount_path) == path;
     }
     mount_matches(&mount.mount_path, path)
-}
-
-#[derive(Copy, Clone)]
-enum SystemFileType {
-    ConfigYaml,
-    Help,
-    Directory,
-}
-
-fn classify_system_path(path: &str) -> Option<SystemFileType> {
-    let path = normalize_virtual_path(path);
-    if path.ends_with("/config.yaml") {
-        return Some(SystemFileType::ConfigYaml);
-    }
-    if path.ends_with("/help") {
-        return Some(SystemFileType::Help);
-    }
-    if path == "/" {
-        return None;
-    }
-    Some(SystemFileType::Directory)
 }
 
 fn mount_matches(mount_path: &str, path: &str) -> bool {

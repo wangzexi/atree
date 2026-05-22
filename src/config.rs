@@ -41,7 +41,7 @@ pub(crate) struct MountConfig {
     pub(crate) options: Value,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct AuthConfig {
     #[serde(default)]
     pub(crate) keys: Vec<KeyConfig>,
@@ -106,6 +106,15 @@ impl Default for CacheConfig {
     }
 }
 
+impl Default for AuthConfig {
+    fn default() -> Self {
+        Self {
+            keys: Vec::new(),
+            rules: Vec::new(),
+        }
+    }
+}
+
 pub(crate) fn default_mounts() -> Vec<MountConfig> {
     vec![
         MountConfig {
@@ -116,7 +125,7 @@ pub(crate) fn default_mounts() -> Vec<MountConfig> {
             options: Value::Null,
         },
         MountConfig {
-            mount_path: "/api".to_string(),
+            mount_path: "/api/config.yaml".to_string(),
             mount_type: "system_config".to_string(),
             root_path: "/".to_string(),
             enabled: true,
@@ -225,7 +234,7 @@ const CONFIG_YAML_COMMENTS: &str = r#"# atree config
 # mounts[].root_path:
 #   quark_cookie: human-readable Quark path to expose at mount_path.
 #   quark_open: human-readable Quark path to expose at mount_path.
-#   system_config: exposed as a service directory; at minimum mount_path + `/{config.yaml,help}` are exposed.
+#   system_config: exposed as one mounted config file path, such as /api/config.yaml.
 #   url_tree: upstream http(s) URL prefix or file URL.
 #   github_releases: GitHub repo in owner/repo form.
 # mounts[].enabled: false disables the mount without deleting it.
@@ -245,12 +254,23 @@ const CONFIG_YAML_COMMENTS: &str = r#"# atree config
 # auth.keys[].key_hash: sha256:<hex> hash generated from plain_key.
 # auth.keys[].key_hint: short non-secret hint for humans.
 # auth.rules: default-deny allow-list.
-# auth.rules[].principal: anonymous or key:<name>.
+# auth.rules[].principal: anonymous, root, or key:<name>.
 # auth.rules[].actions: ListBucket, HeadObject, GetObject, PutObject, DeleteObject, or *.
 # auth.rules[].resources: service paths such as /public/* or /*.
 #
 # cache.enabled: reserved for read-through cache work.
 # cache.max_bytes: max local cache size in bytes; it is not Quark capacity.
+#
+# `atree` is an S3-style file tree API with one mounted system config file.
+#
+# Examples:
+#   curl -H 'Authorization: Bearer <root-key>' 'http://127.0.0.1:9000/api/config.yaml'
+#   curl -X PUT -H 'Authorization: Bearer <root-key>' --data @config.yaml 'http://127.0.0.1:9000/api/config.yaml'
+#   curl -I -H 'Authorization: Bearer <key>' 'http://127.0.0.1:9000/quark/public/example.txt'
+#   curl -H 'Authorization: Bearer <key>' 'http://127.0.0.1:9000/quark?list-type=2&delimiter=/&prefix=public/'
+#   curl -X PUT -H 'Authorization: Bearer <key>' -T ./example.txt 'http://127.0.0.1:9000/quark/public/example.txt'
+#   curl -H 'Accept: text/html' 'http://127.0.0.1:9000/quark/public/'
+#   curl -H 'Accept: application/xml' 'http://127.0.0.1:9000/quark/public/'
 
 "#;
 
@@ -356,9 +376,8 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
             }
             "system_config" => {
                 validate_abs_path(&mount.root_path, "root_path")?;
-                if mount.mount_path.ends_with("/config.yaml") || mount.mount_path.ends_with("/help")
-                {
-                    bail!("system_config mount_path must be a directory, not a file");
+                if !mount.mount_path.ends_with("/config.yaml") {
+                    bail!("system_config mount_path must be a config file path ending with /config.yaml");
                 }
             }
             _ => unreachable!(),
@@ -388,7 +407,10 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
     }
 
     for rule in &config.auth.rules {
-        if rule.principal != "anonymous" && !rule.principal.starts_with("key:") {
+        if rule.principal != "anonymous"
+            && rule.principal != "root"
+            && !rule.principal.starts_with("key:")
+        {
             bail!("invalid principal '{}'", rule.principal);
         }
         if let Some(name) = rule.principal.strip_prefix("key:")

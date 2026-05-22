@@ -39,12 +39,11 @@ Config routes:
 ```text
 GET  /api/config.yaml
 PUT  /api/config.yaml
-GET  /api/help
 ```
 
 No separate key CRUD routes are needed. Keys, auth rules, and cache settings are all just fields in the config document.
 
-`GET /api/help` is the small AI-facing help endpoint. It is a `system_config` mount directory, so you can move the whole system mount by editing mounts (for example to `/system/api`, then use `/system/api/config.yaml` and `/system/api/help`) with the same permissions model.
+`system_config` is a mounted config file path. You can move it by editing mounts, for example to `/system/config.yaml`.
 
 ## Browser Versus S3 Behavior
 
@@ -221,21 +220,21 @@ The browser homepage is the main HTML shell. It should be enough for normal huma
 - browse files
 - enter/save an access key
 - see current auth state
-- see current API help text
+- see the config entry command
 
-The help text should render inline using the current origin:
+The config entry command should render inline using the current origin:
 
 ```bash
-curl -H 'Authorization: Bearer <super-admin-key>' 'https://current.example.com/api/help'
+curl -H 'Authorization: Bearer <root-key>' 'https://current.example.com/api/config.yaml'
 ```
 
 For local development:
 
 ```bash
-curl -H 'Authorization: Bearer <super-admin-key>' 'http://127.0.0.1:9000/api/help'
+curl -H 'Authorization: Bearer <root-key>' 'http://127.0.0.1:9000/api/config.yaml'
 ```
 
-The copied command is for AI/Codex or shell use. The help endpoint should explain how to read and write config, list objects, fetch files, and update auth rules.
+The copied command is for AI/Codex or shell use. The `config.yaml` header comments should explain how to read and write config, list objects, fetch files, and update auth rules.
 
 ## Browser Login Model
 
@@ -270,7 +269,7 @@ GET /api/config.yaml
 PUT /api/config.yaml
 ```
 
-The config API is YAML-only at the HTTP boundary. `GET /api/config.yaml` returns explanatory comments for humans and AI agents, and `PUT /api/config.yaml` ignores those comments naturally. This path behaves like a special system file mount: reading it requires `GetObject` on `/api/config.yaml`, and updating it requires `PutObject` on `/api/config.yaml`. The environment super-admin key is only a bootstrap and recovery credential.
+The config API is YAML-only at the HTTP boundary. `GET /api/config.yaml` returns explanatory comments for humans and AI agents, and `PUT /api/config.yaml` ignores those comments naturally. This path behaves like a special system file mount: reading it requires `GetObject` on `/api/config.yaml`, and updating it requires `PutObject` on `/api/config.yaml`. Requests that do not match any allow rule still remain accessible to the environment root key for bootstrap and recovery.
 
 The config endpoint is not special outside the mount model. It is a `system_config` mount. A user can move it by editing `mounts`, but validation must require at least one enabled `system_config` mount so the service cannot easily lose its editable config file.
 
@@ -315,7 +314,7 @@ Current mount types:
 
 - `quark_cookie`: read/write Quark Drive through the captured web cookie.
 - `quark_open`: read/write Quark Drive through QuarkOpen OAuth credentials.
-- `system_config`: exposes service files under a mount directory. It is used for `config.yaml` and `help`, and default mount is `/api`.
+- `system_config`: exposes the service config as one mounted file path. The default mount is `/api/config.yaml`.
 - `url_tree`: read-only `GET`/`HEAD` access to URL-backed files. This is useful for raw URLs or fixed download prefixes that need a server-side proxy in mainland China.
 - `github_releases`: read-only latest GitHub Release asset tree. This is better than `url_tree` for release assets because it supports listing the files through S3/ListBucket.
 
@@ -436,7 +435,7 @@ Reasons:
 
 - OpenList's JSON fields use names like `mount_path`, `root_path`, and `access_token`.
 - Rust `serde` can handle this cleanly with `rename_all = "snake_case"`.
-- Environment variables naturally use upper snake case, such as `ATREE_SUPER_ADMIN_KEY`.
+- Environment variables naturally use upper snake case, such as `ATREE_ROOT_KEY`.
 - Frontend code can still use camelCase internally, but API/config boundaries should stay snake_case.
 
 ## Config Storage
@@ -454,7 +453,7 @@ SQLite:
   object/cache metadata
 
 Environment:
-  bootstrap super-admin key
+  bootstrap root key
   Quark cookie or Quark OAuth tokens
 
 Docs:
@@ -464,29 +463,29 @@ Docs:
 
 Even if SQLite stores the normalized runtime state internally, `GET /api/config.yaml` should expose the user-facing config as readable YAML with comments.
 
-## Super Admin And Config Access
+## Root And Config Access
 
 The config file uses the same policy model as other mounted files:
 
 - `GET /api/config.yaml` requires `GetObject` on `/api/config.yaml`.
 - `PUT /api/config.yaml` requires `PutObject` on `/api/config.yaml`.
-- The environment super-admin key bypasses policy checks and is meant for bootstrap and recovery.
+- The environment root key bypasses policy checks and is meant for bootstrap and recovery.
 
-This means config can be delegated to a normal configured key by adding explicit rules. The default generated config has no keys or rules, so the super-admin key is the only practical way to read or write config at first startup.
+This means config can be delegated to a normal configured key by adding explicit rules. The default generated config has no allow rules, so the root key is the only practical way to read or write config at first startup.
 
-The super-admin key is a bootstrap secret loaded from environment:
+The root key is a bootstrap secret loaded from environment:
 
 ```text
-ATREE_SUPER_ADMIN_KEY
+ATREE_ROOT_KEY
 ```
 
 Bootstrap config requests can include:
 
 ```http
-Authorization: Bearer <super-admin-key>
+Authorization: Bearer <root-key>
 ```
 
-The super-admin key should not be stored in the normal config or browser `localStorage`.
+The root key should not be stored in the normal config or browser `localStorage`.
 
 ## Example Config
 
@@ -504,7 +503,7 @@ mounts:
     options:
       cookie: "<quark cookie>"
       root_fid: "0"
-  - mount_path: /api
+  - mount_path: /api/config.yaml
     type: system_config
     root_path: /
     enabled: true
@@ -549,7 +548,7 @@ Each request resolves to a principal:
 
 - `anonymous`: no key
 - `key:<name>`: matched configured key
-- `super-admin`: bootstrap/recovery admin key that bypasses policy checks
+- `root`: bootstrap/recovery key that bypasses policy checks
 
 Actions:
 
@@ -588,41 +587,7 @@ Suggested anonymous behavior:
 
 ## AI-Friendly API Index
 
-Use `GET /api/help` as the AI-friendly interface description.
-
-It should be plain JSON or Markdown-like JSON that is easy for curl and AI agents to consume. It replaces a separate settings page and avoids many small management endpoints.
-
-Suggested response content:
-
-```json
-{
-  "service": "atree",
-  "auth": {
-    "user_header": "Authorization: Bearer <key>",
-    "admin_header": "Authorization: Bearer <super-admin-key>"
-  },
-  "config": {
-    "get": "GET /api/config.yaml",
-    "put": "PUT /api/config.yaml",
-    "note": "Config is one YAML document. Edit mounts, keys, rules, and cache together."
-  },
-  "s3": {
-    "list": "GET /{bucket}?list-type=2&delimiter=/&prefix=<path>",
-    "get": "GET /{bucket}/{key}",
-    "put": "PUT /{bucket}/{key}",
-    "delete": "DELETE /{bucket}/{key}"
-  },
-  "examples": {
-    "get_config": "curl -H 'Authorization: Bearer <super-admin-key>' '<origin>/api/config.yaml'",
-    "put_config": "curl -X PUT -H 'Authorization: Bearer <super-admin-key>' --data @config.yaml '<origin>/api/config.yaml'",
-    "list": "curl -H 'Authorization: Bearer <key>' '<origin>/quark?list-type=2&delimiter=/&prefix=public/'",
-    "upload": "curl -X PUT -H 'Authorization: Bearer <key>' -H 'Content-Type: text/plain' --data-binary @./example.txt '<origin>/quark/public/example.txt'",
-    "upload_with_curl_T": "curl -H 'Authorization: Bearer <key>' -T ./example.txt '<origin>/quark/public/example.txt'",
-    "read": "curl -H 'Authorization: Bearer <key>' '<origin>/quark/public/example.txt'",
-    "delete": "curl -X DELETE -H 'Authorization: Bearer <key>' '<origin>/quark/public/example.txt'"
-  }
-}
-```
+Use `GET /api/config.yaml` as the AI-friendly entry point. The YAML header comments can carry the minimal examples for curl and AI agents, so there is no second help file to keep in sync.
 
 ## File Browser Behavior
 
@@ -659,7 +624,7 @@ Implications:
 - XSS would expose the key.
 - Keys should be scoped narrowly.
 - Browser keys should usually be read-only.
-- The super-admin key should not be stored in browser `localStorage`.
+- The root key should not be stored in browser `localStorage`.
 
 Admin config writes can expose private data or lock the user out, so:
 
@@ -684,12 +649,12 @@ else:
 Completed in the current implementation:
 
 - Config model stored in SQLite.
-- `ATREE_SUPER_ADMIN_KEY` bootstrap/recovery access.
-- `GET /api/config.yaml`, `PUT /api/config.yaml`, and `GET /api/help`.
+- `ATREE_ROOT_KEY` bootstrap/recovery access.
+- `GET /api/config.yaml` and `PUT /api/config.yaml`.
 - Default-deny policy checks on S3/object routes.
 - Browser detection for directory paths and an HTML file browser shell.
 - Directory index file lookup for browser directory requests.
-- `GET /api/help` returns the machine-readable interface guidance directly.
+- `GET /api/config.yaml` returns the entry comments directly in the YAML header.
 - Browser access key storage in `localStorage`.
 
 Later:

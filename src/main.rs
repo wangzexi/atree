@@ -13,9 +13,11 @@ mod ui;
 
 use crate::mounts::{
     GithubReleasesConfig, QuarkOpenConfig, ResolvedMount, backend_from_mount, github_client,
-    is_fnnas_quark_refresh_url, normalize_virtual_path, persist_quark_open_config, quark_client,
-    quark_open_client, resolve_explicit_mount, resolve_mount, resolve_remote_key,
+    is_fnnas_quark_refresh_url, persist_quark_open_config, quark_client,
+    quark_open_client, resolve_explicit_mount, resolve_mount,
 };
+#[cfg(test)]
+use crate::mounts::resolve_remote_key;
 use anyhow::{Context, Result, anyhow, bail};
 use axum::{
     Json, Router,
@@ -49,14 +51,12 @@ const REFERER: &str = "https://pan.quark.cn";
 const API: &str = "https://drive.quark.cn/1/clouddrive";
 const OPEN_API: &str = "https://open-api-drive.quark.cn";
 const PR: &str = "ucpro";
-const DEFAULT_CONFIG_PATH: &str = "/api/config.yaml";
-const DEFAULT_HELP_PATH: &str = "/api/help";
 
 #[derive(Clone)]
 struct AppState {
     config: Arc<RwLock<ServiceConfig>>,
     db_path: PathBuf,
-    super_admin_key: Option<String>,
+    root_key: Option<String>,
     multipart_dir: PathBuf,
 }
 
@@ -201,6 +201,7 @@ struct OpenFileListResp {
 
 #[derive(Debug, Deserialize)]
 struct OpenFileListData {
+    #[serde(default)]
     file_list: Vec<OpenFile>,
     #[serde(default)]
     last_page: bool,
@@ -850,6 +851,7 @@ impl QuarkOpenClient {
         pathname: &str,
         body: Option<Value>,
     ) -> Result<T> {
+        let method_name = method.as_str().to_string();
         if self.needs_bootstrap_refresh().await {
             self.refresh_token().await?;
         }
@@ -863,7 +865,14 @@ impl QuarkOpenClient {
         } else {
             bytes
         };
-        Ok(serde_json::from_slice(&bytes)?)
+        serde_json::from_slice(&bytes).with_context(|| {
+            format!(
+                "failed to decode quark open response for {} {}: {}",
+                method_name,
+                pathname,
+                String::from_utf8_lossy(&bytes)
+            )
+        })
     }
 
     async fn request_with_sign<T: DeserializeOwned>(
@@ -873,6 +882,7 @@ impl QuarkOpenClient {
         body: Option<Value>,
         sign: (String, String, String),
     ) -> Result<T> {
+        let method_name = method.as_str().to_string();
         if self.needs_bootstrap_refresh().await {
             self.refresh_token().await?;
         }
@@ -888,7 +898,14 @@ impl QuarkOpenClient {
         } else {
             bytes
         };
-        Ok(serde_json::from_slice(&bytes)?)
+        serde_json::from_slice(&bytes).with_context(|| {
+            format!(
+                "failed to decode quark open response for {} {}: {}",
+                method_name,
+                pathname,
+                String::from_utf8_lossy(&bytes)
+            )
+        })
     }
 
     async fn request_bytes(
@@ -1339,9 +1356,9 @@ async fn main() -> Result<()> {
     let multipart_dir = multipart_dir_path();
     std::fs::create_dir_all(&multipart_dir)?;
     let config = load_or_init_config(&db_path)?;
-    let super_admin_key = env::var("ATREE_SUPER_ADMIN_KEY").ok();
-    if super_admin_key.is_none() {
-        warn!("ATREE_SUPER_ADMIN_KEY is not set; /api/config.yaml will be unavailable");
+    let root_key = env::var("ATREE_ROOT_KEY").ok();
+    if root_key.is_none() {
+        warn!("ATREE_ROOT_KEY is not set; only explicit auth rules will grant access");
     }
     let max_upload_bytes = config.s3.max_upload_bytes;
     let bind: SocketAddr = env::var("BIND")
@@ -1351,7 +1368,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         config: Arc::new(RwLock::new(config)),
         db_path,
-        super_admin_key,
+        root_key,
         multipart_dir,
     };
     let app = build_app(state, max_upload_bytes);
@@ -1381,6 +1398,126 @@ fn build_app(state: AppState, max_upload_bytes: usize) -> Router {
         .with_state(state)
 }
 
+async fn browser_root_entries_json(state: &AppState) -> String {
+    browser_virtual_entries_json(state, "/")
+        .await
+        .unwrap_or_else(|| "[]".to_string())
+}
+
+async fn browser_virtual_entries_response(
+    state: &AppState,
+    headers: &HeaderMap,
+    virtual_path: &str,
+) -> Response {
+    {
+        let config = state.config.read().await;
+        if !has_virtual_directory(&config, virtual_path) {
+            return s3_error(StatusCode::NOT_FOUND, "NoSuchBucket", "bucket not found");
+        }
+    }
+    if !is_authorized(state, headers, "ListBucket", virtual_path).await {
+        return json_error(StatusCode::FORBIDDEN, "access denied");
+    }
+    let entries = browser_virtual_entries_json(state, virtual_path)
+        .await
+        .unwrap_or_else(|| "[]".to_string());
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
+        entries,
+    )
+        .into_response()
+}
+
+fn normalize_browser_virtual_path(path: &str) -> String {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed == "/" {
+        return "/".to_string();
+    }
+    format!("/{}", trimmed.trim_matches('/'))
+}
+
+fn has_virtual_directory(config: &ServiceConfig, virtual_path: &str) -> bool {
+    let current = normalize_browser_virtual_path(virtual_path);
+    if current == "/" {
+        return true;
+    }
+    let prefix = format!("{}/", current.trim_end_matches('/'));
+    config
+        .mounts
+        .iter()
+        .filter(|mount| mount.enabled)
+        .map(|mount| normalize_browser_virtual_path(&mount.mount_path))
+        .any(|mount_path| mount_path.starts_with(&prefix))
+}
+
+async fn browser_virtual_entries_json(state: &AppState, virtual_path: &str) -> Option<String> {
+    let current = normalize_browser_virtual_path(virtual_path);
+    let bucket = state_bucket(state).await;
+    let config = state.config.read().await;
+    let mut entries = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    if current == "/" {
+        entries.push(json!({
+            "type": "dir",
+            "name": bucket.clone(),
+            "href": format!("/{}/", bucket),
+        }));
+        seen.insert(bucket);
+    }
+
+    for mount in &config.mounts {
+        if !mount.enabled || mount.mount_path == "/" {
+            continue;
+        }
+        let normalized = normalize_browser_virtual_path(&mount.mount_path);
+        if current == "/" {
+            let Some(first) = normalized.trim_start_matches('/').split('/').next() else {
+                continue;
+            };
+            if first.is_empty() || !seen.insert(first.to_string()) {
+                continue;
+            }
+            entries.push(json!({
+                "type": "dir",
+                "name": first,
+                "href": format!("/{}/", first),
+            }));
+            continue;
+        }
+
+        let prefix = format!("{}/", current.trim_end_matches('/'));
+        if !normalized.starts_with(&prefix) {
+            continue;
+        }
+        let rest = &normalized[prefix.len()..];
+        if rest.is_empty() {
+            continue;
+        }
+        let mut parts = rest.split('/');
+        let Some(first) = parts.next() else {
+            continue;
+        };
+        if first.is_empty() || !seen.insert(first.to_string()) {
+            continue;
+        }
+        let is_file = parts.next().is_none();
+        let href = if is_file {
+            format!("{}/{}", current.trim_end_matches('/'), first)
+        } else {
+            format!("{}/{}/", current.trim_end_matches('/'), first)
+        };
+        entries.push(json!({
+            "type": if is_file { "file" } else { "dir" },
+            "name": first,
+            "href": href,
+        }));
+    }
+    (!entries.is_empty())
+        .then(|| serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string()))
+}
+
 async fn root_handler(
     State(state): State<AppState>,
     method: Method,
@@ -1388,7 +1525,11 @@ async fn root_handler(
 ) -> Response {
     let bucket = state_bucket(&state).await;
     if method == Method::GET && wants_html(&headers) {
-        return html_response(StatusCode::OK, file_browser_html(&bucket, "/"));
+        let root_entries = browser_root_entries_json(&state).await;
+        return html_response(
+            StatusCode::OK,
+            file_browser_html(&bucket, "/", &root_entries, "null"),
+        );
     }
     if method != Method::GET {
         return s3_error(
@@ -1457,117 +1598,15 @@ async fn config_handler(
 
 enum SystemFile {
     ConfigYaml,
-    Help,
     Unknown,
 }
 
 fn classify_system_file(path: &str) -> SystemFile {
     if path.ends_with("/config.yaml") {
         SystemFile::ConfigYaml
-    } else if path.ends_with("/help") {
-        SystemFile::Help
     } else {
         SystemFile::Unknown
     }
-}
-
-fn config_system_paths(config: &ServiceConfig) -> (String, String) {
-    let (mut config_path, mut help_path) = (
-        DEFAULT_CONFIG_PATH.to_string(),
-        DEFAULT_HELP_PATH.to_string(),
-    );
-    for mount in &config.mounts {
-        if mount.mount_type != "system_config" || !mount.enabled {
-            continue;
-        }
-        match classify_system_file(&mount.mount_path) {
-            SystemFile::ConfigYaml => config_path = mount.mount_path.clone(),
-            SystemFile::Help => help_path = mount.mount_path.clone(),
-            SystemFile::Unknown => {
-                let normalized = normalize_virtual_path(&mount.mount_path);
-                if normalized == "/" {
-                    config_path = DEFAULT_CONFIG_PATH.to_string();
-                    help_path = DEFAULT_HELP_PATH.to_string();
-                } else {
-                    config_path = format!("{normalized}/config.yaml");
-                    help_path = format!("{normalized}/help");
-                }
-            }
-        }
-    }
-    (config_path, help_path)
-}
-
-async fn help_handler(
-    state: &AppState,
-    headers: &HeaderMap,
-    _virtual_path: &str,
-    method: Method,
-) -> Response {
-    if method != Method::GET && method != Method::HEAD {
-        return json_error(
-            StatusCode::METHOD_NOT_ALLOWED,
-            "help file supports GET and HEAD",
-        );
-    }
-
-    if method == Method::HEAD {
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
-            .body(Body::empty())
-            .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
-    }
-
-    let config = state.config.read().await;
-    let (config_path, help_path) = config_system_paths(&config);
-    drop(config);
-
-    let bucket = state_bucket(state).await;
-    let origin = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .map(|host| format!("http://{host}"))
-        .unwrap_or_else(|| "http://127.0.0.1:9000".to_string());
-    Json(json!({
-        "service": "atree",
-        "auth": {
-            "user_header": "Authorization: Bearer <key>",
-            "admin_header": "Authorization: Bearer <super-admin-key>"
-        },
-        "config": {
-            "path": config_path,
-            "get": format!("GET {config_path}"),
-            "put": format!("PUT {config_path}"),
-            "note": "Config is a YAML document exposed as a system file. Reading needs GetObject, writing needs PutObject on the mounted config file. The bootstrap super-admin key is still allowed for first setup. PUT rejects invalid config and keeps the old one."
-        },
-        "help": {
-            "path": help_path,
-            "get": format!("GET {help_path}"),
-        },
-        "s3": {
-            "bucket": bucket,
-            "list": "GET /{bucket}?list-type=2&delimiter=/&prefix=<path>",
-            "get": "GET /{bucket}/{key}",
-            "head": "HEAD /{bucket}/{key}",
-            "put": "PUT /{bucket}/{key}",
-            "delete": "DELETE /{bucket}/{key}"
-        },
-        "browser": {
-            "mode": "Send Accept: text/html for the file browser or directory index. Send Accept: application/xml for S3 XML.",
-            "login": "The HTML UI stores the service access key in localStorage and sends it as Authorization: Bearer <key> for list/read requests."
-        },
-        "examples": {
-            "get_config": format!("curl -H 'Authorization: Bearer <super-admin-key>' '{origin}{config_path}'"),
-            "put_config": format!("curl -X PUT -H 'Authorization: Bearer <super-admin-key>' --data @config.yaml '{origin}{config_path}'"),
-            "list": format!("curl -H 'Authorization: Bearer <key>' '{origin}/{bucket}?list-type=2&delimiter=/&prefix=public/'"),
-            "upload": format!("curl -X PUT -H 'Authorization: Bearer <key>' -H 'Content-Type: text/plain' --data-binary @./example.txt '{origin}/{bucket}/public/example.txt'"),
-            "upload_with_curl_T": format!("curl -H 'Authorization: Bearer <key>' -T ./example.txt '{origin}/{bucket}/public/example.txt'"),
-            "read": format!("curl -H 'Authorization: Bearer <key>' '{origin}/{bucket}/public/example.txt'"),
-            "delete": format!("curl -X DELETE -H 'Authorization: Bearer <key>' '{origin}/{bucket}/public/example.txt'")
-        }
-    }))
-    .into_response()
 }
 
 async fn system_file_handler(
@@ -1579,7 +1618,6 @@ async fn system_file_handler(
 ) -> Response {
     match classify_system_file(virtual_path) {
         SystemFile::ConfigYaml => config_handler(state, method, headers, body, virtual_path).await,
-        SystemFile::Help => help_handler(state, headers, virtual_path, method).await,
         SystemFile::Unknown => s3_error(StatusCode::NOT_FOUND, "NoSuchKey", "unknown system file"),
     }
 }
@@ -1594,6 +1632,19 @@ async fn bucket_handler(
     let current_bucket = state_bucket(&state).await;
     if bucket != current_bucket {
         let virtual_path = format!("/{}", percent_decode_path(&bucket).trim_matches('/'));
+        let query = raw_query.as_deref().unwrap_or_default();
+        let params = parse_query(query);
+        if method == Method::GET && params.contains_key("atree-browser-list") {
+            return browser_virtual_entries_response(&state, &headers, &virtual_path).await;
+        }
+        if method == Method::GET && wants_html(&headers) {
+            let config = state.config.read().await;
+            let is_virtual_dir = has_virtual_directory(&config, &virtual_path);
+            drop(config);
+            if is_virtual_dir {
+                return browser_directory(&state, &virtual_path, &headers, true).await;
+            }
+        }
         let config = state.config.read().await;
         let mount = resolve_explicit_mount(&config, &virtual_path);
         drop(config);
@@ -1638,7 +1689,7 @@ async fn bucket_handler(
         );
     }
     if method == Method::GET && wants_html(&headers) {
-        return browser_directory(&state, "/", &headers).await;
+        return browser_directory(&state, "/", &headers, false).await;
     }
     match method {
         Method::GET => list_objects(state, raw_query, "/", &headers).await,
@@ -1675,6 +1726,19 @@ async fn object_handler(
     };
     if key.trim_matches('/').is_empty() {
         if !is_bucket_path {
+            let query = raw_query.as_deref().unwrap_or_default();
+            let params = parse_query(query);
+            if method == Method::GET && params.contains_key("atree-browser-list") {
+                return browser_virtual_entries_response(&state, &headers, &virtual_path).await;
+            }
+            if method == Method::GET && wants_html(&headers) {
+                let config = state.config.read().await;
+                let is_virtual_dir = has_virtual_directory(&config, &virtual_path);
+                drop(config);
+                if is_virtual_dir {
+                    return browser_directory(&state, &virtual_path, &headers, true).await;
+                }
+            }
             let config = state.config.read().await;
             let mount = resolve_explicit_mount(&config, &virtual_path);
             drop(config);
@@ -1684,7 +1748,9 @@ async fn object_handler(
             return s3_error(StatusCode::NOT_FOUND, "NoSuchBucket", "bucket not found");
         }
         return match method {
-            Method::GET if wants_html(&headers) => browser_directory(&state, "/", &headers).await,
+            Method::GET if wants_html(&headers) => {
+                browser_directory(&state, "/", &headers, false).await
+            }
             Method::GET => list_objects(state, raw_query.unwrap_or_default(), "/", &headers).await,
             Method::HEAD | Method::PUT => StatusCode::OK.into_response(),
             _ => s3_error(
@@ -1695,7 +1761,7 @@ async fn object_handler(
         };
     }
     if method == Method::GET && key.ends_with('/') && wants_html(&headers) {
-        return browser_directory(&state, &virtual_path, &headers).await;
+        return browser_directory(&state, &virtual_path, &headers, false).await;
     }
     if method == Method::GET && key.ends_with('/') {
         return list_objects(
@@ -1714,13 +1780,6 @@ async fn object_handler(
     } else {
         resolve_explicit_mount(&config, &virtual_path)
     };
-    if let Some(ResolvedMount::SystemConfig { virtual_path }) = &resolved_mount {
-        if matches!(classify_system_file(virtual_path), SystemFile::Help) {
-            drop(config);
-            return system_file_handler(&state, method, &headers, body, virtual_path).await;
-        }
-    }
-
     let action = match method {
         Method::GET => "GetObject",
         Method::HEAD => "HeadObject",
@@ -2564,28 +2623,41 @@ fn safe_upload_id(upload_id: &str) -> String {
         .collect()
 }
 
-async fn browser_directory(state: &AppState, virtual_path: &str, headers: &HeaderMap) -> Response {
+async fn browser_directory(
+    state: &AppState,
+    virtual_path: &str,
+    headers: &HeaderMap,
+    synthetic: bool,
+) -> Response {
     let bucket = state_bucket(state).await;
-    let html = || html_response(StatusCode::OK, file_browser_html(&bucket, virtual_path));
+    let html = |error_json: &str| {
+        html_response(
+            StatusCode::OK,
+            file_browser_html(&bucket, virtual_path, "null", error_json),
+        )
+    };
+    if synthetic || virtual_path == "/" {
+        return html("null");
+    }
     if !is_authorized(state, headers, "ListBucket", virtual_path).await {
-        return html();
+        return html("null");
     }
     let Some(index_key) = find_directory_index(state, virtual_path).await else {
-        return html();
+        return html("null");
     };
     let index_path = format!("/{index_key}");
     if !is_authorized(state, headers, "GetObject", &index_path).await {
-        return html();
+        return html("null");
     }
     let config = state.config.read().await;
     let Some((remote_key, backend)) =
         resolve_mount(&config, &index_path).and_then(backend_from_mount)
     else {
-        return html();
+        return html("null");
     };
     match get_object(&backend, &remote_key, headers).await {
         Ok(resp) => resp,
-        Err(_) => html(),
+        Err(_) => html("null"),
     }
 }
 
@@ -2632,8 +2704,8 @@ async fn resolve_principal(state: &AppState, headers: &HeaderMap) -> String {
     let Some(token) = request_access_key(headers) else {
         return "anonymous".to_string();
     };
-    if state.super_admin_key.as_deref() == Some(token.as_str()) {
-        return "super-admin".to_string();
+    if state.root_key.as_deref() == Some(token.as_str()) {
+        return "root".to_string();
     }
     let hash = hash_key(&token);
     let config = state.config.read().await;
@@ -2647,7 +2719,7 @@ async fn resolve_principal(state: &AppState, headers: &HeaderMap) -> String {
 }
 
 fn policy_allows(config: &ServiceConfig, principal: &str, action: &str, resource: &str) -> bool {
-    if principal == "super-admin" {
+    if principal == "root" {
         return true;
     }
     config.auth.rules.iter().any(|rule| {
@@ -2862,7 +2934,10 @@ fn yaml_response(status: StatusCode, yaml: String) -> Response {
 
 fn access_denied(headers: &HeaderMap, bucket: &str) -> Response {
     if wants_html(headers) {
-        html_response(StatusCode::UNAUTHORIZED, file_browser_html(bucket, "/"))
+        html_response(
+            StatusCode::UNAUTHORIZED,
+            file_browser_html(bucket, "/", "null", r#""需要访问 key。""#),
+        )
     } else {
         s3_error(StatusCode::FORBIDDEN, "AccessDenied", "access denied")
     }
@@ -2992,16 +3067,17 @@ fn parse_query(raw: &str) -> HashMap<String, String> {
         .filter(|p| !p.is_empty())
         .map(|p| {
             let (k, v) = p.split_once('=').unwrap_or((p, ""));
-            (
-                urlencoding::decode(k)
-                    .unwrap_or_else(|_| k.into())
-                    .into_owned(),
-                urlencoding::decode(v)
-                    .unwrap_or_else(|_| v.into())
-                    .into_owned(),
-            )
+            (decode_query_component(k), decode_query_component(v))
         })
         .collect()
+}
+
+fn decode_query_component(value: &str) -> String {
+    let plus_fixed = value.replace('+', " ");
+    match urlencoding::decode(&plus_fixed) {
+        Ok(decoded) => decoded.into_owned(),
+        Err(_) => plus_fixed,
+    }
 }
 
 fn percent_decode_path(path: &str) -> String {
@@ -3148,7 +3224,7 @@ mod tests {
             config: Arc::new(RwLock::new(config)),
             multipart_dir,
             db_path,
-            super_admin_key: Some("admin-test-key".to_string()),
+            root_key: Some("root-test-key".to_string()),
         }
     }
 
@@ -3195,7 +3271,7 @@ mod tests {
                 options: json!({"proxy": "http://127.0.0.1:1080"}),
             },
             MountConfig {
-                mount_path: "/api".to_string(),
+                mount_path: "/api/config.yaml".to_string(),
                 mount_type: "system_config".to_string(),
                 root_path: "/".to_string(),
                 enabled: true,
@@ -3208,23 +3284,12 @@ mod tests {
             Some(ResolvedMount::SystemConfig { virtual_path }) if virtual_path == "/api/config.yaml"
         ));
         assert!(matches!(
-            resolve_mount(&config, "/api/help"),
-            Some(ResolvedMount::SystemConfig { virtual_path }) if virtual_path == "/api/help"
-        ));
-        assert!(matches!(
-            resolve_mount(&config, "/api/config.yaml/extra"),
-            Some(ResolvedMount::Quark { remote_key, .. }) if remote_key == "root/api/config.yaml/extra"
-        ));
-        assert!(matches!(
             resolve_mount(&config, "/github/client.tar.gz"),
             Some(ResolvedMount::UrlTree { url, proxy })
                 if url == "https://github.com/example-org/releases/client.tar.gz"
                     && proxy.as_deref() == Some("http://127.0.0.1:1080")
         ));
-        assert!(matches!(
-            resolve_mount(&config, "/api/"),
-            Some(ResolvedMount::SystemConfig { virtual_path }) if virtual_path == "/api"
-        ));
+        assert!(!matches!(resolve_mount(&config, "/api/"), Some(ResolvedMount::SystemConfig { .. })));
     }
 
     #[test]
@@ -3243,7 +3308,7 @@ mod tests {
                 }),
             },
             MountConfig {
-                mount_path: "/api".to_string(),
+                mount_path: "/api/config.yaml".to_string(),
                 mount_type: "system_config".to_string(),
                 root_path: "/".to_string(),
                 enabled: true,
@@ -3404,7 +3469,7 @@ mod tests {
         assert!(validate_config(&config).is_err());
 
         let mut config = ServiceConfig::default();
-        config.mounts[1].mount_path = "/api/config.yaml".to_string();
+        config.mounts[1].mount_path = "/api".to_string();
         assert!(validate_config(&config).is_err());
     }
 
@@ -3446,7 +3511,82 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn config_api_yaml_requires_admin_hashes_plain_key_and_rejects_invalid_config() {
+    async fn synthetic_directory_browser_shell_defers_auth_to_client_fetch() {
+        let app = build_app(test_state(), 1024 * 1024);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/")
+                    .header(header::ACCEPT, "text/html")
+                    .header(header::USER_AGENT, "Mozilla/5.0")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
+        assert!(body.contains("var DIRECTORY_ENTRIES = null;"));
+        assert!(!body.contains("var DIRECTORY_ERROR = \"需要访问 key。\";"));
+    }
+
+    #[tokio::test]
+    async fn synthetic_directory_browser_list_requires_auth_and_root_can_read_it() {
+        let app = build_app(test_state(), 1024 * 1024);
+
+        let no_auth = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/?atree-browser-list=1")
+                    .header(header::ACCEPT, "application/json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(no_auth.status(), StatusCode::FORBIDDEN);
+
+        let root = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/?atree-browser-list=1")
+                    .header(header::ACCEPT, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(root.status(), StatusCode::OK);
+        let body = response_text(root).await;
+        assert!(body.contains("\"name\":\"config.yaml\""));
+    }
+
+    #[tokio::test]
+    async fn root_browser_view_shows_top_level_entries() {
+        let app = build_app(test_state(), 1024 * 1024);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/")
+                    .header(header::ACCEPT, "text/html")
+                    .header(header::USER_AGENT, "Mozilla/5.0")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
+        assert!(body.contains("\"name\":\"quark\""));
+        assert!(body.contains("\"name\":\"api\""));
+    }
+
+    #[tokio::test]
+    async fn config_api_yaml_requires_root_hashes_plain_key_and_rejects_invalid_config() {
         let app = build_app(test_state(), 1024 * 1024);
 
         let no_auth = app
@@ -3467,7 +3607,7 @@ mod tests {
                 Request::builder()
                     .method(Method::PUT)
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::from(
                         r#"mounts:
   - mount_path: bad
@@ -3493,7 +3633,7 @@ mounts:
     type: quark_cookie
     root_path: /
     enabled: true
-  - mount_path: /api
+  - mount_path: /api/config.yaml
     type: system_config
     root_path: /
     enabled: true
@@ -3516,7 +3656,7 @@ cache:
                 Request::builder()
                     .method(Method::PUT)
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::from(good_config))
                     .unwrap(),
             )
@@ -3533,7 +3673,7 @@ cache:
             .oneshot(
                 Request::builder()
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3556,7 +3696,7 @@ mounts:
     type: quark_cookie
     root_path: /
     enabled: true
-  - mount_path: /api
+  - mount_path: /api/config.yaml
     type: system_config
     root_path: /
     enabled: true
@@ -3580,7 +3720,7 @@ cache:
                 Request::builder()
                     .method(Method::PUT)
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::from(yaml_config))
                     .unwrap(),
             )
@@ -3595,7 +3735,7 @@ cache:
             .oneshot(
                 Request::builder()
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3625,7 +3765,7 @@ mounts:
     type: quark_cookie
     root_path: /
     enabled: true
-  - mount_path: /api
+  - mount_path: /api/config.yaml
     type: system_config
     root_path: /
     enabled: true
@@ -3648,7 +3788,7 @@ cache:
                 Request::builder()
                     .method(Method::PUT)
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::from(bootstrap_config))
                     .unwrap(),
             )
@@ -3697,7 +3837,7 @@ mounts:
     type: quark_cookie
     root_path: /
     enabled: true
-  - mount_path: /system
+  - mount_path: /system/config.yaml
     type: system_config
     root_path: /
     enabled: true
@@ -3720,7 +3860,7 @@ cache:
                 Request::builder()
                     .method(Method::PUT)
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::from(moved_config))
                     .unwrap(),
             )
@@ -3750,7 +3890,7 @@ cache:
             .oneshot(
                 Request::builder()
                     .uri("/api/config.yaml")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3835,7 +3975,7 @@ cache:
             .oneshot(
                 Request::builder()
                     .uri("/api/config")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3845,13 +3985,26 @@ cache:
     }
 
     #[tokio::test]
-    async fn help_md_route_is_not_supported() {
+    async fn old_help_route_is_not_supported() {
         let app = build_app(test_state(), 1024 * 1024);
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/help")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
         let response = app
             .oneshot(
                 Request::builder()
                     .uri("/api/help.md")
-                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3882,13 +4035,13 @@ cache:
     }
 
     #[tokio::test]
-    async fn help_endpoint_is_ai_friendly_json() {
+    async fn config_yaml_comments_include_ai_friendly_examples() {
         let app = build_app(test_state(), 1024 * 1024);
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/api/help")
-                    .header(header::HOST, "127.0.0.1:9000")
+                    .uri("/api/config.yaml")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -3896,10 +4049,10 @@ cache:
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
-        assert!(body.contains("\"service\":\"atree\""));
-        assert!(body.contains("GET /api/config.yaml"));
-        assert!(body.contains("GET /{bucket}?list-type=2"));
-        assert!(body.contains("--data-binary @./example.txt"));
+        assert!(body.contains("# `atree` is an S3-style file tree API"));
+        assert!(body.contains("curl -H 'Authorization: Bearer <root-key>'"));
+        assert!(body.contains("curl -I -H 'Authorization: Bearer <key>'"));
         assert!(body.contains("-T ./example.txt"));
+        assert!(body.contains("Accept: text/html"));
     }
 }
