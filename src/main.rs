@@ -3845,6 +3845,22 @@ cache:
     }
 
     #[tokio::test]
+    async fn help_md_route_is_not_supported() {
+        let app = build_app(test_state(), 1024 * 1024);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api/help.md")
+                    .header(header::AUTHORIZATION, "Bearer admin-test-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
     async fn s3_list_is_default_denied_before_backend_access() {
         let app = build_app(test_state(), 1024 * 1024);
         let response = app
