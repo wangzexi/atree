@@ -2958,7 +2958,10 @@ fn resource_matches(pattern: &str, resource: &str) -> bool {
         return true;
     }
     if let Some(prefix) = pattern.strip_suffix("/*") {
-        return resource == prefix || resource.starts_with(&format!("{prefix}/"));
+        let rest = resource
+            .trim_end_matches('/')
+            .strip_prefix(&format!("{prefix}/"));
+        return rest.is_some_and(|rest| !rest.is_empty());
     }
     if let Some(prefix) = pattern.strip_suffix('*') {
         return resource.starts_with(prefix);
@@ -3426,10 +3429,69 @@ mod tests {
     };
     use axum::body::{Body, to_bytes};
     use axum::http::Request;
+    use std::ops::Deref;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tower::ServiceExt;
 
     static TEST_ID: AtomicU64 = AtomicU64::new(0);
+
+    struct TestState {
+        state: AppState,
+    }
+
+    impl TestState {
+        fn app_state(&self) -> AppState {
+            self.state.clone()
+        }
+    }
+
+    impl Deref for TestState {
+        type Target = AppState;
+
+        fn deref(&self) -> &Self::Target {
+            &self.state
+        }
+    }
+
+    impl Drop for TestState {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.state.db_path);
+            let _ = std::fs::remove_dir_all(&self.state.cache_dir);
+            let _ = std::fs::remove_dir_all(&self.state.multipart_dir);
+        }
+    }
+
+    struct TestDir {
+        path: PathBuf,
+    }
+
+    impl TestDir {
+        fn new(prefix: &str) -> Self {
+            let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "{prefix}-{}-{}-{}",
+                std::process::id(),
+                chrono_millis(),
+                id
+            ));
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+    }
+
+    impl Deref for TestDir {
+        type Target = PathBuf;
+
+        fn deref(&self) -> &Self::Target {
+            &self.path
+        }
+    }
+
+    impl Drop for TestDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
 
     fn config_with_mounts(mounts: Vec<MountConfig>) -> ServiceConfig {
         ServiceConfig {
@@ -3449,7 +3511,7 @@ mod tests {
         }
     }
 
-    fn test_state() -> AppState {
+    fn test_state() -> TestState {
         let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
         let db_path = std::env::temp_dir().join(format!(
             "atree-test-{}-{}-{}.sqlite",
@@ -3472,12 +3534,14 @@ mod tests {
         ));
         std::fs::create_dir_all(&multipart_dir).unwrap();
         std::fs::create_dir_all(&cache_dir).unwrap();
-        AppState {
-            config: Arc::new(RwLock::new(config)),
-            cache_dir,
-            multipart_dir,
-            db_path,
-            root_key: Some("root-test-key".to_string()),
+        TestState {
+            state: AppState {
+                config: Arc::new(RwLock::new(config)),
+                cache_dir,
+                multipart_dir,
+                db_path,
+                root_key: Some("root-test-key".to_string()),
+            },
         }
     }
 
@@ -3518,14 +3582,7 @@ mod tests {
 
     #[test]
     fn bootstrap_config_can_seed_empty_db() {
-        let id = TEST_ID.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "atree-bootstrap-{}-{}-{}",
-            std::process::id(),
-            chrono_millis(),
-            id
-        ));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = TestDir::new("atree-bootstrap");
         let db_path = root.join("atree.sqlite");
         let bootstrap_path = root.join("config.yaml");
         std::fs::write(
@@ -3771,7 +3828,19 @@ cache:
             "GetObject",
             "/public/a.txt"
         ));
-        assert!(policy_allows(&config, "anonymous", "GetObject", "/public"));
+        assert!(policy_allows(
+            &config,
+            "anonymous",
+            "GetObject",
+            "/public/nested/a.txt"
+        ));
+        assert!(!policy_allows(&config, "anonymous", "GetObject", "/public"));
+        assert!(!policy_allows(
+            &config,
+            "anonymous",
+            "GetObject",
+            "/public/"
+        ));
         assert!(!policy_allows(
             &config,
             "anonymous",
@@ -3849,7 +3918,8 @@ cache:
 
     #[tokio::test]
     async fn root_route_negotiates_browser_html_and_s3_xml() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let html_resp = app
             .clone()
@@ -3886,7 +3956,8 @@ cache:
 
     #[tokio::test]
     async fn root_browser_list_requires_auth_and_root_can_read_it() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let no_auth = app
             .clone()
@@ -3920,7 +3991,8 @@ cache:
 
     #[tokio::test]
     async fn synthetic_directory_browser_shell_defers_auth_to_client_fetch() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let response = app
             .oneshot(
@@ -3941,7 +4013,8 @@ cache:
 
     #[tokio::test]
     async fn synthetic_directory_browser_list_requires_auth_and_root_can_read_it() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let no_auth = app
             .clone()
@@ -3974,7 +4047,8 @@ cache:
 
     #[tokio::test]
     async fn synthetic_directory_parent_without_trailing_slash_is_still_visible() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let response = app
             .oneshot(
@@ -3994,7 +4068,8 @@ cache:
 
     #[tokio::test]
     async fn browser_directory_under_mount_returns_shell_without_request_auth() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let response = app
             .oneshot(
@@ -4015,7 +4090,8 @@ cache:
 
     #[tokio::test]
     async fn root_browser_view_shows_top_level_entries() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let response = app
             .oneshot(
@@ -4036,7 +4112,8 @@ cache:
 
     #[tokio::test]
     async fn config_api_yaml_requires_root_hashes_plain_key_and_rejects_invalid_config() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
 
         let no_auth = app
             .clone()
@@ -4133,7 +4210,8 @@ cache:
 
     #[tokio::test]
     async fn config_api_supports_commented_yaml_roundtrip() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
         let yaml_config = r#"
 # This comment should be ignored on PUT.
 mounts:
@@ -4198,7 +4276,8 @@ cache:
 
     #[tokio::test]
     async fn config_yaml_can_be_delegated_with_normal_auth_rules() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
         let bootstrap_config = r#"
 mounts:
   - mount_path: /
@@ -4265,7 +4344,8 @@ cache:
 
     #[tokio::test]
     async fn system_config_mount_path_can_be_any_file_path() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
         let moved_config = r#"
 mounts:
   - mount_path: /quark
@@ -4376,7 +4456,7 @@ cache:
             },
             cache: CacheConfig::default(),
         };
-        let app = build_app(state);
+        let app = build_app(state.app_state());
 
         let response = app
             .oneshot(
@@ -4405,7 +4485,7 @@ cache:
             auth: AuthConfig::default(),
             cache: CacheConfig::default(),
         };
-        let app = build_app(state);
+        let app = build_app(state.app_state());
         let response = app
             .oneshot(
                 Request::builder()
@@ -4433,7 +4513,7 @@ cache:
             auth: AuthConfig::default(),
             cache: CacheConfig::default(),
         };
-        let app = build_app(state);
+        let app = build_app(state.app_state());
         let response = app
             .clone()
             .oneshot(
@@ -4462,7 +4542,8 @@ cache:
 
     #[tokio::test]
     async fn s3_list_is_default_denied_before_backend_access() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
         let response = app
             .oneshot(
                 Request::builder()
@@ -4483,7 +4564,8 @@ cache:
 
     #[tokio::test]
     async fn config_yaml_comments_include_ai_friendly_examples() {
-        let app = build_app(test_state());
+        let state = test_state();
+        let app = build_app(state.app_state());
         let response = app
             .oneshot(
                 Request::builder()

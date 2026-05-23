@@ -362,10 +362,12 @@ auth:
   rules:
     - principal: anonymous
       actions: [ListBucket, HeadObject, GetObject]
-      resources: [/hiddify/*]
+      resources: [/hiddify, /hiddify/*]
 ```
 
 `/github/sing-box/file.tar.gz` maps to `https://github.com/SagerNet/sing-box/releases/download/v1.12.0/file.tar.gz`. The proxy option belongs to this mount only; other mounts can stay direct.
+
+`/hiddify/*` matches descendants at any depth, but not `/hiddify` itself. Listable directories should be granted explicitly.
 
 The routing rule should be:
 
@@ -531,7 +533,7 @@ auth:
       resources: [/github/sing-box/*]
     - principal: key:reader
       actions: [ListBucket, HeadObject, GetObject]
-      resources: [/public/*, /share/*]
+      resources: [/public, /public/*, /share, /share/*]
 cache:
   max_bytes: 53687091200
 ```

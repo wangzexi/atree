@@ -143,8 +143,10 @@ auth:
   rules:
     - principal: anonymous
       actions: [ListBucket, HeadObject, GetObject]
-      resources: [/hiddify/*]
+      resources: [/hiddify, /hiddify/*]
 ```
+
+`/hiddify/*` matches descendants at any depth, but not `/hiddify` itself. Listable directories should be granted explicitly.
 
 ## 简单测试
 

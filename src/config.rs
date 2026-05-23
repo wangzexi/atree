@@ -275,7 +275,8 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 # auth.rules: default-deny allow-list.
 # auth.rules[].principal: anonymous, root, or key:<name>.
 # auth.rules[].actions: ListBucket, HeadObject, GetObject, PutObject, DeleteObject, or *.
-# auth.rules[].resources: service paths such as /public/* or /*.
+# auth.rules[].resources: service paths such as /public, /public/*, or /*.
+#   /public/* matches descendants at any depth, but not /public itself.
 # requests that match no rule are denied unless the caller is `root`.
 #
 # cache.enabled: enable local read cache for Quark GET/HEAD objects and GitHub release metadata.
