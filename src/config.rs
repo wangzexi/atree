@@ -105,20 +105,12 @@ impl Default for AuthConfig {
 }
 
 pub(crate) fn default_mounts() -> Vec<MountConfig> {
-    vec![
-        MountConfig {
-            mount_path: "/".to_string(),
-            mount_type: "quark_cookie".to_string(),
-            root_path: Some("/".to_string()),
-            options: Value::Null,
-        },
-        MountConfig {
-            mount_path: "/api/config.yaml".to_string(),
-            mount_type: "system_config".to_string(),
-            root_path: None,
-            options: Value::Null,
-        },
-    ]
+    vec![MountConfig {
+        mount_path: "/api/config.yaml".to_string(),
+        mount_type: "system_config".to_string(),
+        root_path: None,
+        options: Value::Null,
+    }]
 }
 
 fn default_true() -> bool {
@@ -244,17 +236,14 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 # s3_bucket: path-style S3 bucket name used by clients. Default: atree.
 # mounts: ordered mount table. Later mounts have higher priority.
 # mounts[].mount_path: service path, must start with /. Example: /quark or /pub
-# mounts[].type: quark_cookie, quark_open, system_config, url_tree, or github_releases.
+# mounts[].type: quark_open, system_config, url_tree, or github_releases.
 # mounts[].root_path: only for mounts backed by a remote tree.
-#   quark_cookie: human-readable Quark path to expose at mount_path.
 #   quark_open: human-readable Quark path to expose at mount_path.
 #   url_tree: upstream http(s) URL prefix. Read-only.
 #   github_releases: GitHub repo in owner/repo form. Read-only.
 #   system_config does not use root_path; mount_path is the config file path.
 # Disable a mount by commenting it out of this YAML.
 # mounts[].options:
-#   quark_cookie.cookie: Quark web cookie for this mount.
-#   quark_cookie.root_fid: optional Quark root fid for this mount. Default: 0.
 #   quark_open.oauth_file: path to private OAuth YAML, such as quark-open-oauth.yaml.
 #   quark_open.access_token/refresh_token/app_id/sign_key/refresh_url can also be set directly.
 #   url_tree.proxy: optional outbound proxy URL, such as http://127.0.0.1:1080.
@@ -279,7 +268,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 #   /public/* matches descendants at any depth, but not /public itself.
 # requests that match no rule are denied unless the caller is `root`.
 #
-# cache.enabled: enable local tree cache for ListBucket responses and Quark GET/HEAD objects.
+# cache.enabled: enable local tree cache for ListBucket responses and object GET/HEAD reads.
 #   GitHub release mounts also cache driver metadata behind the same TTL.
 # cache.ttl_seconds: cached freshness window. Default: 600.
 # cache.max_bytes: max local cache size in bytes; it is not backend capacity.
@@ -313,48 +302,28 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
         validate_abs_path(&mount.mount_path, "mount_path")?;
         if !matches!(
             mount.mount_type.as_str(),
-            "quark_cookie" | "quark_open" | "system_config" | "url_tree" | "github_releases"
+            "quark_open" | "system_config" | "url_tree" | "github_releases"
         ) {
             bail!("unsupported mount type '{}'", mount.mount_type);
         }
         match mount.mount_type.as_str() {
-            "quark_cookie" | "quark_open" => {
+            "quark_open" => {
                 let Some(root_path) = mount.root_path.as_deref() else {
                     bail!("{} mounts need root_path", mount.mount_type);
                 };
                 validate_abs_path(root_path, "root_path")?;
-                if mount.mount_type == "quark_cookie"
-                    && let Some(cookie) = mount.options.get("cookie")
-                {
-                    let Some(cookie) = cookie.as_str() else {
-                        bail!("options.cookie must be a string");
-                    };
-                    if cookie.trim().is_empty() {
-                        bail!("options.cookie cannot be empty for quark_cookie mounts");
-                    }
-                }
-                if let Some(root_fid) = mount.options.get("root_fid") {
-                    let Some(root_fid) = root_fid.as_str() else {
-                        bail!("options.root_fid must be a string");
-                    };
-                    if root_fid.trim().is_empty() {
-                        bail!("options.root_fid cannot be empty");
-                    }
-                }
-                if mount.mount_type == "quark_open" {
-                    for key in [
-                        "oauth_file",
-                        "access_token",
-                        "refresh_token",
-                        "app_id",
-                        "sign_key",
-                        "refresh_url",
-                    ] {
-                        if let Some(value) = mount.options.get(key)
-                            && !value.is_string()
-                        {
-                            bail!("options.{key} must be a string");
-                        }
+                for key in [
+                    "oauth_file",
+                    "access_token",
+                    "refresh_token",
+                    "app_id",
+                    "sign_key",
+                    "refresh_url",
+                ] {
+                    if let Some(value) = mount.options.get(key)
+                        && !value.is_string()
+                    {
+                        bail!("options.{key} must be a string");
                     }
                 }
             }

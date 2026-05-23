@@ -6,7 +6,7 @@ use reqwest::{Client, Proxy, Url};
 use serde::Deserialize;
 use serde_yaml::Value as YamlValue;
 
-use crate::{QuarkBackend, QuarkClient, QuarkOpenClient, config};
+use crate::{QuarkBackend, QuarkOpenClient, config};
 
 #[derive(Debug, Clone)]
 pub(crate) struct QuarkOpenConfig {
@@ -30,11 +30,6 @@ pub(crate) struct GithubReleasesConfig {
 
 #[derive(Debug, Clone)]
 pub(crate) enum ResolvedMount {
-    Quark {
-        remote_key: String,
-        cookie: String,
-        root_fid: String,
-    },
     QuarkOpen {
         remote_key: String,
         config: QuarkOpenConfig,
@@ -50,13 +45,6 @@ pub(crate) enum ResolvedMount {
         rest: String,
         config: GithubReleasesConfig,
     },
-}
-
-pub(crate) fn quark_client(cookie: String, root_fid: String) -> Result<QuarkClient> {
-    if cookie.trim().is_empty() {
-        bail!("quark_cookie mount needs options.cookie in config.yaml");
-    }
-    QuarkClient::new(cookie, root_fid)
 }
 
 pub(crate) fn quark_open_client(config: QuarkOpenConfig) -> Result<QuarkOpenClient> {
@@ -90,7 +78,7 @@ pub(crate) fn resolve_remote_key(
     virtual_path: &str,
 ) -> Option<String> {
     match resolve_mount(config, virtual_path)? {
-        ResolvedMount::Quark { remote_key, .. } => Some(remote_key),
+        ResolvedMount::QuarkOpen { remote_key, .. } => Some(remote_key),
         _ => None,
     }
 }
@@ -106,15 +94,6 @@ pub(crate) fn resolve_mount(
         .rev()
         .find(|mount| mount_matches_for_type(mount, &path))?;
     match mount.mount_type.as_str() {
-        "quark_cookie" => {
-            let rest = strip_mount_path(&mount.mount_path, &path);
-            Some(ResolvedMount::Quark {
-                remote_key: join_remote_path(config::mount_root_path(mount), rest),
-                cookie: mount_option_string(&mount.options, "cookie").unwrap_or_default(),
-                root_fid: mount_option_string(&mount.options, "root_fid")
-                    .unwrap_or_else(|| "0".to_string()),
-            })
-        }
         "quark_open" => {
             let rest = strip_mount_path(&mount.mount_path, &path);
             Some(ResolvedMount::QuarkOpen {
@@ -150,14 +129,6 @@ pub(crate) fn resolve_mount(
 
 pub(crate) fn backend_from_mount(mount: ResolvedMount) -> Option<(String, QuarkBackend)> {
     match mount {
-        ResolvedMount::Quark {
-            remote_key,
-            cookie,
-            root_fid,
-        } => Some((
-            remote_key,
-            QuarkBackend::Cookie(quark_client(cookie, root_fid).ok()?),
-        )),
         ResolvedMount::QuarkOpen { remote_key, config } => Some((
             remote_key,
             QuarkBackend::Open(quark_open_client(config).ok()?),
@@ -268,7 +239,7 @@ fn quark_open_config_from_options(options: &serde_json::Value) -> Option<QuarkOp
                     .and_then(|value| yaml_string(value, &["source", "refresh_url"]))
             })
             .unwrap_or_else(|| "https://api.oplist.org/quarkyun/renewapi".to_string()),
-        root_fid: mount_option_string(options, "root_fid").unwrap_or_else(|| "0".to_string()),
+        root_fid: "0".to_string(),
     })
 }
 

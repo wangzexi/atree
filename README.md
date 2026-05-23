@@ -2,7 +2,7 @@
 
 一个 AI 友好的文件树网关：把夸克网盘、配置文件、外部 HTTP 文件等资源挂到同一棵路径树上，通过 S3 path-style HTTP、普通 HTTP 和浏览器文件界面访问。当前优先保证 restic 备份可用，也覆盖 curl、AWS CLI 和 MinIO JS SDK 的基础上传下载语义。
 
-它参考了 `refs/alist/drivers/quark_uc` 里的 AList 夸克驱动，目前实现：
+它参考了 OpenList 的 QuarkOpen、GitHub Release 等 driver 思路，目前实现：
 
 - `GET /`：浏览器返回文件界面壳，S3/curl 返回 bucket XML
 - `GET /quark?list-type=2&delimiter=/&prefix=...`：列对象和目录
@@ -25,7 +25,7 @@ export ATREE_ROOT_KEY='换成你的 root key'
 cargo run
 ```
 
-夸克 Cookie、S3 bucket 名和 Quark root fid 都写在 `config.yaml` 里，不再需要单独的 `quark.env`。
+S3 bucket 名、mount、权限和缓存策略都写在 `/api/config.yaml` 里。夸克只支持 `quark_open` OAuth，不再支持网页登录 Cookie。
 
 首次启动会创建 SQLite 配置库，默认位置：
 
@@ -33,7 +33,7 @@ cargo run
 ~/.local/share/atree/atree.sqlite
 ```
 
-默认配置有两个 mount：`/` 指向夸克根目录，`/api/config.yaml` 作为系统配置文件挂载点：
+默认配置只包含 `/api/config.yaml` 系统配置文件挂载点。实际存储 mount 通过配置文件添加：
 
 ```bash
 curl -H 'Authorization: Bearer <root-key>' \
@@ -53,29 +53,16 @@ curl -X PUT \
 
 `/api/config.yaml` 也走同一套权限模型：读取需要 `GetObject`，修改需要 `PutObject`，资源路径就是 `/api/config.yaml`。未命中任何 `auth.rules` 的请求，只有 `ATREE_ROOT_KEY` 对应的 `root` 身份还能访问，用作第一次写入配置或救援。
 
-夸克网页登录态放在对应 mount 的 `options.cookie` 里。`s3_bucket` 是 S3 path-style 客户端看到的 bucket 名：
+`s3_bucket` 是 S3 path-style 客户端看到的 bucket 名。夸克挂载使用 QuarkOpen OAuth。`oauth_file` 是本机私密文件，里面保存 access token、refresh token、refresh URL、app id 和 sign key；access token 过期时，atree 会用 refresh token 刷新，并把新 token 写回这个 YAML：
 
 ```yaml
 s3_bucket: atree
-mounts:
-  - mount_path: /quark
-    type: quark_cookie
-    root_path: /
-    options:
-      cookie: '<从 pan.quark.cn 抓到的 Cookie>'
-      root_fid: '0'
-```
-
-如果要避免 Cookie 失效，可以用 QuarkOpen OAuth token。`oauth_file` 是本机私密文件，里面保存 access token、refresh token、refresh URL、app id 和 sign key；access token 过期时，atree 会用 refresh token 刷新，并把新 token 写回这个 YAML：
-
-```yaml
 mounts:
   - mount_path: /quark
     type: quark_open
     root_path: /
     options:
       oauth_file: quark-open-oauth.yaml
-      root_fid: '0'
 ```
 
 当前 `oauth.example.com/quarkyun/renewapi` 是 OpenList APIPages 的裁剪接口，只返回 access/refresh token，不返回 Quark Open 请求签名所需的 `sign_key`。atree 的私密 OAuth YAML 应该把 `source.refresh_url` 设为飞牛原始刷新接口，这样能同时刷新 token 并保存 `app_id/sign_key`：
@@ -99,9 +86,11 @@ tokens:
 
 ```yaml
 mounts:
-  - mount_path: /
-    type: quark_cookie
+  - mount_path: /quark
+    type: quark_open
     root_path: /
+    options:
+      oauth_file: quark-open-oauth.yaml
   - mount_path: /system/live.yaml
     type: system_config
 ```
@@ -236,7 +225,6 @@ await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 - 下载会代理夸克下载链接，而不是返回 302。
 - `url_tree` mount 只支持 `GET` 和 `HEAD`，支持透传 `Range`，暂不做目录列表和本地缓存。
 - `github_releases` mount 当前支持 latest release assets 的只读列表和下载，暂不支持 all versions、多仓库合并和 README/source code 的完整 OpenList 行为。
-- Cookie 自动刷新只保存在进程内，没有写回磁盘。
 - 浏览器 UI 是内嵌单 HTML，不需要前后端分离；私有文件的直接地址访问仍需要请求里携带 key。
 
 ## 已验证
@@ -244,16 +232,16 @@ await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 - `restic init` 成功。
 - 备份 8 MiB 测试目录成功，`restic check` 无错误，`restore latest` 成功。
 - 备份 16 MiB 随机文件成功，总耗时约 18.8 秒；恢复耗时约 5.8 秒。
-- 当前版本新增验证：配置 API、默认拒绝、带 key 列目录、HTML/XML Accept 切换、真实夸克小文件 PUT/HEAD/GET/DELETE。
+- 当前版本新增验证：配置 API、默认拒绝、带 key 列目录、HTML/XML Accept 切换、真实 QuarkOpen 小文件 PUT/HEAD/GET/DELETE。
 
-## 后续 OAuth/Open API 方向
+## QuarkOpen OAuth
 
-当前服务同时支持网页登录 Cookie 和 `quark_open` OAuth。关于 OAuth/Open API 的历史记录和来源说明见 `docs/oauth-notes.md`。
+当前服务只支持 `quark_open` OAuth。关于 OAuth/Open API 的历史记录和来源说明见 `docs/oauth-notes.md`。
 
 ## 本地缓存方向
 
-关于 Rust vs Bun、SQLite、write-through 写入、read-through 读取缓存的设计决策见 `docs/cache-design.md`。当前已实现 tree 层 ListBucket 响应缓存、Quark GET/HEAD 对象读缓存和 GitHub release 元数据缓存；普通 PUT/DELETE、multipart complete、配置 PUT 会清理相关缓存，避免读到旧数据。
+关于 Rust vs Bun、SQLite、write-through 写入、read-through 读取缓存的设计决策见 `docs/cache-design.md`。当前已实现 tree 层 ListBucket 响应缓存、tree 层对象 GET/HEAD 读缓存和 GitHub release 元数据缓存；普通 PUT/DELETE、multipart complete、配置 PUT 会清理相关缓存，避免读到旧数据。
 
 ## 鉴权和文件界面
 
-关于 API key、公开路径、浏览器 `localStorage` 登录和 Quark-backed file browser 的设计见 `docs/auth-and-file-ui.md`。当前给 AI/脚本看的最小入口说明直接写在 `/api/config.yaml` 的头部注释里。
+关于 API key、公开路径、浏览器 `localStorage` 登录和 S3 browser 的设计见 `docs/auth-and-file-ui.md`。当前给 AI/脚本看的最小入口说明直接写在 `/api/config.yaml` 的头部注释里。

@@ -259,7 +259,7 @@ The browser UI uses a simple key as a lightweight login.
 Authorization: Bearer <key>
 ```
 
-The key is not the Quark cookie. It is only a local service credential mapped to allowed actions and prefixes.
+The key is not the Quark OAuth token. It is only a local service credential mapped to allowed actions and prefixes.
 
 `localStorage` is acceptable for a personal lightweight file browser, but admin keys should not be used casually in the browser.
 
@@ -299,29 +299,27 @@ A mount maps a path in this service to a path in some remote system.
 Fields:
 
 - `mount_path`: where the mount appears in this service
-- `type`: how to access the remote system, such as `quark_cookie`, `quark_open`, `system_config`, `url_tree`, `github_releases`, or future `s3`
+- `type`: how to access the remote system, such as `quark_open`, `system_config`, `url_tree`, `github_releases`, or future `s3`
 - `root_path`: where this mount starts in the remote system. It is only present for mount types backed by a remote tree, not for `system_config`.
 - To disable a mount, comment it out of the YAML.
 - `options`: mount-specific settings, such as an outbound proxy for `url_tree` or `github_releases`
 
 `mount_path` is the mount's unique identifier. A separate `name` field is not needed in the first version.
 
-`root_path` is a human-readable string. Normal configs should not need internal IDs such as Quark `fid`. Driver-specific internal IDs should usually be resolved at runtime and cached in SQLite, though mounts may still expose optional fields such as `root_fid` for advanced cases.
+`root_path` is a human-readable string. Normal configs should not need internal IDs such as Quark `fid`. Driver-specific internal IDs should usually be resolved at runtime and cached in SQLite.
 
 Example:
 
 ```json
 {
   "mount_path": "/quark/restic-repo",
-  "type": "quark_cookie",
-  "root_path": "/我的备份/restic-repo",
-  "enabled": true
+  "type": "quark_open",
+  "root_path": "/我的备份/restic-repo"
 }
 ```
 
 Current mount types:
 
-- `quark_cookie`: read/write Quark Drive through the captured web cookie.
 - `quark_open`: read/write Quark Drive through QuarkOpen OAuth credentials.
 - `system_config`: exposes the service config as one mounted file path. The default mount is `/api/config.yaml`, but the file name does not need to stay `config.yaml`.
 - `url_tree`: read-only `GET`/`HEAD` access to URL-backed files. This is useful for raw URLs or fixed download prefixes that need a server-side proxy in mainland China.
@@ -389,21 +387,18 @@ Example:
   "mounts": [
     {
       "mount_path": "/",
-      "type": "quark_cookie",
-      "root_path": "/",
-      "enabled": true
+      "type": "quark_open",
+      "root_path": "/"
     },
     {
       "mount_path": "/public",
-      "type": "quark_cookie",
-      "root_path": "/公开",
-      "enabled": true
+      "type": "quark_open",
+      "root_path": "/公开"
     },
     {
       "mount_path": "/public/site",
-      "type": "quark_cookie",
-      "root_path": "/网站首页",
-      "enabled": true
+      "type": "quark_open",
+      "root_path": "/网站首页"
     }
   ]
 }
@@ -504,11 +499,10 @@ The effective config returned by `GET /api/config.yaml` can look like:
 s3_bucket: atree
 mounts:
   - mount_path: /quark
-    type: quark_cookie
+    type: quark_open
     root_path: /
     options:
-      cookie: "<quark cookie>"
-      root_fid: "0"
+      oauth_file: quark-open-oauth.yaml
   - mount_path: /api/config.yaml
     type: system_config
   - mount_path: /github/sing-box

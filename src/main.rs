@@ -15,8 +15,7 @@ mod ui;
 use crate::mounts::resolve_remote_key;
 use crate::mounts::{
     GithubReleasesConfig, QuarkOpenConfig, ResolvedMount, backend_from_mount, github_client,
-    is_fnnas_quark_refresh_url, persist_quark_open_config, quark_client, quark_open_client,
-    resolve_mount,
+    is_fnnas_quark_refresh_url, persist_quark_open_config, quark_open_client, resolve_mount,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use axum::{
@@ -46,11 +45,8 @@ use tokio::{
 use tracing::{info, warn};
 use ui::{file_browser_html, wants_html};
 
-const QUARK_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch";
 const REFERER: &str = "https://pan.quark.cn";
-const API: &str = "https://drive.quark.cn/1/clouddrive";
 const OPEN_API: &str = "https://open-api-drive.quark.cn";
-const PR: &str = "ucpro";
 
 #[derive(Clone)]
 struct AppState {
@@ -77,31 +73,13 @@ struct CachedObject {
 }
 
 #[derive(Clone)]
-struct QuarkClient {
-    http: Client,
-    cookie: Arc<Mutex<String>>,
-    root_fid: String,
-}
-
-#[derive(Clone)]
 struct QuarkOpenClient {
     http: Client,
     config: Arc<Mutex<QuarkOpenConfig>>,
 }
 
 enum QuarkBackend {
-    Cookie(QuarkClient),
     Open(QuarkOpenClient),
-}
-
-#[derive(Debug, Deserialize)]
-struct ApiStatus {
-    #[serde(default)]
-    status: i64,
-    #[serde(default)]
-    code: i64,
-    #[serde(default)]
-    message: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -116,78 +94,6 @@ struct QuarkFile {
     created_at: i64,
     #[serde(default)]
     updated_at: i64,
-}
-
-#[derive(Debug, Deserialize)]
-struct SortResp {
-    data: SortData,
-    metadata: SortMeta,
-}
-
-#[derive(Debug, Deserialize)]
-struct SortData {
-    list: Vec<QuarkFile>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SortMeta {
-    #[serde(rename = "_total")]
-    total: usize,
-}
-
-#[derive(Debug, Deserialize)]
-struct DownResp {
-    data: Vec<DownItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct DownItem {
-    download_url: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpPreResp {
-    data: UpPreData,
-    metadata: UpPreMeta,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct UpPreData {
-    task_id: String,
-    #[serde(default)]
-    finish: bool,
-    upload_id: String,
-    obj_key: String,
-    upload_url: String,
-    bucket: String,
-    auth_info: String,
-    callback: Value,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpPreMeta {
-    part_size: usize,
-}
-
-#[derive(Debug, Deserialize)]
-struct HashResp {
-    data: HashData,
-}
-
-#[derive(Debug, Deserialize)]
-struct HashData {
-    #[serde(default)]
-    finish: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpAuthResp {
-    data: UpAuthData,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpAuthData {
-    auth_key: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -380,481 +286,49 @@ struct S3Entry {
     modified: i64,
 }
 
-impl QuarkClient {
-    fn new(cookie: String, root_fid: String) -> Result<Self> {
-        let http = Client::builder()
-            .user_agent(QUARK_UA)
-            .redirect(reqwest::redirect::Policy::limited(10))
-            .build()?;
-        Ok(Self {
-            http,
-            cookie: Arc::new(Mutex::new(cookie)),
-            root_fid,
-        })
-    }
-
-    async fn request<T: DeserializeOwned>(
-        &self,
-        method: Method,
-        pathname: &str,
-        query: &[(&str, String)],
-        body: Option<Value>,
-    ) -> Result<T> {
-        let url = format!("{API}{pathname}");
-        let cookie = self.cookie.lock().await.clone();
-        let mut req = self
-            .http
-            .request(method, url)
-            .header(header::COOKIE, cookie)
-            .header(header::ACCEPT, "application/json, text/plain, */*")
-            .header(header::REFERER, REFERER)
-            .query(&[("pr", PR), ("fr", "pc")])
-            .query(query);
-        if let Some(body) = body {
-            req = req.json(&body);
-        }
-
-        let res = req.send().await?;
-        self.update_cookie(res.headers()).await;
-        let status = res.status();
-        let bytes = res.bytes().await?;
-        if !status.is_success() {
-            bail!(
-                "quark api http {}: {}",
-                status,
-                String::from_utf8_lossy(&bytes)
-            );
-        }
-
-        let api: ApiStatus = serde_json::from_slice(&bytes).with_context(|| {
-            format!(
-                "invalid quark response: {}",
-                String::from_utf8_lossy(&bytes)
-            )
-        })?;
-        if api.status >= 400 || api.code != 0 {
-            bail!(
-                "quark api error status={} code={}: {}",
-                api.status,
-                api.code,
-                api.message
-            );
-        }
-        Ok(serde_json::from_slice(&bytes)?)
-    }
-
-    async fn update_cookie(&self, headers: &HeaderMap) {
-        let mut cookie = self.cookie.lock().await;
-        for value in headers.get_all(header::SET_COOKIE) {
-            let Ok(s) = value.to_str() else { continue };
-            for name in ["__puus", "__pus"] {
-                if let Some(v) = parse_set_cookie_value(s, name) {
-                    *cookie = set_cookie_value(&cookie, name, &v);
-                }
-            }
-        }
-    }
-
-    async fn list_files(&self, parent_fid: &str) -> Result<Vec<QuarkFile>> {
-        let mut files = Vec::new();
-        let mut page = 1usize;
-        let size = 100usize;
-        loop {
-            let resp: SortResp = self
-                .request(
-                    Method::GET,
-                    "/file/sort",
-                    &[
-                        ("pdir_fid", parent_fid.to_string()),
-                        ("_size", size.to_string()),
-                        ("_page", page.to_string()),
-                        ("_fetch_total", "1".into()),
-                        ("fetch_all_file", "1".into()),
-                        ("fetch_risk_file_name", "1".into()),
-                        ("_sort", "file_type:asc,file_name:asc".into()),
-                    ],
-                    None,
-                )
-                .await?;
-            files.extend(resp.data.list);
-            if page * size >= resp.metadata.total {
-                break;
-            }
-            page += 1;
-        }
-        Ok(files)
-    }
-
-    async fn mkdir(&self, parent_fid: &str, name: &str) -> Result<()> {
-        self.request::<Value>(
-            Method::POST,
-            "/file",
-            &[],
-            Some(json!({
-                "dir_init_lock": false,
-                "dir_path": "",
-                "file_name": name,
-                "pdir_fid": parent_fid,
-            })),
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn resolve_dir(&self, path: &str, create: bool) -> Result<String> {
-        let mut parent = self.root_fid.clone();
-        for part in path.split('/').filter(|p| !p.is_empty()) {
-            let files = self.list_files(&parent).await?;
-            if let Some(dir) = files.iter().find(|f| !f.file && f.file_name == part) {
-                parent = dir.fid.clone();
-                continue;
-            }
-            if !create {
-                bail!("directory not found: {path}");
-            }
-            self.mkdir(&parent, part).await?;
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let files = self.list_files(&parent).await?;
-            let dir = files
-                .into_iter()
-                .find(|f| !f.file && f.file_name == part)
-                .ok_or_else(|| anyhow!("created directory did not appear: {part}"))?;
-            parent = dir.fid;
-        }
-        Ok(parent)
-    }
-
-    async fn find_object(&self, key: &str) -> Result<Option<QuarkFile>> {
-        let key = key.trim_matches('/');
-        if key.is_empty() {
-            return Ok(None);
-        }
-        let (dir, name) = split_key(key);
-        let parent = match self.resolve_dir(dir, false).await {
-            Ok(fid) => fid,
-            Err(_) => return Ok(None),
-        };
-        let files = self.list_files(&parent).await?;
-        Ok(files.into_iter().find(|f| f.file_name == name))
-    }
-
-    async fn download_url(&self, fid: &str) -> Result<String> {
-        let resp: DownResp = self
-            .request(
-                Method::POST,
-                "/file/download",
-                &[],
-                Some(json!({ "fids": [fid] })),
-            )
-            .await?;
-        resp.data
-            .first()
-            .map(|d| d.download_url.clone())
-            .filter(|u| !u.is_empty())
-            .ok_or_else(|| anyhow!("quark did not return a download URL"))
-    }
-
-    async fn delete_fid(&self, fid: &str) -> Result<()> {
-        self.request::<Value>(
-            Method::POST,
-            "/file/delete",
-            &[],
-            Some(json!({
-                "action_type": 1,
-                "exclude_fids": [],
-                "filelist": [fid],
-            })),
-        )
-        .await?;
-        Ok(())
-    }
-
-    async fn put_object(&self, key: &str, content_type: &str, body: Bytes) -> Result<()> {
-        let total_start = SystemTime::now();
-        let expected_size = body.len() as i64;
-        if let Some(existing) = self.find_object(key).await? {
-            self.delete_fid(&existing.fid).await?;
-        }
-
-        let (dir, name) = split_key(key);
-        let parent = self.resolve_dir(dir, true).await?;
-        let md5_hex = format!("{:x}", md5::compute(&body));
-        let sha1_hex = hex::encode(Sha1::digest(&body));
-        let now = chrono_millis();
-
-        let pre_start = SystemTime::now();
-        let pre: UpPreResp = self
-            .request(
-                Method::POST,
-                "/file/upload/pre",
-                &[],
-                Some(json!({
-                    "ccp_hash_update": true,
-                    "dir_name": "",
-                    "file_name": name,
-                    "format_type": content_type,
-                    "l_created_at": now,
-                    "l_updated_at": now,
-                    "pdir_fid": parent,
-                    "size": body.len(),
-                })),
-            )
-            .await?;
-        timing_log("upload.pre", key, expected_size, pre_start);
-        if pre.data.finish {
-            timing_log("upload.total.instant", key, expected_size, total_start);
-            return Ok(());
-        }
-
-        let hash_start = SystemTime::now();
-        let hash: HashResp = self
-            .request(
-                Method::POST,
-                "/file/update/hash",
-                &[],
-                Some(json!({
-                    "md5": md5_hex,
-                    "sha1": sha1_hex,
-                    "task_id": pre.data.task_id,
-                })),
-            )
-            .await?;
-        timing_log("upload.hash", key, expected_size, hash_start);
-        if hash.data.finish {
-            timing_log("upload.total.dedupe", key, expected_size, total_start);
-            return Ok(());
-        }
-
-        let part_size = pre.metadata.part_size.max(1024 * 1024);
-        let mut etags = Vec::new();
-        for (idx, chunk) in body.chunks(part_size).enumerate() {
-            let part_start = SystemTime::now();
-            let etag = self
-                .upload_part(
-                    &pre.data,
-                    content_type,
-                    idx + 1,
-                    Bytes::copy_from_slice(chunk),
-                )
-                .await?;
-            timing_log(
-                &format!("upload.part.{}", idx + 1),
-                key,
-                chunk.len() as i64,
-                part_start,
-            );
-            etags.push(etag);
-        }
-        let commit_start = SystemTime::now();
-        self.upload_commit(&pre.data, &etags).await?;
-        timing_log("upload.commit", key, expected_size, commit_start);
-        let finish_start = SystemTime::now();
-        self.upload_finish(&pre.data).await?;
-        timing_log("upload.finish", key, expected_size, finish_start);
-        let visible_start = SystemTime::now();
-        self.wait_until_visible(key, expected_size).await?;
-        timing_log("upload.visible", key, expected_size, visible_start);
-        timing_log("upload.total", key, expected_size, total_start);
-        Ok(())
-    }
-
-    async fn wait_until_visible(&self, key: &str, expected_size: i64) -> Result<()> {
-        let mut last = None;
-        for _ in 0..20 {
-            match self.find_object(key).await? {
-                Some(file) if file.file && file.size == expected_size => return Ok(()),
-                Some(file) => last = Some(format!("visible with size {}", file.size)),
-                None => last = Some("not visible".to_string()),
-            }
-            sleep(Duration::from_millis(500)).await;
-        }
-        bail!(
-            "uploaded object is not visible yet: {}",
-            last.unwrap_or_else(|| "unknown".to_string())
-        )
-    }
-
-    async fn upload_part(
-        &self,
-        pre: &UpPreData,
-        content_type: &str,
-        part_number: usize,
-        body: Bytes,
-    ) -> Result<String> {
-        let date = httpdate::fmt_http_date(SystemTime::now());
-        let auth_meta = format!(
-            "PUT\n\n{content_type}\n{date}\nx-oss-date:{date}\nx-oss-user-agent:aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit\n/{}/{}?partNumber={part_number}&uploadId={}",
-            pre.bucket, pre.obj_key, pre.upload_id
-        );
-        let auth: UpAuthResp = self
-            .request(
-                Method::POST,
-                "/file/upload/auth",
-                &[],
-                Some(json!({
-                    "auth_info": pre.auth_info,
-                    "auth_meta": auth_meta,
-                    "task_id": pre.task_id,
-                })),
-            )
-            .await?;
-        let url = oss_url(pre)?;
-        let res = self
-            .http
-            .put(url)
-            .query(&[
-                ("partNumber", part_number.to_string()),
-                ("uploadId", pre.upload_id.clone()),
-            ])
-            .header(header::AUTHORIZATION, auth.data.auth_key)
-            .header(header::CONTENT_TYPE, content_type)
-            .header(header::REFERER, "https://pan.quark.cn/")
-            .header("x-oss-date", date)
-            .header(
-                "x-oss-user-agent",
-                "aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit",
-            )
-            .body(body)
-            .send()
-            .await?;
-        if !res.status().is_success() {
-            bail!(
-                "oss upload part failed {}: {}",
-                res.status(),
-                res.text().await?
-            );
-        }
-        Ok(res
-            .headers()
-            .get(header::ETAG)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string())
-    }
-
-    async fn upload_commit(&self, pre: &UpPreData, etags: &[String]) -> Result<()> {
-        let mut xml =
-            String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<CompleteMultipartUpload>\n");
-        for (idx, etag) in etags.iter().enumerate() {
-            xml.push_str(&format!(
-                "<Part>\n<PartNumber>{}</PartNumber>\n<ETag>{}</ETag>\n</Part>\n",
-                idx + 1,
-                etag
-            ));
-        }
-        xml.push_str("</CompleteMultipartUpload>");
-
-        let content_md5 = general_purpose::STANDARD.encode(md5::compute(xml.as_bytes()).0);
-        let callback = general_purpose::STANDARD.encode(serde_json::to_vec(&pre.callback)?);
-        let date = httpdate::fmt_http_date(SystemTime::now());
-        let auth_meta = format!(
-            "POST\n{content_md5}\napplication/xml\n{date}\nx-oss-callback:{callback}\nx-oss-date:{date}\nx-oss-user-agent:aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit\n/{}/{}?uploadId={}",
-            pre.bucket, pre.obj_key, pre.upload_id
-        );
-        let auth: UpAuthResp = self
-            .request(
-                Method::POST,
-                "/file/upload/auth",
-                &[],
-                Some(json!({
-                    "auth_info": pre.auth_info,
-                    "auth_meta": auth_meta,
-                    "task_id": pre.task_id,
-                })),
-            )
-            .await?;
-        let res = self
-            .http
-            .post(oss_url(pre)?)
-            .query(&[("uploadId", pre.upload_id.clone())])
-            .header(header::AUTHORIZATION, auth.data.auth_key)
-            .header("Content-MD5", content_md5)
-            .header(header::CONTENT_TYPE, "application/xml")
-            .header(header::REFERER, "https://pan.quark.cn/")
-            .header("x-oss-callback", callback)
-            .header("x-oss-date", date)
-            .header(
-                "x-oss-user-agent",
-                "aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit",
-            )
-            .body(xml)
-            .send()
-            .await?;
-        if !res.status().is_success() {
-            bail!("oss commit failed {}: {}", res.status(), res.text().await?);
-        }
-        Ok(())
-    }
-
-    async fn upload_finish(&self, pre: &UpPreData) -> Result<()> {
-        self.request::<Value>(
-            Method::POST,
-            "/file/upload/finish",
-            &[],
-            Some(json!({
-                "obj_key": pre.obj_key,
-                "task_id": pre.task_id,
-            })),
-        )
-        .await?;
-        Ok(())
-    }
-}
-
 impl QuarkBackend {
     fn http(&self) -> &Client {
         match self {
-            QuarkBackend::Cookie(client) => &client.http,
             QuarkBackend::Open(client) => &client.http,
         }
     }
 
     async fn list_files(&self, parent_fid: &str) -> Result<Vec<QuarkFile>> {
         match self {
-            QuarkBackend::Cookie(client) => client.list_files(parent_fid).await,
             QuarkBackend::Open(client) => client.list_files(parent_fid).await,
         }
     }
 
     async fn resolve_dir(&self, path: &str, create: bool) -> Result<String> {
         match self {
-            QuarkBackend::Cookie(client) => client.resolve_dir(path, create).await,
             QuarkBackend::Open(client) => client.resolve_dir(path, create).await,
         }
     }
 
     async fn find_object(&self, key: &str) -> Result<Option<QuarkFile>> {
         match self {
-            QuarkBackend::Cookie(client) => client.find_object(key).await,
             QuarkBackend::Open(client) => client.find_object(key).await,
         }
     }
 
-    async fn download_url_and_cookie(&self, fid: &str) -> Result<(String, String)> {
+    async fn download_request_parts(&self, fid: &str) -> Result<(String, String)> {
         match self {
-            QuarkBackend::Cookie(client) => {
-                let url = client.download_url(fid).await?;
-                let cookie = client.cookie.lock().await.clone();
-                Ok((url, cookie))
-            }
             QuarkBackend::Open(client) => {
                 let url = client.download_url(fid).await?;
-                let cookie = client.auth_cookie().await;
-                Ok((url, cookie))
+                let auth_cookie = client.auth_cookie().await;
+                Ok((url, auth_cookie))
             }
         }
     }
 
     async fn delete_fid(&self, fid: &str) -> Result<()> {
         match self {
-            QuarkBackend::Cookie(client) => client.delete_fid(fid).await,
             QuarkBackend::Open(client) => client.delete_fid(fid).await,
         }
     }
 
     async fn put_object(&self, key: &str, content_type: &str, body: Bytes) -> Result<()> {
         match self {
-            QuarkBackend::Cookie(client) => client.put_object(key, content_type, body).await,
             QuarkBackend::Open(client) => client.put_object(key, content_type, body).await,
         }
     }
@@ -1728,19 +1202,6 @@ async fn object_handler(
     };
     drop(config);
     let (remote_key, backend) = match mount {
-        ResolvedMount::Quark {
-            remote_key,
-            cookie,
-            root_fid,
-        } => {
-            let quark = match quark_client(cookie, root_fid) {
-                Ok(quark) => quark,
-                Err(err) => {
-                    return s3_error(StatusCode::BAD_REQUEST, "InvalidConfig", &err.to_string());
-                }
-            };
-            (remote_key, QuarkBackend::Cookie(quark))
-        }
         ResolvedMount::QuarkOpen { remote_key, config } => {
             let quark = match quark_open_client(config) {
                 Ok(quark) => quark,
@@ -1874,19 +1335,6 @@ async fn list_objects(
 
     let config = state.config.read().await;
     let (remote_dir, backend) = match resolve_mount(&config, &virtual_prefix) {
-        Some(ResolvedMount::Quark {
-            remote_key,
-            cookie,
-            root_fid,
-        }) => {
-            let quark = match quark_client(cookie, root_fid) {
-                Ok(quark) => quark,
-                Err(err) => {
-                    return s3_error(StatusCode::BAD_REQUEST, "InvalidConfig", &err.to_string());
-                }
-            };
-            (remote_key, QuarkBackend::Cookie(quark))
-        }
         Some(ResolvedMount::QuarkOpen { remote_key, config }) => {
             let quark = match quark_open_client(config) {
                 Ok(quark) => quark,
@@ -2076,11 +1524,11 @@ async fn get_object_bytes(backend: &QuarkBackend, key: &str) -> Result<CachedObj
         .await?
         .filter(|f| f.file)
         .ok_or_else(|| anyhow!("object not found"))?;
-    let (url, cookie) = backend.download_url_and_cookie(&file.fid).await?;
+    let (url, auth_cookie) = backend.download_request_parts(&file.fid).await?;
     let res = backend
         .http()
         .get(url)
-        .header(header::COOKIE, cookie)
+        .header(header::COOKIE, auth_cookie)
         .header(header::REFERER, REFERER)
         .send()
         .await?;
@@ -3459,40 +2907,6 @@ fn split_key(key: &str) -> (&str, &str) {
     key.rsplit_once('/').unwrap_or(("", key))
 }
 
-fn parse_set_cookie_value(set_cookie: &str, name: &str) -> Option<String> {
-    set_cookie
-        .split(';')
-        .next()?
-        .strip_prefix(&format!("{name}="))
-        .map(str::to_string)
-}
-
-fn set_cookie_value(cookie: &str, name: &str, value: &str) -> String {
-    let mut found = false;
-    let mut parts = Vec::new();
-    for part in cookie.split(';').map(str::trim).filter(|p| !p.is_empty()) {
-        if part.starts_with(&format!("{name}=")) {
-            parts.push(format!("{name}={value}"));
-            found = true;
-        } else {
-            parts.push(part.to_string());
-        }
-    }
-    if !found {
-        parts.push(format!("{name}={value}"));
-    }
-    parts.join("; ")
-}
-
-fn oss_url(pre: &UpPreData) -> Result<String> {
-    let host = pre
-        .upload_url
-        .strip_prefix("https://")
-        .or_else(|| pre.upload_url.strip_prefix("http://"))
-        .ok_or_else(|| anyhow!("unexpected upload_url: {}", pre.upload_url))?;
-    Ok(format!("https://{}.{}/{}", pre.bucket, host, pre.obj_key))
-}
-
 fn chrono_millis() -> i64 {
     SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -3511,20 +2925,6 @@ fn iso_time(millis: i64) -> String {
 fn http_time(millis: i64) -> String {
     let secs = (millis.max(0) / 1000) as u64;
     httpdate::fmt_http_date(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs))
-}
-
-fn timing_log(stage: &str, key: &str, bytes: i64, start: SystemTime) {
-    if env::var_os("TIMING_LOG").is_none() {
-        return;
-    }
-    let elapsed = start.elapsed().unwrap_or_default();
-    eprintln!(
-        "timing stage={} ms={} bytes={} key={}",
-        stage,
-        elapsed.as_millis(),
-        bytes,
-        key
-    );
 }
 
 fn xml_escape(s: &str) -> String {
@@ -3619,9 +3019,9 @@ mod tests {
     fn mount(mount_path: &str, root_path: &str) -> MountConfig {
         MountConfig {
             mount_path: mount_path.to_string(),
-            mount_type: "quark_cookie".to_string(),
+            mount_type: "quark_open".to_string(),
             root_path: Some(root_path.to_string()),
-            options: Value::Null,
+            options: json!({"refresh_token": "test-refresh-token"}),
         }
     }
 
@@ -4013,8 +3413,7 @@ cache:
 
     #[test]
     fn invalid_config_is_rejected() {
-        let mut config = ServiceConfig::default();
-        config.mounts[0].root_path = Some("../bad".to_string());
+        let config = config_with_mounts(vec![mount("/quark", "../bad")]);
         assert!(validate_config(&config).is_err());
 
         let mut config = ServiceConfig::default();
@@ -4026,7 +3425,7 @@ cache:
         assert!(validate_config(&config).is_err());
 
         let mut config = ServiceConfig::default();
-        config.mounts[1].mount_path = "/".to_string();
+        config.mounts[0].mount_path = "/".to_string();
         assert!(validate_config(&config).is_err());
     }
 
@@ -4183,6 +3582,15 @@ cache:
     #[tokio::test]
     async fn browser_directory_under_mount_returns_shell_without_request_auth() {
         let state = test_state();
+        *state.config.write().await = config_with_mounts(vec![
+            mount("/quark", "/"),
+            MountConfig {
+                mount_path: "/api/config.yaml".to_string(),
+                mount_type: "system_config".to_string(),
+                root_path: None,
+                options: Value::Null,
+            },
+        ]);
         let app = build_app(state.app_state());
 
         let response = app
@@ -4251,7 +3659,7 @@ cache:
                     .body(Body::from(
                         r#"mounts:
   - mount_path: bad
-    type: quark_cookie
+    type: quark_open
     root_path: /
 "#,
                     ))
@@ -4269,10 +3677,9 @@ cache:
         let good_config = r#"
 mounts:
   - mount_path: /quark
-    type: quark_cookie
+    type: quark_open
     root_path: /
     options:
-      cookie: placeholder-cookie
   - mount_path: /api/config.yaml
     type: system_config
 auth:
@@ -4330,7 +3737,7 @@ cache:
 # This comment should be ignored on PUT.
 mounts:
   - mount_path: /quark
-    type: quark_cookie
+    type: quark_open
     root_path: /
   - mount_path: /api/config.yaml
     type: system_config
@@ -4395,7 +3802,7 @@ cache:
         let bootstrap_config = r#"
 mounts:
   - mount_path: /
-    type: quark_cookie
+    type: quark_open
     root_path: /
   - mount_path: /api/config.yaml
     type: system_config
@@ -4463,7 +3870,7 @@ cache:
         let moved_config = r#"
 mounts:
   - mount_path: /quark
-    type: quark_cookie
+    type: quark_open
     root_path: /
   - mount_path: /system/live.yaml
     type: system_config
@@ -4543,7 +3950,7 @@ cache:
             mounts: vec![
                 MountConfig {
                     mount_path: "/".to_string(),
-                    mount_type: "quark_cookie".to_string(),
+                    mount_type: "quark_open".to_string(),
                     root_path: Some("/".to_string()),
                     options: Value::Null,
                 },

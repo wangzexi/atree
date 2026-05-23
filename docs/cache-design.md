@@ -180,7 +180,7 @@ Completed:
 - tmp-backed local directory for multipart upload parts.
 - S3 multipart upload compatibility by assembling local parts before uploading one final object to Quark.
 - Tree-level ListBucket XML response cache with TTL and size cleanup.
-- Quark GET/HEAD object read cache.
+- Tree-level object GET/HEAD read cache for backends that return cacheable objects.
 - GitHub release metadata cache, so repeated directory listings and file metadata checks do not hit the GitHub API every time.
 - Conservative cache invalidation for normal PUT/DELETE, multipart complete, and config PUT.
 
