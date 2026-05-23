@@ -612,7 +612,7 @@ Differences here:
 - server is Rust, not Koa/tRPC
 - files come through mounts, initially backed by Quark
 - S3 routes are also browser routes
-- Quark listing/file reads and GitHub release metadata use the local TTL cache; browser listing still follows the same S3 auth rules
+- ListBucket responses use the local tree cache; Quark file reads and GitHub release metadata use the same TTL window. Browser listing still follows the same S3 auth rules.
 
 ## Security Notes
 

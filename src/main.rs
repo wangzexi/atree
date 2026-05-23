@@ -1860,6 +1860,18 @@ async fn list_objects(
         return access_denied_response(&state, headers, &bucket).await;
     }
 
+    let list_cache_key = tree_list_cache_key(
+        &bucket,
+        &virtual_prefix,
+        &prefix,
+        delimiter.as_deref(),
+        max_keys,
+        offset,
+    );
+    if let Some(cached) = read_cached_object(&state, &list_cache_key).await {
+        return cached_list_response(cached);
+    }
+
     let config = state.config.read().await;
     let (remote_dir, backend) = match resolve_mount(&config, &virtual_prefix) {
         Some(ResolvedMount::Quark {
@@ -1886,9 +1898,19 @@ async fn list_objects(
         }
         Some(ResolvedMount::GithubReleases { rest, config }) => {
             if rest.trim_matches('/').is_empty() {
-                return list_github_releases(&state, &config, headers, &bucket, &prefix).await;
+                return list_github_releases(
+                    &state,
+                    Some(&list_cache_key),
+                    &config,
+                    headers,
+                    &bucket,
+                    &prefix,
+                )
+                .await;
             }
-            return list_xml(
+            return list_xml_cached(
+                &state,
+                &list_cache_key,
                 &bucket,
                 &prefix,
                 delimiter.as_deref(),
@@ -1896,10 +1918,13 @@ async fn list_objects(
                 None,
                 Vec::new(),
                 Vec::new(),
-            );
+            )
+            .await;
         }
         None => {
-            return list_xml(
+            return list_xml_cached(
+                &state,
+                &list_cache_key,
                 &bucket,
                 &prefix,
                 delimiter.as_deref(),
@@ -1907,10 +1932,13 @@ async fn list_objects(
                 None,
                 Vec::new(),
                 Vec::new(),
-            );
+            )
+            .await;
         }
         _ => {
-            return list_xml(
+            return list_xml_cached(
+                &state,
+                &list_cache_key,
                 &bucket,
                 &prefix,
                 delimiter.as_deref(),
@@ -1918,27 +1946,18 @@ async fn list_objects(
                 None,
                 Vec::new(),
                 Vec::new(),
-            );
+            )
+            .await;
         }
     };
     drop(config);
-    let list_cache_key = quark_list_cache_key(
-        &bucket,
-        &prefix,
-        delimiter.as_deref(),
-        max_keys,
-        offset,
-        &remote_dir,
-        &dir_path,
-    );
-    if let Some(cached) = read_cached_object(&state, &list_cache_key).await {
-        return cached_list_response(cached);
-    }
 
     let parent = match backend.resolve_dir(&remote_dir, false).await {
         Ok(fid) => fid,
         Err(_) => {
-            return list_xml(
+            return list_xml_cached(
+                &state,
+                &list_cache_key,
                 &bucket,
                 &prefix,
                 delimiter.as_deref(),
@@ -1946,7 +1965,8 @@ async fn list_objects(
                 None,
                 Vec::new(),
                 Vec::new(),
-            );
+            )
+            .await;
         }
     };
     let recursive = delimiter.as_deref() != Some("/");
@@ -2241,17 +2261,16 @@ where
     write_cached_object(state, cache_key, &cached).await;
 }
 
-fn quark_list_cache_key(
+fn tree_list_cache_key(
     bucket: &str,
+    resource: &str,
     prefix: &str,
     delimiter: Option<&str>,
     max_keys: usize,
     offset: usize,
-    remote_dir: &str,
-    dir_path: &str,
 ) -> String {
     format!(
-        "/.atree/cache/list/bucket={bucket}/prefix={prefix}/delimiter={}/max={max_keys}/offset={offset}/remote={remote_dir}/dir={dir_path}",
+        "/.atree/cache/tree/ListBucket/bucket={bucket}/resource={resource}/prefix={prefix}/delimiter={}/max={max_keys}/offset={offset}",
         delimiter.unwrap_or("")
     )
 }
@@ -2276,6 +2295,38 @@ async fn cache_list_xml(state: &AppState, cache_key: &str, xml: &str) {
         bytes: Bytes::copy_from_slice(xml.as_bytes()),
     };
     write_cached_object(state, cache_key, &cached).await;
+}
+
+async fn list_xml_cached(
+    state: &AppState,
+    cache_key: &str,
+    bucket: &str,
+    prefix: &str,
+    delimiter: Option<&str>,
+    max_keys: usize,
+    next_token: Option<&str>,
+    objects: Vec<(String, QuarkFile)>,
+    common_prefixes: Vec<String>,
+) -> Response {
+    let entries = objects
+        .into_iter()
+        .map(|(key, f)| S3Entry {
+            key,
+            size: f.size,
+            modified: f.updated_at.max(f.created_at),
+        })
+        .collect();
+    let xml = list_xml_string(
+        bucket,
+        prefix,
+        delimiter,
+        entries,
+        common_prefixes,
+        max_keys,
+        next_token,
+    );
+    cache_list_xml(state, cache_key, &xml).await;
+    xml_response(StatusCode::OK, xml)
 }
 
 fn cache_paths(cache_dir: &PathBuf, virtual_path: &str) -> (PathBuf, PathBuf) {
@@ -2416,7 +2467,7 @@ async fn github_releases_object(
     }
     let rest = rest.trim_matches('/');
     if rest.is_empty() {
-        return list_github_releases(state, &config, headers, "github_releases", "").await;
+        return list_github_releases(state, None, &config, headers, "github_releases", "").await;
     }
     let release = match fetch_github_release_cached(state, &config).await {
         Ok(release) => release,
@@ -2497,6 +2548,7 @@ fn github_release_head_response(
 
 async fn list_github_releases(
     state: &AppState,
+    list_cache_key: Option<&str>,
     config: &GithubReleasesConfig,
     headers: &HeaderMap,
     bucket: &str,
@@ -2520,7 +2572,11 @@ async fn list_github_releases(
             entry
         })
         .collect();
-    list_xml_entries(bucket, prefix, Some("/"), entries, Vec::new(), 1000, None)
+    let xml = list_xml_string(bucket, prefix, Some("/"), entries, Vec::new(), 1000, None);
+    if let Some(cache_key) = list_cache_key {
+        cache_list_xml(state, cache_key, &xml).await;
+    }
+    xml_response(StatusCode::OK, xml)
 }
 
 async fn fetch_github_release_cached(
@@ -3097,34 +3153,6 @@ fn aws_access_key(headers: &HeaderMap) -> Option<String> {
         .map(str::trim)
         .find_map(|part| part.strip_prefix("Credential="))?;
     credential.split('/').next().map(str::to_string)
-}
-
-fn list_xml(
-    bucket: &str,
-    prefix: &str,
-    delimiter: Option<&str>,
-    max_keys: usize,
-    next_token: Option<&str>,
-    objects: Vec<(String, QuarkFile)>,
-    common_prefixes: Vec<String>,
-) -> Response {
-    let entries = objects
-        .into_iter()
-        .map(|(key, f)| S3Entry {
-            key,
-            size: f.size,
-            modified: f.updated_at.max(f.created_at),
-        })
-        .collect();
-    list_xml_entries(
-        bucket,
-        prefix,
-        delimiter,
-        entries,
-        common_prefixes,
-        max_keys,
-        next_token,
-    )
 }
 
 fn list_xml_entries(
