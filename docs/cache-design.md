@@ -179,9 +179,9 @@ Completed:
 - SQLite-backed runtime config.
 - tmp-backed local directory for multipart upload parts.
 - S3 multipart upload compatibility by assembling local parts before uploading one final object to Quark.
-- Quark GET/HEAD object read cache with TTL and size cleanup.
+- Quark ListBucket XML and GET/HEAD object read cache with TTL and size cleanup.
 - GitHub release metadata cache, so repeated directory listings and file metadata checks do not hit the GitHub API every time.
-- Cache invalidation for normal PUT/DELETE, multipart complete, and config PUT.
+- Conservative cache invalidation for normal PUT/DELETE, multipart complete, and config PUT.
 
 Planned cache work:
 

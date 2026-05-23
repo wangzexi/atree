@@ -252,7 +252,7 @@ await client.fPutObject("quark", "examples/file.txt", "/tmp/file.txt");
 
 ## 本地缓存方向
 
-关于 Rust vs Bun、SQLite、write-through 写入、read-through 读取缓存的设计决策见 `docs/cache-design.md`。当前已实现 Quark GET/HEAD 对象读缓存和 GitHub release 元数据缓存；普通 PUT/DELETE、multipart complete、配置 PUT 会清理相关缓存，避免读到旧数据。
+关于 Rust vs Bun、SQLite、write-through 写入、read-through 读取缓存的设计决策见 `docs/cache-design.md`。当前已实现 Quark ListBucket/GET/HEAD 读缓存和 GitHub release 元数据缓存；普通 PUT/DELETE、multipart complete、配置 PUT 会清理相关缓存，避免读到旧数据。
 
 ## 鉴权和文件界面
 

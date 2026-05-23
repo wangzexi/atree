@@ -279,7 +279,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 #   /public/* matches descendants at any depth, but not /public itself.
 # requests that match no rule are denied unless the caller is `root`.
 #
-# cache.enabled: enable local read cache for Quark GET/HEAD objects and GitHub release metadata.
+# cache.enabled: enable local read cache for Quark ListBucket/GET/HEAD and GitHub release metadata.
 # cache.ttl_seconds: cached freshness window. Default: 600.
 # cache.max_bytes: max local cache size in bytes; it is not backend capacity.
 #

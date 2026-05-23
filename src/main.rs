@@ -373,7 +373,7 @@ struct GithubAsset {
     browser_download_url: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct S3Entry {
     key: String,
     size: i64,
@@ -1802,6 +1802,7 @@ async fn object_handler(
                     let virtual_path = virtual_path.to_string();
                     tokio::spawn(async move {
                         invalidate_cached_object(&state, &virtual_path).await;
+                        clear_cache_dir(&state).await;
                     });
                     (StatusCode::OK, [(header::ETAG, etag)]).into_response()
                 })
@@ -1921,6 +1922,19 @@ async fn list_objects(
         }
     };
     drop(config);
+    let list_cache_key = quark_list_cache_key(
+        &bucket,
+        &prefix,
+        delimiter.as_deref(),
+        max_keys,
+        offset,
+        &remote_dir,
+        &dir_path,
+    );
+    if let Some(cached) = read_cached_object(&state, &list_cache_key).await {
+        return cached_list_response(cached);
+    }
+
     let parent = match backend.resolve_dir(&remote_dir, false).await {
         Ok(fid) => fid,
         Err(_) => {
@@ -1968,15 +1982,25 @@ async fn list_objects(
         .skip(offset.saturating_sub(objects_len))
         .take(remaining)
         .collect::<Vec<_>>();
-    list_xml(
+    let entries = objects
+        .into_iter()
+        .map(|(key, f)| S3Entry {
+            key,
+            size: f.size,
+            modified: f.updated_at.max(f.created_at),
+        })
+        .collect();
+    let xml = list_xml_string(
         &bucket,
         &prefix,
         delimiter.as_deref(),
+        entries,
+        common_prefixes,
         max_keys,
         next_token.as_deref(),
-        objects,
-        common_prefixes,
-    )
+    );
+    cache_list_xml(&state, &list_cache_key, &xml).await;
+    xml_response(StatusCode::OK, xml)
 }
 
 async fn list_files_for_s3(
@@ -2213,6 +2237,43 @@ where
             content_type: Some("application/json".to_string()),
         },
         bytes: Bytes::from(bytes),
+    };
+    write_cached_object(state, cache_key, &cached).await;
+}
+
+fn quark_list_cache_key(
+    bucket: &str,
+    prefix: &str,
+    delimiter: Option<&str>,
+    max_keys: usize,
+    offset: usize,
+    remote_dir: &str,
+    dir_path: &str,
+) -> String {
+    format!(
+        "/.atree/cache/list/bucket={bucket}/prefix={prefix}/delimiter={}/max={max_keys}/offset={offset}/remote={remote_dir}/dir={dir_path}",
+        delimiter.unwrap_or("")
+    )
+}
+
+fn cached_list_response(cached: CachedObject) -> Response {
+    let mut response = Response::new(Body::from(cached.bytes));
+    response.headers_mut().insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/xml; charset=utf-8"),
+    );
+    response
+}
+
+async fn cache_list_xml(state: &AppState, cache_key: &str, xml: &str) {
+    let cached = CachedObject {
+        meta: CacheMeta {
+            size: xml.len() as u64,
+            modified: chrono_millis(),
+            fetched_at: chrono_millis(),
+            content_type: Some("application/xml; charset=utf-8".to_string()),
+        },
+        bytes: Bytes::copy_from_slice(xml.as_bytes()),
     };
     write_cached_object(state, cache_key, &cached).await;
 }
@@ -2653,6 +2714,7 @@ async fn delete_object_cached(
 ) -> Result<Response> {
     let response = delete_object(backend, key).await?;
     invalidate_cached_object(state, virtual_path).await;
+    clear_cache_dir(state).await;
     Ok(response)
 }
 
@@ -2794,6 +2856,7 @@ async fn complete_multipart_upload(
         Ok(()) => {
             let bucket = state_bucket(state).await;
             invalidate_cached_object(state, &format!("/{}", key.trim_matches('/'))).await;
+            clear_cache_dir(state).await;
             let _ = std::fs::remove_dir_all(&dir);
             xml_response(
                 StatusCode::OK,
@@ -3073,6 +3136,29 @@ fn list_xml_entries(
     max_keys: usize,
     next_token: Option<&str>,
 ) -> Response {
+    xml_response(
+        StatusCode::OK,
+        list_xml_string(
+            bucket,
+            prefix,
+            delimiter,
+            objects,
+            common_prefixes,
+            max_keys,
+            next_token,
+        ),
+    )
+}
+
+fn list_xml_string(
+    bucket: &str,
+    prefix: &str,
+    delimiter: Option<&str>,
+    objects: Vec<S3Entry>,
+    common_prefixes: Vec<String>,
+    max_keys: usize,
+    next_token: Option<&str>,
+) -> String {
     let mut xml = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
 <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -3119,7 +3205,7 @@ fn list_xml_entries(
         ));
     }
     xml.push_str("</ListBucketResult>");
-    xml_response(StatusCode::OK, xml)
+    xml
 }
 
 fn xml_response(status: StatusCode, xml: String) -> Response {
