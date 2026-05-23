@@ -1475,7 +1475,7 @@ fn has_virtual_directory(config: &ServiceConfig, virtual_path: &str) -> bool {
         .iter()
         .filter(|mount| mount.enabled)
         .map(|mount| normalize_browser_virtual_path(&mount.mount_path))
-        .any(|mount_path| mount_path.starts_with(&prefix))
+        .any(|mount_path| mount_path == current || mount_path.starts_with(&prefix))
 }
 
 async fn browser_virtual_entries_json(state: &AppState, virtual_path: &str) -> Option<String> {
@@ -3897,6 +3897,26 @@ cache:
             .unwrap();
         assert_eq!(root.status(), StatusCode::OK);
         let body = response_text(root).await;
+        assert!(body.contains("\"name\":\"config.yaml\""));
+    }
+
+    #[tokio::test]
+    async fn synthetic_directory_parent_without_trailing_slash_is_still_visible() {
+        let app = build_app(test_state());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/api?atree-browser-list=1")
+                    .header(header::ACCEPT, "application/json")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response_text(response).await;
         assert!(body.contains("\"name\":\"config.yaml\""));
     }
 
