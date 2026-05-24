@@ -921,32 +921,7 @@ fn build_app(state: AppState) -> Router {
         .with_state(state)
 }
 
-async fn browser_virtual_entries_response(
-    state: &AppState,
-    headers: &HeaderMap,
-    virtual_path: &str,
-) -> Response {
-    {
-        let config = state.config.read().await;
-        if !has_virtual_directory(&config, virtual_path) {
-            return s3_error(StatusCode::NOT_FOUND, "NoSuchBucket", "bucket not found");
-        }
-    }
-    if !is_authorized(state, headers, "ListBucket", virtual_path).await {
-        return json_error(StatusCode::FORBIDDEN, "access denied");
-    }
-    let entries = browser_virtual_entries_json(state, virtual_path)
-        .await
-        .unwrap_or_else(|| "[]".to_string());
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json; charset=utf-8")],
-        entries,
-    )
-        .into_response()
-}
-
-fn normalize_browser_virtual_path(path: &str) -> String {
+fn normalize_tree_path(path: &str) -> String {
     let trimmed = path.trim();
     if trimmed.is_empty() || trimmed == "/" {
         return "/".to_string();
@@ -955,7 +930,7 @@ fn normalize_browser_virtual_path(path: &str) -> String {
 }
 
 fn has_virtual_directory(config: &ServiceConfig, virtual_path: &str) -> bool {
-    let current = normalize_browser_virtual_path(virtual_path);
+    let current = normalize_tree_path(virtual_path);
     if current == "/" {
         return true;
     }
@@ -963,67 +938,8 @@ fn has_virtual_directory(config: &ServiceConfig, virtual_path: &str) -> bool {
     config
         .mounts
         .iter()
-        .map(|mount| normalize_browser_virtual_path(&mount.mount_path))
+        .map(|mount| normalize_tree_path(&mount.mount_path))
         .any(|mount_path| mount_path == current || mount_path.starts_with(&prefix))
-}
-
-async fn browser_virtual_entries_json(state: &AppState, virtual_path: &str) -> Option<String> {
-    let current = normalize_browser_virtual_path(virtual_path);
-    let config = state.config.read().await;
-    let mut entries = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-
-    for mount in &config.mounts {
-        if mount.mount_path == "/" {
-            continue;
-        }
-        let normalized = normalize_browser_virtual_path(&mount.mount_path);
-        if current == "/" {
-            let Some(first) = normalized.trim_start_matches('/').split('/').next() else {
-                continue;
-            };
-            if first.is_empty() || !seen.insert(first.to_string()) {
-                continue;
-            }
-            let is_file = mount.mount_type == "system_config"
-                && normalized.trim_start_matches('/').split('/').count() == 1;
-            entries.push(json!({
-                "type": if is_file { "file" } else { "dir" },
-                "name": first,
-                "href": if is_file { format!("/{first}") } else { format!("/{first}/") },
-            }));
-            continue;
-        }
-
-        let prefix = format!("{}/", current.trim_end_matches('/'));
-        if !normalized.starts_with(&prefix) {
-            continue;
-        }
-        let rest = &normalized[prefix.len()..];
-        if rest.is_empty() {
-            continue;
-        }
-        let mut parts = rest.split('/');
-        let Some(first) = parts.next() else {
-            continue;
-        };
-        if first.is_empty() || !seen.insert(first.to_string()) {
-            continue;
-        }
-        let is_file = parts.next().is_none();
-        let href = if is_file {
-            format!("{}/{}", current.trim_end_matches('/'), first)
-        } else {
-            format!("{}/{}/", current.trim_end_matches('/'), first)
-        };
-        entries.push(json!({
-            "type": if is_file { "file" } else { "dir" },
-            "name": first,
-            "href": href,
-        }));
-    }
-    (!entries.is_empty())
-        .then(|| serde_json::to_string(&entries).unwrap_or_else(|_| "[]".to_string()))
 }
 
 async fn root_handler(
@@ -1046,14 +962,8 @@ async fn root_handler(
             "unsupported method",
         );
     }
-    if method == Method::GET && params.contains_key("atree-browser-list") {
-        return browser_virtual_entries_response(&state, &headers, "/").await;
-    }
     if method == Method::GET && wants_html(&headers) {
-        return html_response(
-            StatusCode::OK,
-            file_browser_html(&config_path, "null", "null"),
-        );
+        return html_response(StatusCode::OK, file_browser_html(&config_path));
     }
     if params.contains_key("location") {
         return xml_response(
@@ -1170,10 +1080,6 @@ async fn object_handler(
         format!("/{}", path.trim_matches('/'))
     };
     let raw_query = raw_query.unwrap_or_default();
-    let query = parse_query(&raw_query);
-    if query.contains_key("atree-browser-list") {
-        return browser_virtual_entries_response(&state, &headers, &virtual_path).await;
-    }
     if method == Method::GET && wants_html(&headers) {
         let config = state.config.read().await;
         let is_virtual_dir = has_virtual_directory(&config, &virtual_path);
@@ -1588,7 +1494,7 @@ fn synthetic_mount_listing(
     if delimiter != Some("/") {
         return (Vec::new(), Vec::new());
     }
-    let current = normalize_browser_virtual_path(prefix.trim_end_matches('/'));
+    let current = normalize_tree_path(prefix.trim_end_matches('/'));
     let mut entries = Vec::new();
     let mut common_prefixes = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -1596,7 +1502,7 @@ fn synthetic_mount_listing(
         if mount.mount_path == "/" {
             continue;
         }
-        let normalized = normalize_browser_virtual_path(&mount.mount_path);
+        let normalized = normalize_tree_path(&mount.mount_path);
         let rest = if current == "/" {
             normalized.trim_start_matches('/')
         } else {
@@ -3289,34 +3195,29 @@ async fn browser_directory(
     synthetic: bool,
 ) -> Response {
     let config_path = state_config_path(state).await;
-    let html = |error_json: &str| {
-        html_response(
-            StatusCode::OK,
-            file_browser_html(&config_path, "null", error_json),
-        )
-    };
+    let html = || html_response(StatusCode::OK, file_browser_html(&config_path));
     if synthetic || virtual_path == "/" {
-        return html("null");
+        return html();
     }
     if !is_authorized(state, headers, "ListBucket", virtual_path).await {
-        return html("null");
+        return html();
     }
     let Some(index_key) = find_directory_index(state, virtual_path).await else {
-        return html("null");
+        return html();
     };
     let index_path = format!("/{index_key}");
     if !is_authorized(state, headers, "GetObject", &index_path).await {
-        return html("null");
+        return html();
     }
     let config = state.config.read().await;
     let Some((remote_key, backend)) =
         resolve_mount(&config, &index_path).and_then(backend_from_mount)
     else {
-        return html("null");
+        return html();
     };
     match get_object_cached(state, &backend, &index_path, &remote_key, headers).await {
         Ok(resp) => resp,
-        Err(_) => html("null"),
+        Err(_) => html(),
     }
 }
 
@@ -3591,10 +3492,7 @@ fn yaml_response(status: StatusCode, yaml: String) -> Response {
 
 fn access_denied(headers: &HeaderMap, _bucket: &str, config_path: &str) -> Response {
     if wants_html(headers) {
-        html_response(
-            StatusCode::UNAUTHORIZED,
-            file_browser_html(config_path, "null", r#""需要访问 key。""#),
-        )
+        html_response(StatusCode::UNAUTHORIZED, file_browser_html(config_path))
     } else {
         s3_error(StatusCode::FORBIDDEN, "AccessDenied", "access denied")
     }
@@ -4355,7 +4253,6 @@ cache:
         let html = response_text(html_resp).await;
         assert!(html.contains("atree"));
         assert!(html.contains("atree_key"));
-        assert!(html.contains("var DIRECTORY_ENTRIES = null;"));
 
         let xml_resp = app
             .oneshot(
@@ -4370,41 +4267,6 @@ cache:
         assert_eq!(xml_resp.status(), StatusCode::FORBIDDEN);
         let xml = response_text(xml_resp).await;
         assert!(xml.contains("<Code>AccessDenied"));
-    }
-
-    #[tokio::test]
-    async fn root_browser_list_requires_auth_and_root_can_read_it() {
-        let state = test_state();
-        let app = build_app(state.app_state());
-
-        let no_auth = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/?atree-browser-list=1")
-                    .header(header::ACCEPT, "application/json")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(no_auth.status(), StatusCode::FORBIDDEN);
-
-        let root = app
-            .oneshot(
-                Request::builder()
-                    .uri("/?atree-browser-list=1")
-                    .header(header::ACCEPT, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer root-test-key")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(root.status(), StatusCode::OK);
-        let body = response_text(root).await;
-        assert!(body.contains("\"name\":\"api\""));
-        assert!(body.contains("\"href\":\"/api/\""));
     }
 
     #[tokio::test]
@@ -4425,55 +4287,20 @@ cache:
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
-        assert!(body.contains("var DIRECTORY_ENTRIES = null;"));
-        assert!(!body.contains("var DIRECTORY_ERROR = \"需要访问 key。\";"));
+        assert!(body.contains("u.searchParams.set('list-type', '2');"));
     }
 
     #[tokio::test]
-    async fn synthetic_directory_browser_list_requires_auth_and_root_can_read_it() {
-        let state = test_state();
-        let app = build_app(state.app_state());
-
-        let no_auth = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .uri("/api/?atree-browser-list=1")
-                    .header(header::ACCEPT, "application/json")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(no_auth.status(), StatusCode::FORBIDDEN);
-
-        let root = app
-            .oneshot(
-                Request::builder()
-                    .uri("/api/?atree-browser-list=1")
-                    .header(header::ACCEPT, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer root-test-key")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(root.status(), StatusCode::OK);
-        let body = response_text(root).await;
-        assert!(body.contains("\"name\":\"config.yaml\""));
-    }
-
-    #[tokio::test]
-    async fn synthetic_directory_parent_without_trailing_slash_is_still_visible() {
+    async fn synthetic_directory_parent_without_trailing_slash_returns_browser_shell() {
         let state = test_state();
         let app = build_app(state.app_state());
 
         let response = app
             .oneshot(
                 Request::builder()
-                    .uri("/api?atree-browser-list=1")
-                    .header(header::ACCEPT, "application/json")
-                    .header(header::AUTHORIZATION, "Bearer root-test-key")
+                    .uri("/api")
+                    .header(header::ACCEPT, "text/html")
+                    .header(header::USER_AGENT, "Mozilla/5.0")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -4481,7 +4308,7 @@ cache:
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
-        assert!(body.contains("\"name\":\"config.yaml\""));
+        assert!(body.contains("u.searchParams.set('list-type', '2');"));
     }
 
     #[tokio::test]
@@ -4511,7 +4338,6 @@ cache:
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
-        assert!(body.contains("var DIRECTORY_ENTRIES = null;"));
         assert!(body.contains("u.searchParams.set('list-type', '2');"));
     }
 
@@ -4533,7 +4359,6 @@ cache:
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         let body = response_text(response).await;
-        assert!(body.contains("var DIRECTORY_ENTRIES = null;"));
         assert!(body.contains("u.searchParams.set('list-type', '2');"));
     }
 

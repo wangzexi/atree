@@ -30,11 +30,7 @@ pub(crate) fn wants_html(headers: &HeaderMap) -> bool {
     .any(|tool| ua.contains(tool))
 }
 
-pub(crate) fn file_browser_html(
-    config_path: &str,
-    directory_entries_json: &str,
-    directory_error_json: &str,
-) -> String {
+pub(crate) fn file_browser_html(config_path: &str) -> String {
     let config_path_json =
         serde_json::to_string(config_path).unwrap_or_else(|_| "\"/api/config.yaml\"".to_string());
     format!(
@@ -103,8 +99,6 @@ pub(crate) fn file_browser_html(
   </main>
   <script>
     var CONFIG_PATH = {config_path_json};
-    var DIRECTORY_ENTRIES = {directory_entries_json};
-    var DIRECTORY_ERROR = {directory_error_json};
     var keyName = 'atree_key';
     var keyInput = document.getElementById('keyInput');
     var rows = document.getElementById('rows');
@@ -348,14 +342,6 @@ pub(crate) fn file_browser_html(
       setAuthState();
       renderCrumbs();
       renderStatus('加载中...', false);
-      if (DIRECTORY_ERROR) {{
-        renderStatus(DIRECTORY_ERROR, true);
-        return Promise.resolve();
-      }}
-      if (Array.isArray(DIRECTORY_ENTRIES)) {{
-        renderItems(DIRECTORY_ENTRIES);
-        return Promise.resolve();
-      }}
       return fetch(listUrl(), {{ headers: headers() }})
         .then(function(res) {{
           if (res.status === 403 || res.status === 401) {{
