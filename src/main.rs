@@ -1220,7 +1220,7 @@ async fn object_handler(
             return system_file_handler(&state, method, &headers, body, &virtual_path).await;
         }
         ResolvedMount::UrlTree { url, proxy } => {
-            return url_object(method, &headers, url, proxy).await;
+            return url_object(method, &headers, &virtual_path, url, proxy).await;
         }
         ResolvedMount::GithubReleases { rest, config } => {
             return github_releases_object(&state, method, &headers, &virtual_path, rest, config)
@@ -1741,8 +1741,8 @@ async fn s3_object(
     config: S3Config,
 ) -> Response {
     let result = match method {
-        Method::GET => s3_get_object(&config, &remote_key, headers).await,
-        Method::HEAD => s3_head_object(&config, &remote_key).await,
+        Method::GET => s3_get_object(&config, &remote_key, virtual_path, headers).await,
+        Method::HEAD => s3_head_object(&config, &remote_key, virtual_path).await,
         Method::PUT => {
             let body = match decode_request_body(headers, body) {
                 Ok(body) => body,
@@ -1782,12 +1782,17 @@ async fn s3_object(
     }
 }
 
-async fn s3_head_object(config: &S3Config, key: &str) -> Result<Response> {
+async fn s3_head_object(config: &S3Config, key: &str, virtual_path: &str) -> Result<Response> {
     let response = s3_send(config, Method::HEAD, key, Vec::new(), Bytes::new(), None).await?;
-    s3_passthrough_response(response, true).await
+    s3_passthrough_response(response, virtual_path, true).await
 }
 
-async fn s3_get_object(config: &S3Config, key: &str, headers: &HeaderMap) -> Result<Response> {
+async fn s3_get_object(
+    config: &S3Config,
+    key: &str,
+    virtual_path: &str,
+    headers: &HeaderMap,
+) -> Result<Response> {
     let mut extra_headers = Vec::new();
     if let Some(range) = headers
         .get(header::RANGE)
@@ -1796,7 +1801,7 @@ async fn s3_get_object(config: &S3Config, key: &str, headers: &HeaderMap) -> Res
         extra_headers.push((header::RANGE.as_str().to_string(), range.to_string()));
     }
     let response = s3_send(config, Method::GET, key, extra_headers, Bytes::new(), None).await?;
-    s3_passthrough_response(response, false).await
+    s3_passthrough_response(response, virtual_path, false).await
 }
 
 async fn s3_put_object(
@@ -1825,7 +1830,11 @@ async fn s3_delete_object(config: &S3Config, key: &str) -> Result<Response> {
     Ok(StatusCode::NO_CONTENT.into_response())
 }
 
-async fn s3_passthrough_response(response: reqwest::Response, head_only: bool) -> Result<Response> {
+async fn s3_passthrough_response(
+    response: reqwest::Response,
+    virtual_path: &str,
+    head_only: bool,
+) -> Result<Response> {
     let status = response.status();
     if !status.is_success() && status != StatusCode::PARTIAL_CONTENT {
         return s3_upstream_error(response).await;
@@ -1853,6 +1862,7 @@ async fn s3_passthrough_response(response: reqwest::Response, head_only: bool) -
             resp.headers_mut().insert(name, value.clone());
         }
     }
+    apply_browser_content_headers(&mut resp, virtual_path);
     Ok(resp)
 }
 
@@ -2199,6 +2209,10 @@ async fn head_object(backend: &QuarkBackend, key: &str) -> Result<Response> {
     );
     resp.headers_mut()
         .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+    if let Ok(value) = HeaderValue::from_str(&content_type_for_path(key)) {
+        resp.headers_mut().insert(header::CONTENT_TYPE, value);
+    }
+    apply_browser_content_headers(&mut resp, key);
     Ok(resp)
 }
 
@@ -2245,11 +2259,11 @@ async fn get_object_cached(
     headers: &HeaderMap,
 ) -> Result<Response> {
     if let Some(cached) = read_cached_object(state, virtual_path).await {
-        return cached_object_response(cached, headers, false);
+        return cached_object_response(cached, virtual_path, headers, false);
     }
     let cached = get_object_bytes(backend, key).await?;
     write_cached_object(state, virtual_path, &cached).await;
-    cached_object_response(cached, headers, false)
+    cached_object_response(cached, virtual_path, headers, false)
 }
 
 async fn head_object_cached(
@@ -2259,13 +2273,14 @@ async fn head_object_cached(
     key: &str,
 ) -> Result<Response> {
     if let Some(cached) = read_cached_object(state, virtual_path).await {
-        return cached_object_response(cached, &HeaderMap::new(), true);
+        return cached_object_response(cached, virtual_path, &HeaderMap::new(), true);
     }
     head_object(backend, key).await
 }
 
 fn cached_object_response(
     cached: CachedObject,
+    virtual_path: &str,
     headers: &HeaderMap,
     head_only: bool,
 ) -> Result<Response> {
@@ -2310,11 +2325,15 @@ fn cached_object_response(
     );
     resp.headers_mut()
         .insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
-    if let Some(content_type) = cached.meta.content_type
-        && let Ok(value) = HeaderValue::from_str(&content_type)
-    {
+    let content_type = cached
+        .meta
+        .content_type
+        .clone()
+        .unwrap_or_else(|| content_type_for_path(virtual_path));
+    if let Ok(value) = HeaderValue::from_str(&content_type) {
         resp.headers_mut().insert(header::CONTENT_TYPE, value);
     }
+    apply_browser_content_headers(&mut resp, virtual_path);
     Ok(resp)
 }
 
@@ -2515,6 +2534,7 @@ async fn cleanup_cache_dir(state: &AppState, cache: &config::CacheConfig) {
 async fn url_object(
     method: Method,
     headers: &HeaderMap,
+    virtual_path: &str,
     url: String,
     proxy: Option<String>,
 ) -> Response {
@@ -2560,11 +2580,13 @@ async fn url_object(
         header::ETAG,
         header::CACHE_CONTROL,
         header::ACCEPT_RANGES,
+        header::CONTENT_DISPOSITION,
     ] {
         if let Some(value) = upstream_headers.get(&name) {
             resp.headers_mut().insert(name, value.clone());
         }
     }
+    apply_browser_content_headers(&mut resp, virtual_path);
     resp
 }
 
@@ -2574,6 +2596,8 @@ fn http_client_with_proxy(proxy: Option<&str>) -> Result<Client> {
         .timeout(Duration::from_secs(120));
     if let Some(proxy_url) = proxy {
         builder = builder.proxy(Proxy::all(proxy_url)?);
+    } else {
+        builder = builder.no_proxy();
     }
     Ok(builder.build()?)
 }
@@ -2601,13 +2625,13 @@ async fn github_releases_object(
         && !headers.contains_key(header::RANGE)
         && let Some(cached) = read_cached_object(state, virtual_path).await
     {
-        return cached_object_response(cached, headers, false)
+        return cached_object_response(cached, virtual_path, headers, false)
             .unwrap_or_else(|err| s3_error_for(&err));
     }
     if method == Method::HEAD
         && let Some(cached) = read_cached_object(state, virtual_path).await
     {
-        return cached_object_response(cached, headers, true)
+        return cached_object_response(cached, virtual_path, headers, true)
             .unwrap_or_else(|err| s3_error_for(&err));
     }
     let release = match fetch_github_release_cached(state, &config).await {
@@ -2619,8 +2643,13 @@ async fn github_releases_object(
         return s3_error(StatusCode::NOT_FOUND, "NoSuchKey", "object not found");
     };
     if method == Method::HEAD {
-        return match github_release_head_response(headers, size, modified, content_type.as_deref())
-        {
+        return match github_release_head_response(
+            headers,
+            virtual_path,
+            size,
+            modified,
+            content_type.as_deref(),
+        ) {
             Ok(response) => response,
             Err(err) => s3_error_for(&err),
         };
@@ -2638,7 +2667,7 @@ async fn github_releases_object(
         )
         .await;
     }
-    let mut response = url_object(method, headers, url, config.proxy.clone()).await;
+    let mut response = url_object(method, headers, virtual_path, url, config.proxy.clone()).await;
     if response.status().is_success() {
         let partial = response.status() == StatusCode::PARTIAL_CONTENT
             || response.headers().contains_key(header::CONTENT_RANGE);
@@ -2740,11 +2769,13 @@ async fn github_release_get_cached(
         bytes,
     };
     write_cached_object(state, virtual_path, &cached).await;
-    cached_object_response(cached, headers, false).unwrap_or_else(|err| s3_error_for(&err))
+    cached_object_response(cached, virtual_path, headers, false)
+        .unwrap_or_else(|err| s3_error_for(&err))
 }
 
 fn github_release_head_response(
     headers: &HeaderMap,
+    virtual_path: &str,
     size: i64,
     modified: i64,
     content_type: Option<&str>,
@@ -2783,6 +2814,7 @@ fn github_release_head_response(
     {
         response.headers_mut().insert(header::CONTENT_TYPE, value);
     }
+    apply_browser_content_headers(&mut response, virtual_path);
     Ok(response)
 }
 
@@ -3308,10 +3340,12 @@ async fn browser_directory_index(
                 .ok()
         }
         ResolvedMount::S3 { remote_key, config } => {
-            s3_get_object(&config, &remote_key, headers).await.ok()
+            s3_get_object(&config, &remote_key, &index_path, headers)
+                .await
+                .ok()
         }
         ResolvedMount::UrlTree { url, proxy } => {
-            Some(url_object(Method::GET, headers, url, proxy).await)
+            Some(url_object(Method::GET, headers, &index_path, url, proxy).await)
                 .filter(|response| response.status().is_success())
         }
         _ => None,
@@ -3632,6 +3666,79 @@ fn s3_error_for(err: &anyhow::Error) -> Response {
         )
     } else {
         s3_error(StatusCode::BAD_GATEWAY, "QuarkError", &message)
+    }
+}
+
+fn content_type_for_path(path: &str) -> String {
+    mime_guess::from_path(path)
+        .first_or_octet_stream()
+        .essence_str()
+        .to_string()
+}
+
+fn is_inline_content_type(content_type: &str) -> bool {
+    let content_type = content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+        .to_ascii_lowercase();
+    content_type.starts_with("text/")
+        || content_type.starts_with("image/")
+        || content_type.starts_with("audio/")
+        || content_type.starts_with("video/")
+        || matches!(
+            content_type.as_str(),
+            "application/json"
+                | "application/pdf"
+                | "application/xml"
+                | "application/yaml"
+                | "application/x-yaml"
+                | "application/javascript"
+                | "application/ecmascript"
+                | "application/xhtml+xml"
+        )
+}
+
+fn encoded_filename(path: &str) -> String {
+    let name = path
+        .trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .filter(|name| !name.is_empty())
+        .unwrap_or("download");
+    urlencoding::encode(name)
+        .replace('+', "%20")
+        .replace("%2F", "/")
+}
+
+fn apply_browser_content_headers(response: &mut Response, virtual_path: &str) {
+    if !response.status().is_success() && response.status() != StatusCode::PARTIAL_CONTENT {
+        return;
+    }
+    if !response.headers().contains_key(header::CONTENT_TYPE)
+        && let Ok(value) = HeaderValue::from_str(&content_type_for_path(virtual_path))
+    {
+        response.headers_mut().insert(header::CONTENT_TYPE, value);
+    }
+    if response.headers().contains_key(header::CONTENT_DISPOSITION) {
+        return;
+    }
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    if is_inline_content_type(content_type) {
+        return;
+    }
+    if let Ok(value) = HeaderValue::from_str(&format!(
+        "attachment; filename*=UTF-8''{}",
+        encoded_filename(virtual_path)
+    )) {
+        response
+            .headers_mut()
+            .insert(header::CONTENT_DISPOSITION, value);
     }
 }
 
@@ -3973,6 +4080,26 @@ mod tests {
     }
 
     #[test]
+    fn browser_content_headers_attach_binary_but_not_inline_files() {
+        let mut png = Response::new(Body::empty());
+        png.headers_mut()
+            .insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+        apply_browser_content_headers(&mut png, "/public/photo.png");
+        assert!(!png.headers().contains_key(header::CONTENT_DISPOSITION));
+
+        let mut apk = Response::new(Body::empty());
+        apk.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/vnd.android.package-archive"),
+        );
+        apply_browser_content_headers(&mut apk, "/client/Hiddify Android.apk");
+        assert_eq!(
+            apk.headers().get(header::CONTENT_DISPOSITION).unwrap(),
+            "attachment; filename*=UTF-8''Hiddify%20Android.apk"
+        );
+    }
+
+    #[test]
     fn bootstrap_config_can_seed_empty_db() {
         let root = TestDir::new("atree-bootstrap");
         let db_path = root.join("atree.sqlite");
@@ -4079,9 +4206,14 @@ cache:
     fn github_release_head_response_respects_range() {
         let mut headers = HeaderMap::new();
         headers.insert(header::RANGE, HeaderValue::from_static("bytes=0-99"));
-        let response =
-            github_release_head_response(&headers, 1000, 1_700_000_000_000, Some("text/plain"))
-                .unwrap();
+        let response = github_release_head_response(
+            &headers,
+            "/client/readme.txt",
+            1000,
+            1_700_000_000_000,
+            Some("text/plain"),
+        )
+        .unwrap();
         assert_eq!(response.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(
             response.headers().get(header::CONTENT_LENGTH).unwrap(),

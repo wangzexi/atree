@@ -85,6 +85,8 @@ pub(crate) fn github_client(config: &GithubReleasesConfig) -> Result<Client> {
         .timeout(std::time::Duration::from_secs(120));
     if let Some(proxy_url) = config.proxy.as_deref() {
         builder = builder.proxy(Proxy::all(proxy_url)?);
+    } else {
+        builder = builder.no_proxy();
     }
     Ok(builder.build()?)
 }
