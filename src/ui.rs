@@ -73,7 +73,8 @@ pub(crate) fn file_browser_html(config_path: &str) -> String {
     .item-name {{ overflow-wrap: anywhere; }}
     .muted {{ color: #6b7280; }}
     .error {{ color: #b42318; }}
-    .help {{ margin-top: 14px; font-size: 12px; color: #6b7280; word-break: break-all; }}
+    .help {{ margin-top: 14px; font-size: 12px; color: #6b7280; }}
+    .help pre {{ margin: 0; white-space: pre-wrap; word-break: break-all; }}
     .help code {{ font-family: ui-monospace, Menlo, Monaco, Consolas, monospace; }}
     .brand-wrap {{ display: flex; align-items: baseline; gap: 10px; min-width: 0; }}
     .brand {{ font-size: 20px; font-weight: 700; color: #2563eb; text-decoration: none; }}
@@ -417,8 +418,15 @@ pub(crate) fn file_browser_html(config_path: &str) -> String {
       }}
       return null;
     }}
-    helpLine.innerHTML = "<code>curl -H 'Authorization: Bearer &lt;root-key&gt;' '"
-      + escapeHtml(location.origin) + escapeHtml(CONFIG_PATH) + "'</code>";
+    helpLine.innerHTML = '<pre><code>'
+      + 'bucket=atree\n'
+      + "curl '" + escapeHtml(location.origin) + "/?list-type=2&delimiter=/'\n"
+      + "curl -I '" + escapeHtml(location.origin) + "/release/yacd-gh-pages.zip'\n"
+      + "curl -H 'Authorization: Bearer &lt;key&gt;' '" + escapeHtml(location.origin) + "/path/file.txt'\n"
+      + "curl -X PUT -H 'Authorization: Bearer &lt;key&gt;' -T ./file.txt '" + escapeHtml(location.origin) + "/tmp/file.txt'\n"
+      + "curl -X DELETE -H 'Authorization: Bearer &lt;key&gt;' '" + escapeHtml(location.origin) + "/tmp/file.txt'\n"
+      + "curl -H 'Authorization: Bearer &lt;root-key&gt;' '" + escapeHtml(location.origin) + escapeHtml(CONFIG_PATH) + "'"
+      + '</code></pre>';
     keyInput.addEventListener('blur', function() {{
       var next = keyInput.value.replace(/^\s+|\s+$/g, '');
       var prev = currentKey();
