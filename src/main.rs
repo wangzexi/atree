@@ -1006,6 +1006,17 @@ fn request_virtual_path(
     }
 }
 
+fn is_bucket_root_request(
+    decoded_path: &str,
+    bucket: &str,
+    method: &Method,
+    headers: &HeaderMap,
+    params: &HashMap<String, String>,
+) -> bool {
+    is_s3_path_style_request(method, headers, params)
+        && decoded_path.trim_matches('/') == bucket.trim_matches('/')
+}
+
 async fn root_handler(
     State(state): State<AppState>,
     RawQuery(raw_query): RawQuery,
@@ -1142,6 +1153,27 @@ async fn object_handler(
         &headers,
         &params,
     );
+    let is_bucket_root =
+        is_bucket_root_request(&path, &bucket, &method, &headers, &params);
+    if is_bucket_root {
+        if params.contains_key("location") {
+            return xml_response(
+                StatusCode::OK,
+                r#"<?xml version="1.0" encoding="UTF-8"?>
+<LocationConstraint xmlns="http://s3.amazonaws.com/doc/2006-03-01/">us-east-1</LocationConstraint>"#
+                    .to_string(),
+            );
+        }
+        if method == Method::HEAD {
+            return StatusCode::OK.into_response();
+        }
+        if method == Method::PUT && params.keys().all(|key| key == "x-id") {
+            if !is_authorized(&state, &headers, "PutObject", "/").await {
+                return access_denied_response(&state, &headers, &bucket).await;
+            }
+            return StatusCode::OK.into_response();
+        }
+    }
     if method == Method::GET && wants_html(&headers) {
         if let Some(response) = browser_directory_index(&state, &virtual_path, &headers).await {
             return response;
@@ -4617,6 +4649,51 @@ cache:
             ),
             "/atree/quark/restic-repo"
         );
+    }
+
+    #[tokio::test]
+    async fn s3_bucket_root_supports_create_head_and_location() {
+        let state = test_state();
+        let app = build_app(state.app_state());
+
+        let create = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::PUT)
+                    .uri("/atree?x-id=CreateBucket")
+                    .header(header::AUTHORIZATION, "Bearer root-test-key")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(create.status(), StatusCode::OK);
+
+        let head = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method(Method::HEAD)
+                    .uri("/atree")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(head.status(), StatusCode::OK);
+
+        let location = app
+            .oneshot(
+                Request::builder()
+                    .uri("/atree?location=")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(location.status(), StatusCode::OK);
+        assert!(response_text(location).await.contains("us-east-1"));
     }
 
     #[tokio::test]
