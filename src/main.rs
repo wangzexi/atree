@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, HashSet},
     env,
     net::SocketAddr,
     path::PathBuf,
@@ -1154,8 +1154,7 @@ async fn object_handler(
         &headers,
         &params,
     );
-    let is_bucket_root =
-        is_bucket_root_request(&path, &bucket, &method, &headers, &params);
+    let is_bucket_root = is_bucket_root_request(&path, &bucket, &method, &headers, &params);
     if is_bucket_root {
         if params.contains_key("location") {
             return xml_response(
@@ -1480,6 +1479,8 @@ async fn list_objects(
         }) => {
             let synthetic_listing =
                 synthetic_mount_listing(&config, &principal, &prefix, delimiter.as_deref());
+            let hidden_listing_identities =
+                hidden_mount_identities(&config, &prefix, delimiter.as_deref());
             drop(config);
             return list_s3_mount(
                 &state,
@@ -1494,6 +1495,7 @@ async fn list_objects(
                 remote_key,
                 s3_config,
                 synthetic_listing,
+                hidden_listing_identities,
             )
             .await;
         }
@@ -1648,6 +1650,9 @@ fn synthetic_mount_listing(
         let Some(first) = rest.split('/').next().filter(|part| !part.is_empty()) else {
             continue;
         };
+        if mount_hidden_from_parent(mount) {
+            continue;
+        }
         let key = if current == "/" {
             first.to_string()
         } else {
@@ -1672,6 +1677,55 @@ fn synthetic_mount_listing(
         }
     }
     (entries, common_prefixes)
+}
+
+fn hidden_mount_identities(
+    config: &ServiceConfig,
+    prefix: &str,
+    delimiter: Option<&str>,
+) -> HashSet<String> {
+    if delimiter != Some("/") {
+        return HashSet::new();
+    }
+    let current = normalize_tree_path(prefix.trim_end_matches('/'));
+    config
+        .mounts
+        .iter()
+        .filter(|mount| mount.mount_path != "/" && mount_hidden_from_parent(mount))
+        .filter_map(|mount| {
+            let normalized = normalize_tree_path(&mount.mount_path);
+            let rest = if current == "/" {
+                normalized.trim_start_matches('/')
+            } else {
+                let current_prefix = format!("{}/", current.trim_end_matches('/'));
+                normalized.strip_prefix(&current_prefix)?
+            };
+            let first = rest.split('/').next().filter(|part| !part.is_empty())?;
+            let key = if current == "/" {
+                first.to_string()
+            } else {
+                format!("{}/{}", current.trim_start_matches('/'), first)
+            };
+            Some(listing_identity(&key))
+        })
+        .collect()
+}
+
+fn mount_hidden_from_parent(mount: &config::MountConfig) -> bool {
+    mount_option_bool(&mount.options, "hide_from_parent")
+}
+
+fn mount_option_bool(options: &Value, key: &str) -> bool {
+    options
+        .get(key)
+        .and_then(|value| {
+            value.as_bool().or_else(|| {
+                value
+                    .as_str()
+                    .map(|value| matches!(value, "true" | "yes" | "1"))
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn synthetic_mount_is_file(mount: &config::MountConfig, rest: &str) -> bool {
@@ -1700,6 +1754,7 @@ async fn list_s3_mount(
     remote_prefix: String,
     config: S3Config,
     synthetic_listing: (Vec<S3Entry>, Vec<String>),
+    hidden_listing_identities: HashSet<String>,
 ) -> Response {
     let remote_delimiter = delimiter.filter(|value| *value == "/");
     let listing = match s3_list_objects(
@@ -1738,6 +1793,11 @@ async fn list_s3_mount(
         })
         .filter(|prefix| !prefix.is_empty())
         .collect::<Vec<_>>();
+    if !hidden_listing_identities.is_empty() {
+        entries.retain(|entry| !hidden_listing_identities.contains(&listing_identity(&entry.key)));
+        common_prefixes
+            .retain(|prefix| !hidden_listing_identities.contains(&listing_identity(prefix)));
+    }
     merge_later_listing(&mut entries, &mut common_prefixes, synthetic_listing);
     let xml = list_xml_string(
         bucket,
@@ -4716,7 +4776,11 @@ cache:
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
-        assert!(response_text(response).await.contains("<Code>NoSuchKey</Code>"));
+        assert!(
+            response_text(response)
+                .await
+                .contains("<Code>NoSuchKey</Code>")
+        );
     }
 
     #[tokio::test]
@@ -5427,6 +5491,52 @@ cache:
         assert!(body.contains("<Key>release/yacd-gh-pages.zip</Key>"));
         assert!(body.contains("<Size>2277966</Size>"));
         assert!(!body.contains("<Prefix>release/yacd-gh-pages.zip/</Prefix>"));
+    }
+
+    #[test]
+    fn hide_from_parent_suppresses_mount_in_parent_listing_only() {
+        let config = ServiceConfig {
+            s3_bucket: "atree".to_string(),
+            mounts: vec![
+                MountConfig {
+                    mount_path: "/api/config.yaml".to_string(),
+                    mount_type: "system_config".to_string(),
+                    root_path: None,
+                    options: Value::Null,
+                },
+                MountConfig {
+                    mount_path: "/tmp".to_string(),
+                    mount_type: "s3".to_string(),
+                    root_path: Some("/tmp".to_string()),
+                    options: json!({
+                        "endpoint": "http://minio.local:9000",
+                        "bucket": "file",
+                        "access_key": "key",
+                        "secret_key": "secret",
+                        "hide_from_parent": true
+                    }),
+                },
+            ],
+            auth: AuthConfig {
+                keys: Vec::new(),
+                rules: vec![AuthRule {
+                    principal: "anonymous".to_string(),
+                    actions: vec!["ListBucket".to_string()],
+                    resources: vec!["/".to_string(), "/tmp".to_string(), "/tmp/*".to_string()],
+                }],
+            },
+            cache: CacheConfig::default(),
+        };
+
+        let (_, root_prefixes) = synthetic_mount_listing(&config, "anonymous", "", Some("/"));
+        assert!(!root_prefixes.contains(&"tmp/".to_string()));
+        assert!(hidden_mount_identities(&config, "", Some("/")).contains("tmp"));
+        assert!(hidden_mount_identities(&config, "tmp/", Some("/")).is_empty());
+
+        let (tmp_entries, tmp_prefixes) =
+            synthetic_mount_listing(&config, "anonymous", "tmp/", Some("/"));
+        assert!(tmp_entries.is_empty());
+        assert!(tmp_prefixes.is_empty());
     }
 
     #[test]

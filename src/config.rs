@@ -257,6 +257,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 #   s3.endpoint/bucket/access_key/secret_key: required for S3-compatible mounts.
 #   s3.region: optional, default us-east-1. s3.path_style: optional, default true.
 #   s3.proxy: optional outbound proxy URL.
+#   hide_from_parent: optional boolean. Allows direct access to this mount while hiding it from its parent listing.
 #   use {{}} or null when unused.
 # system_config note:
 #   mount_path is one mounted file path, not a directory. Example: {config_path}
@@ -450,7 +451,7 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
                 if let Some(proxy) = mount.options.get("proxy").and_then(Value::as_str) {
                     validate_http_url(proxy, "options.proxy")?;
                 }
-                for key in ["path_style", "force_path_style"] {
+                for key in ["path_style", "force_path_style", "hide_from_parent"] {
                     if let Some(value) = mount.options.get(key)
                         && !value.is_boolean()
                         && !value.is_string()
