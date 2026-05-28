@@ -54,6 +54,8 @@ pub(crate) fn file_browser_html(config_path: &str) -> String {
     .crumbs {{ display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 16px; line-height: 1.5; font-weight: 600; color: #9ca3af; }}
     .crumbs a {{ color: #2563eb; text-decoration: none; }}
     .crumbs a:hover {{ color: #1d4ed8; }}
+    .crumbs a.root-crumb {{ color: #9ca3af; }}
+    .crumbs a.root-crumb:hover {{ color: #6b7280; }}
     .table-wrap {{ border: 1px solid #e5e7eb; border-radius: 10px; overflow: hidden; background: #ffffff; }}
     table {{ width: 100%; border-collapse: collapse; }}
     thead tr {{ background: #f9fafb; border-bottom: 1px solid #e5e7eb; }}
@@ -333,7 +335,7 @@ pub(crate) fn file_browser_html(config_path: &str) -> String {
     }}
     function renderCrumbs() {{
       var parts = location.pathname.split('/').filter(Boolean);
-      var links = ['<span>/</span>'];
+      var links = ['<a class="root-crumb" href="/">/</a>'];
       var acc = '';
       for (var i = 0; i < parts.length; i += 1) {{
         var part = decodePathPart(parts[i]);
