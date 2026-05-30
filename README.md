@@ -53,7 +53,7 @@ curl -X PUT \
 
 `/api/config.yaml` 也走同一套权限模型：读取需要 `GetObject`，修改需要 `PutObject`，资源路径就是 `/api/config.yaml`。未命中任何 `auth.rules` 的请求，只有 `ATREE_ROOT_KEY` 对应的 `root` 身份还能访问，用作第一次写入配置或救援。
 
-`s3_bucket` 是 S3 path-style 客户端看到的 bucket 名；S3 请求里的 `/atree/quark/file.txt` 会映射到内部树路径 `/quark/file.txt`。夸克挂载使用 QuarkOpen OAuth。`oauth_file` 是本机私密文件，里面保存 access token、refresh token、refresh URL、app id 和 sign key；access token 过期时，atree 会用 refresh token 刷新，并把新 token 写回这个 YAML：
+`s3_bucket` 是 S3 path-style 客户端看到的 bucket 名；S3 请求里的 `/atree/quark/file.txt` 会映射到内部树路径 `/quark/file.txt`。夸克挂载使用 QuarkOpen OAuth；每个 `quark_open` mount 的登录状态直接属于这个 mount 的 `options`。access token 过期时，atree 会用 refresh token 刷新，并把新 token 写回 `/api/config.yaml` 里同一个 mount：
 
 ```yaml
 s3_bucket: atree
@@ -62,25 +62,14 @@ mounts:
     type: quark_open
     root_path: /
     options:
-      oauth_file: quark-open-oauth.yaml
+      refresh_url: https://oauth.fnnas.com/api/v1/oauth/refreshToken
+      refresh_token: '<private refresh token>'
+      access_token: '<private access token>'
+      app_id: '<private app id>'
+      sign_key: '<private sign key>'
 ```
 
-当前 `oauth.example.com/quarkyun/renewapi` 是 OpenList APIPages 的裁剪接口，只返回 access/refresh token，不返回 Quark Open 请求签名所需的 `sign_key`。atree 的私密 OAuth YAML 应该把 `source.refresh_url` 设为飞牛原始刷新接口，这样能同时刷新 token 并保存 `app_id/sign_key`：
-
-```yaml
-kind: quark_open_oauth
-source:
-  token_page: https://oauth.example.com/
-  callback_url: https://oauth.example.com/quarkyun/callback
-  refresh_url: https://oauth.fnnas.com/api/v1/oauth/refreshToken
-  driver: quarkyun_fn
-application:
-  client_id: '<private app id>'
-  sign_key: '<private sign key>'
-tokens:
-  access_token: '<private>'
-  refresh_token: '<private>'
-```
+当前 `oauth.example.com/quarkyun/renewapi` 是 OpenList APIPages 的裁剪接口，只返回 access/refresh token，不返回 Quark Open 请求签名所需的 `sign_key`。atree 的 `refresh_url` 应该设为飞牛原始刷新接口 `https://oauth.fnnas.com/api/v1/oauth/refreshToken`，这样能同时刷新 token 并保存 `app_id/sign_key`。
 
 配置文件本身也是挂载树的一部分。`system_config` 直接挂到某个单文件路径上，默认是 `/api/config.yaml`，也可以改到其它路径。例如：
 
@@ -90,7 +79,8 @@ mounts:
     type: quark_open
     root_path: /
     options:
-      oauth_file: quark-open-oauth.yaml
+      refresh_token: '<private refresh token>'
+      refresh_url: https://oauth.fnnas.com/api/v1/oauth/refreshToken
   - mount_path: /system/live.yaml
     type: system_config
 ```

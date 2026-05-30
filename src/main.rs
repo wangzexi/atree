@@ -16,7 +16,7 @@ use crate::mounts::resolve_remote_key;
 use crate::mounts::{
     GithubReleasesConfig, QuarkOpenConfig, ResolvedMount, S3Config, backend_from_mount,
     github_client, is_fnnas_quark_refresh_url, mount_option_u64, quark_open_client,
-    resolve_github_release_mounts, resolve_mount, save_quark_open_config,
+    resolve_github_release_mounts, resolve_mount,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use axum::{
@@ -78,6 +78,7 @@ struct QuarkOpenClient {
     http: Client,
     config: Arc<Mutex<QuarkOpenConfig>>,
     db_path: PathBuf,
+    service_config: Arc<RwLock<ServiceConfig>>,
     mount_path: String,
 }
 
@@ -489,10 +490,10 @@ impl QuarkOpenClient {
             bail!("quark_open needs access_token; refresh did not return one");
         }
         if config.app_id.is_empty() {
-            bail!("quark_open needs app_id in SQLite OAuth state");
+            bail!("quark_open needs options.app_id; refresh did not return one");
         }
         if config.sign_key.is_empty() {
-            bail!("quark_open needs sign_key in SQLite OAuth state");
+            bail!("quark_open needs options.sign_key; refresh did not return one");
         }
         Ok(())
     }
@@ -525,7 +526,21 @@ impl QuarkOpenClient {
             }
             config.clone()
         };
-        save_quark_open_config(&self.db_path, &self.mount_path, &snapshot)?;
+        self.save_config_snapshot(&snapshot).await?;
+        Ok(())
+    }
+
+    async fn save_config_snapshot(&self, snapshot: &QuarkOpenConfig) -> Result<()> {
+        let mut service_config = self.service_config.write().await;
+        let Some(mount) = service_config
+            .mounts
+            .iter_mut()
+            .find(|mount| mount.mount_type == "quark_open" && mount.mount_path == self.mount_path)
+        else {
+            bail!("quark_open mount {} no longer exists", self.mount_path);
+        };
+        mount.options = serde_json::to_value(snapshot)?;
+        save_config_to_db(&self.db_path, &service_config)?;
         Ok(())
     }
 
@@ -1223,10 +1238,16 @@ async fn object_handler(
     let (remote_key, backend) = match mount {
         ResolvedMount::QuarkOpen {
             remote_key,
+            config: quark_config,
             mount_path,
         } => {
             drop(config);
-            let quark = match quark_open_client(&state.db_path, &mount_path) {
+            let quark = match quark_open_client(
+                quark_config,
+                &mount_path,
+                state.db_path.clone(),
+                state.config.clone(),
+            ) {
                 Ok(quark) => quark,
                 Err(err) => {
                     return s3_error(StatusCode::BAD_REQUEST, "InvalidConfig", &err.to_string());
@@ -1440,9 +1461,15 @@ async fn list_objects(
     let (remote_dir, backend) = match resolve_mount(&config, &virtual_prefix) {
         Some(ResolvedMount::QuarkOpen {
             remote_key,
+            config: quark_config,
             mount_path,
         }) => {
-            let quark = match quark_open_client(&state.db_path, &mount_path) {
+            let quark = match quark_open_client(
+                quark_config,
+                &mount_path,
+                state.db_path.clone(),
+                state.config.clone(),
+            ) {
                 Ok(quark) => quark,
                 Err(err) => {
                     return s3_error(StatusCode::BAD_REQUEST, "InvalidConfig", &err.to_string());
@@ -3483,7 +3510,7 @@ async fn browser_directory(
     }
     let config = state.config.read().await;
     let Some((remote_key, backend)) = resolve_mount(&config, &index_path)
-        .and_then(|mount| backend_from_mount(&state.db_path, mount))
+        .and_then(|mount| backend_from_mount(state.db_path.clone(), state.config.clone(), mount))
     else {
         return html();
     };
@@ -3508,9 +3535,18 @@ async fn browser_directory_index(
     match mount {
         ResolvedMount::QuarkOpen {
             remote_key,
+            config: quark_config,
             mount_path,
         } => {
-            let backend = QuarkBackend::Open(quark_open_client(&state.db_path, &mount_path).ok()?);
+            let backend = QuarkBackend::Open(
+                quark_open_client(
+                    quark_config,
+                    &mount_path,
+                    state.db_path.clone(),
+                    state.config.clone(),
+                )
+                .ok()?,
+            );
             get_object_cached(state, &backend, &index_path, &remote_key, headers)
                 .await
                 .ok()
@@ -3541,7 +3577,8 @@ async fn find_directory_index(state: &AppState, virtual_path: &str) -> Option<St
     let prefix = virtual_path.trim_matches('/');
     let config = state.config.read().await;
     let (remote_key, backend) = backend_from_mount(
-        &state.db_path,
+        state.db_path.clone(),
+        state.config.clone(),
         resolve_mount(&config, &format!("/{prefix}"))?,
     )?;
     drop(config);
@@ -4185,24 +4222,15 @@ mod tests {
             mount_path: mount_path.to_string(),
             mount_type: "quark_open".to_string(),
             root_path: Some(root_path.to_string()),
-            options: Value::Null,
+            options: json!({
+                "access_token": "test-access-token",
+                "refresh_token": "test-refresh-token",
+                "app_id": "test-app-id",
+                "sign_key": "test-sign-key",
+                "refresh_url": "https://api.oplist.org/quarkyun/renewapi",
+                "root_fid": "0",
+            }),
         }
-    }
-
-    fn seed_quark_state(state: &TestState, mount_path: &str) {
-        save_quark_open_config(
-            &state.db_path,
-            mount_path,
-            &QuarkOpenConfig {
-                access_token: "test-access-token".to_string(),
-                refresh_token: "test-refresh-token".to_string(),
-                app_id: "test-app-id".to_string(),
-                sign_key: "test-sign-key".to_string(),
-                refresh_url: "https://api.oplist.org/quarkyun/renewapi".to_string(),
-                root_fid: "0".to_string(),
-            },
-        )
-        .unwrap();
     }
 
     fn test_state() -> TestState {
@@ -4866,7 +4894,6 @@ mod tests {
     #[tokio::test]
     async fn browser_directory_serves_authorized_index_html_before_shell() {
         let state = test_state();
-        seed_quark_state(&state, "/public");
         let mut config = config_with_mounts(vec![
             mount("/public", "/"),
             MountConfig {
@@ -4986,6 +5013,7 @@ mounts:
     type: quark_open
     root_path: /
     options:
+      refresh_token: test-refresh-token
   - mount_path: /api/config.yaml
     type: system_config
 auth:
@@ -5045,6 +5073,8 @@ mounts:
   - mount_path: /quark
     type: quark_open
     root_path: /
+    options:
+      refresh_token: test-refresh-token
   - mount_path: /api/config.yaml
     type: system_config
 auth:
@@ -5110,6 +5140,8 @@ mounts:
   - mount_path: /
     type: quark_open
     root_path: /
+    options:
+      refresh_token: test-refresh-token
   - mount_path: /api/config.yaml
     type: system_config
 auth:
@@ -5178,6 +5210,8 @@ mounts:
   - mount_path: /quark
     type: quark_open
     root_path: /
+    options:
+      refresh_token: test-refresh-token
   - mount_path: /system/live.yaml
     type: system_config
 auth:

@@ -508,7 +508,8 @@ mounts:
     type: quark_open
     root_path: /
     options:
-      oauth_file: quark-open-oauth.yaml
+      refresh_token: '<private refresh token>'
+      refresh_url: https://oauth.fnnas.com/api/v1/oauth/refreshToken
   - mount_path: /api/config.yaml
     type: system_config
   - mount_path: /github/sing-box

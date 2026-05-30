@@ -57,16 +57,16 @@ source:
   refresh_url: https://oauth.fnnas.com/api/v1/oauth/refreshToken
 ```
 
-The token page does not print `sign_key` because OpenList APIPages normally treats application keys as server-side credentials.
+The token page does not print `sign_key` because OpenList APIPages normally treats application keys as server-side credentials. atree stores the refreshed `access_token`, `refresh_token`, `app_id`, and `sign_key` in the corresponding `quark_open` mount's `options` inside `/api/config.yaml`.
 
 This has been tested with real Quark OAuth credentials: atree can list the root directory and complete a small-object PUT, GET, byte-for-byte readback, and DELETE loop through the `quark_open` mount.
 
 ## Operating Model
 
 1. Use `type: quark_open` for Quark mounts.
-2. Store OAuth secrets in a private ignored YAML, then reference it from mount `options.oauth_file`.
-3. Refresh rotated access/refresh tokens back into the private OAuth YAML.
-4. Keep `source.refresh_url` pointed at `https://oauth.fnnas.com/api/v1/oauth/refreshToken` for FnOS-backed Quark OAuth tokens; the OpenList APIPages renew endpoint is not enough for atree because it omits `sign_key`.
+2. Store OAuth state in that mount's `options`: `refresh_token`, optional current `access_token`, `app_id`, `sign_key`, and `refresh_url`.
+3. Refresh rotated tokens back into the same mount options in `/api/config.yaml`.
+4. Keep `options.refresh_url` pointed at `https://oauth.fnnas.com/api/v1/oauth/refreshToken` for FnOS-backed Quark OAuth tokens; the OpenList APIPages renew endpoint is not enough for atree because it omits `sign_key`.
 
 ## Near-Term Improvements
 

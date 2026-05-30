@@ -158,16 +158,6 @@ pub(crate) fn load_or_init_config(db_path: &Path) -> Result<ServiceConfig> {
         )",
         [],
     )?;
-    conn.execute(
-        "CREATE TABLE IF NOT EXISTS private_state (
-            namespace TEXT NOT NULL,
-            name TEXT NOT NULL,
-            json TEXT NOT NULL,
-            updated_at INTEGER NOT NULL,
-            PRIMARY KEY (namespace, name)
-        )",
-        [],
-    )?;
     let existing: Option<String> = conn
         .query_row("SELECT json FROM config WHERE id = 1", [], |row| row.get(0))
         .ok();
@@ -245,7 +235,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 #   system_config does not use root_path; mount_path is the config file path.
 # Disable a mount by commenting it out of this YAML.
 # mounts[].options:
-#   quark_open credentials are private driver state stored in SQLite, keyed by mount_path.
+#   quark_open.access_token/refresh_token/app_id/sign_key/refresh_url belong to that mount.
 #   url_tree.proxy: optional outbound proxy URL, such as http://127.0.0.1:1080.
 #   url_tree.size: optional file size for file-shaped URL mounts when upstream HEAD is not reliable.
 #   github_releases.repo: owner/repo. If omitted, root_path can be owner/repo.
@@ -320,14 +310,38 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
                     bail!("{} mounts need root_path", mount.mount_type);
                 };
                 validate_abs_path(root_path, "root_path")?;
-                if !mount.options.is_null()
-                    && !mount
-                        .options
-                        .as_object()
-                        .map(|options| options.is_empty())
-                        .unwrap_or(false)
+                for key in [
+                    "access_token",
+                    "refresh_token",
+                    "app_id",
+                    "sign_key",
+                    "refresh_url",
+                    "root_fid",
+                ] {
+                    if let Some(value) = mount.options.get(key)
+                        && !value.is_string()
+                    {
+                        bail!("options.{key} must be a string");
+                    }
+                }
+                if mount
+                    .options
+                    .get("refresh_token")
+                    .and_then(Value::as_str)
+                    .filter(|value| !value.trim().is_empty())
+                    .is_none()
                 {
-                    bail!("quark_open mounts do not take options; OAuth state is stored in SQLite");
+                    bail!("quark_open mounts need options.refresh_token");
+                }
+                if let Some(refresh_url) = mount.options.get("refresh_url").and_then(Value::as_str)
+                {
+                    validate_http_url(refresh_url, "options.refresh_url")?;
+                }
+                if let Some(value) = mount.options.get("hide_from_parent")
+                    && !value.is_boolean()
+                    && !value.is_string()
+                {
+                    bail!("options.hide_from_parent must be a boolean");
                 }
             }
             "url_tree" => {
