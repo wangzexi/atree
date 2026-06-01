@@ -8,7 +8,7 @@
 - 浏览器访问是文件树界面。
 - API 访问是 S3 path-style 协议。
 - 配置也是树上的文件：`/api/config.yaml`。
-- 权限模型只有用户、路径和动作；默认拒绝。
+- 权限模型只有用户、路径和动作。
 
 ```mermaid
 flowchart LR
