@@ -57,7 +57,7 @@ mounts:
 auth:
   keys:
     - name: admin
-      plain_key: replace-with-admin-key
+      plain_key: fa17258e88926697fffd6be6aedc912e609b612ecffbc256
   rules:
     - principal: key:admin
       actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
