@@ -38,8 +38,6 @@ docker run --rm \
 
 镜像：`ghcr.io/wangzexi/atree:latest` 或 `ghcr.io/wangzexi/atree:<git-sha>`。
 
-K8s：持久化 `/data`，`ATREE_ROOT_KEY` 用 Secret，`ATREE_DB=/data/atree.sqlite`。
-
 ## 配置入口
 
 ```bash
