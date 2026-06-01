@@ -2,19 +2,6 @@
 
 AI 友好的文件树网关。协议 MIT。感谢 [OpenList](https://github.com/OpenListTeam/OpenList)，QuarkOpen 相关逻辑参考 `drivers/quark_open`。
 
-## 先看代码
-
-- `src/main.rs`：主逻辑、路由、QuarkOpen、测试。
-- `src/config.rs`：配置 schema、默认配置、校验。
-- `src/mounts.rs`：mount 解析。
-- `src/ui.rs`：内嵌文件浏览器。
-- `docs/oauth-notes.md`：OpenList/QuarkOpen 记录。
-
-```bash
-rg -n "quark_open|github_releases|system_config|ListBucket|PutObject" src docs
-cargo test --quiet
-```
-
 ## Docker
 
 ```bash
