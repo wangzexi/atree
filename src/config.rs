@@ -64,9 +64,9 @@ pub(crate) struct KeyConfig {
 pub(crate) struct AuthRule {
     #[serde(rename = "user", alias = "principal")]
     pub(crate) principal: String,
-    pub(crate) actions: Vec<String>,
     #[serde(rename = "paths", alias = "resources")]
     pub(crate) resources: Vec<String>,
+    pub(crate) actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

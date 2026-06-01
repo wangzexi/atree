@@ -60,14 +60,14 @@ auth:
       key: f834a310973c0f615cff59f4a692d535e7a0ef7f69059c30
   rules:
     - user: root
-      actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
       paths: [/, /*]
+      actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
     - user: anonymous
-      actions: [ListBucket]
       paths: [/]
+      actions: [ListBucket]
     - user: public
-      actions: [ListBucket, HeadObject, GetObject, PutObject]
       paths: [/public, /public/*]
+      actions: [ListBucket, HeadObject, GetObject, PutObject]
 cache:
   enabled: true
   ttl_seconds: 600

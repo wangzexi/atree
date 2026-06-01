@@ -5067,8 +5067,8 @@ auth:
       key: reader-test-key
   rules:
     - user: reader
-      actions: [ListBucket]
       paths: [/*]
+      actions: [ListBucket]
 cache:
   max_bytes: 1048576
 "#;
@@ -5129,8 +5129,8 @@ auth:
       key: yaml-reader-key
   rules:
     - user: yaml-reader
-      actions: [ListBucket, GetObject]
       paths: [/*]
+      actions: [ListBucket, GetObject]
 cache:
   max_bytes: 2097152
 "#;
@@ -5195,8 +5195,8 @@ auth:
       key: config-editor-key
   rules:
     - user: config-editor
-      actions: [GetObject, PutObject]
       paths: [/api/config.yaml]
+      actions: [GetObject, PutObject]
 cache:
   max_bytes: 1048576
 "#;
@@ -5265,8 +5265,8 @@ auth:
       key: config-reader-key
   rules:
     - user: config-reader
-      actions: [GetObject]
       paths: [/system/live.yaml]
+      actions: [GetObject]
 cache:
   max_bytes: 1048576
 "#;
