@@ -153,7 +153,7 @@ Plain `curl /public/` without browser headers can keep returning the S3-compatib
 
 ### Directory Index File Lookup
 
-Directory paths should support automatic index lookup, modeled after `example-file-service`.
+Directory paths should support automatic index lookup, modeled after common static file servers.
 
 Reference behavior:
 
@@ -164,10 +164,6 @@ Reference behavior:
 - sort candidates
 - prefer exact `index`
 - otherwise use lexical order
-
-Reference source:
-
-- `example-file-service/server/src/fileServing.ts`
 
 Candidate examples:
 
@@ -592,7 +588,7 @@ Use `GET /api/config.yaml` as the AI-friendly entry point. The YAML header comme
 
 ## File Browser Behavior
 
-The UI can be modeled after `example-file-service`:
+The UI can follow a compact file-browser model:
 
 - breadcrumb navigation
 - folder-first table
@@ -601,12 +597,6 @@ The UI can be modeled after `example-file-service`:
 - direct file links
 - markdown preview if useful
 - key login stored in `localStorage`
-
-Reference implementation:
-
-- `example-file-service/web/src/App/FileBrowser.tsx`
-- `example-file-service/server/src/appRouter.ts`
-- `example-file-service/server/src/fileServing.ts`
 
 Differences here:
 

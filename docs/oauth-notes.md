@@ -6,7 +6,7 @@ atree only supports the QuarkOpen OAuth driver for Quark mounts. The older web-c
 
 OpenList has a `quark_open` driver:
 
-- reference path: `OpenList drivers/quark_open`
+- reference path: OpenList's `drivers/quark_open`
 - API base: `https://open-api-drive.quark.cn`
 - main APIs:
   - `/open/v1/user/info`
@@ -50,7 +50,7 @@ OpenList's default token refresh path calls:
 https://api.oplist.org/quarkyun/renewapi
 ```
 
-For the self-hosted APIPages flow used by `oauth.example.com`, `/quarkyun/renewapi` returns only `access_token` and `refresh_token`. The underlying FnOS Quark OAuth refresh endpoint returns the app signing fields under `data.tokenInfo.appId` and `data.tokenInfo.signKey`, so atree uses that endpoint directly when the private OAuth YAML sets:
+Some self-hosted APIPages flows expose `/quarkyun/renewapi`, which returns only `access_token` and `refresh_token`. The underlying FnOS Quark OAuth refresh endpoint returns the app signing fields under `data.tokenInfo.appId` and `data.tokenInfo.signKey`, so atree uses that endpoint directly when the private OAuth YAML sets:
 
 ```yaml
 source:

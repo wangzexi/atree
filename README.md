@@ -20,7 +20,6 @@
 ## 运行
 
 ```bash
-cd atree
 export ATREE_ROOT_KEY='换成你的 root key'
 cargo run
 ```
@@ -69,7 +68,7 @@ mounts:
       sign_key: '<private sign key>'
 ```
 
-当前 `oauth.example.com/quarkyun/renewapi` 是 OpenList APIPages 的裁剪接口，只返回 access/refresh token，不返回 Quark Open 请求签名所需的 `sign_key`。atree 的 `refresh_url` 应该设为飞牛原始刷新接口 `https://oauth.fnnas.com/api/v1/oauth/refreshToken`，这样能同时刷新 token 并保存 `app_id/sign_key`。
+OpenList APIPages 风格的刷新接口通常只返回 access/refresh token，不返回 Quark Open 请求签名所需的 `sign_key`。atree 的 `refresh_url` 应该设为能返回完整 token 信息的刷新接口，例如 `https://oauth.fnnas.com/api/v1/oauth/refreshToken`，这样能同时刷新 token 并保存 `app_id/sign_key`。
 
 配置文件本身也是挂载树的一部分。`system_config` 直接挂到某个单文件路径上，默认是 `/api/config.yaml`，也可以改到其它路径。例如：
 
@@ -156,7 +155,7 @@ auth:
       resources: [/file, /file/*]
 ```
 
-如果想让 `files.example.com/foo.txt` 直接对应 bucket 里的 `foo.txt`，可以把这个 mount 的 `mount_path` 改成 `/`，再把 `files.example.com` 的 Ingress 指到 atree 服务。
+如果想让 `files.example.com/foo.txt` 直接对应 bucket 里的 `foo.txt`，可以把这个 mount 的 `mount_path` 改成 `/`，再把对应域名的 Ingress 指到 atree 服务。
 
 ## 简单测试
 
@@ -173,7 +172,6 @@ aws --endpoint-url http://127.0.0.1:9000 s3 rm s3://atree/examples/atree.txt --n
 ## restic 使用
 
 ```bash
-cd atree
 cargo run
 ```
 
