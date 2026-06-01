@@ -55,14 +55,3 @@ curl -X PUT \
 配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。mount 支持类型在 `src/mounts.rs`。
 
 OpenList QuarkOpen 默认刷新接口是 `https://api.oplist.org/quarkyun/renewapi`。如果需要让 atree 获取 `app_id/sign_key`，看 `docs/oauth-notes.md`。
-
-## 快速验证
-
-```bash
-curl -H 'Authorization: Bearer <key>' \
-  'http://127.0.0.1:9000/?list-type=2&delimiter=/&prefix=quark/'
-
-echo hello > /tmp/atree.txt
-curl -H 'Authorization: Bearer <key>' -T /tmp/atree.txt \
-  'http://127.0.0.1:9000/quark/examples/atree.txt'
-```
