@@ -67,7 +67,7 @@ cache:
   ttl_seconds: 600
 ```
 
-完整配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。mount 支持类型在 `src/mounts.rs`。QuarkOpen 细节看 `docs/oauth-notes.md`。
+完整配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。
 
 ## 致谢
 
