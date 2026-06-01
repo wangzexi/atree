@@ -66,9 +66,3 @@ echo hello > /tmp/atree.txt
 curl -H 'Authorization: Bearer <key>' -T /tmp/atree.txt \
   'http://127.0.0.1:9000/quark/examples/atree.txt'
 ```
-
-## Agent 规则
-
-- 不提交真实 token、key、SQLite、配置快照。
-- 改代码跑 `cargo test --quiet`。
-- 不确定的行为直接看 `src/main.rs` 测试。
