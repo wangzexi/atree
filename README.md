@@ -60,20 +60,19 @@ s3_bucket: atree
 mounts:
   - type: system_config
     path: /api/config.yaml
-auth:
-  users:
-    - name: public
-      key: f834a310973c0f615cff59f4a692d535e7a0ef7f69059c30
-  rules:
-    - user: root
-      paths: [/, /*]
-      actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
-    - user: anonymous
-      paths: [/]
-      actions: [ListBucket]
-    - user: public
-      paths: [/public, /public/*]
-      actions: [ListBucket, HeadObject, GetObject, PutObject]
+users:
+  - name: public
+    key: f834a310973c0f615cff59f4a692d535e7a0ef7f69059c30
+rules:
+  - user: root
+    paths: [/, /*]
+    actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
+  - user: anonymous
+    paths: [/]
+    actions: [ListBucket]
+  - user: public
+    paths: [/public, /public/*]
+    actions: [ListBucket, HeadObject, GetObject, PutObject]
 cache:
   enabled: true
   ttl_seconds: 600

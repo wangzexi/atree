@@ -3639,8 +3639,7 @@ async fn resolve_principal(state: &AppState, headers: &HeaderMap) -> String {
     let hash = hash_key(&token);
     let config = state.config.read().await;
     config
-        .auth
-        .keys
+        .users
         .iter()
         .find(|key| key.enabled && key.key_hash == hash)
         .map(|key| key.name.clone())
@@ -3651,7 +3650,7 @@ fn policy_allows(config: &ServiceConfig, principal: &str, action: &str, resource
     if principal == "root" {
         return true;
     }
-    config.auth.rules.iter().any(|rule| {
+    config.rules.iter().any(|rule| {
         rule.principal
             .strip_prefix("key:")
             .unwrap_or(&rule.principal)
@@ -4228,7 +4227,9 @@ mod tests {
         ServiceConfig {
             s3_bucket: "atree".to_string(),
             mounts,
-            auth: AuthConfig::default(),
+            users: Vec::new(),
+            rules: Vec::new(),
+            legacy_auth: AuthConfig::default(),
             cache: CacheConfig::default(),
         }
     }
@@ -4592,7 +4593,7 @@ mod tests {
             "GetObject",
             "/public/a.txt"
         ));
-        config.auth.rules.push(AuthRule {
+        config.rules.push(AuthRule {
             principal: "anonymous".to_string(),
             actions: vec!["GetObject".to_string(), "HeadObject".to_string()],
             resources: vec!["/public/*".to_string()],
@@ -4635,24 +4636,23 @@ mod tests {
         let config = ServiceConfig {
             s3_bucket: "atree".to_string(),
             mounts: default_mounts(),
-            auth: AuthConfig {
-                keys: vec![KeyConfig {
-                    name: "reader".to_string(),
-                    key_hash: String::new(),
-                    key_hint: String::new(),
-                    enabled: true,
-                    plain_key: Some("reader-secret".to_string()),
-                }],
-                rules: vec![AuthRule {
-                    principal: "reader".to_string(),
-                    actions: vec!["ListBucket".to_string()],
-                    resources: vec!["/*".to_string()],
-                }],
-            },
+            users: vec![KeyConfig {
+                name: "reader".to_string(),
+                key_hash: String::new(),
+                key_hint: String::new(),
+                enabled: true,
+                plain_key: Some("reader-secret".to_string()),
+            }],
+            rules: vec![AuthRule {
+                principal: "reader".to_string(),
+                actions: vec!["ListBucket".to_string()],
+                resources: vec!["/*".to_string()],
+            }],
             cache: CacheConfig::default(),
+            legacy_auth: AuthConfig::default(),
         };
         let config = normalize_config(config).expect("valid config");
-        let key = &config.auth.keys[0];
+        let key = &config.users[0];
         assert!(key.key_hash.starts_with("sha256:"));
         assert_eq!(key.key_hint, "read...cret");
         let raw = serde_json::to_string(&config).unwrap();
@@ -4680,13 +4680,14 @@ auth:
         .and_then(normalize_config)
         .expect("legacy auth config remains valid");
 
-        assert_eq!(config.auth.rules[0].principal, "reader");
+        assert_eq!(config.rules[0].principal, "reader");
         let yaml = serde_yaml::to_string(&config).unwrap();
         assert!(yaml.contains("type: system_config\n  path: /api/config.yaml"));
         assert!(!yaml.contains("mount_path:"));
         assert!(yaml.contains("users:"));
         assert!(yaml.contains("user: reader"));
         assert!(yaml.contains("paths:"));
+        assert!(!yaml.contains("auth:"));
         assert!(!yaml.contains("plain_key:"));
         assert!(!yaml.contains("principal:"));
         assert!(!yaml.contains("resources:"));
@@ -4711,7 +4712,7 @@ auth:
         assert!(validate_config(&config).is_err());
 
         let mut config = ServiceConfig::default();
-        config.auth.rules.push(AuthRule {
+        config.rules.push(AuthRule {
             principal: "key:missing".to_string(),
             actions: vec!["GetObject".to_string()],
             resources: vec!["/*".to_string()],
@@ -4952,7 +4953,7 @@ auth:
                 options: Value::Null,
             },
         ]);
-        config.auth.rules.push(AuthRule {
+        config.rules.push(AuthRule {
             principal: "anonymous".to_string(),
             actions: vec!["GetObject".to_string()],
             resources: vec!["/public/site/index.html".to_string()],
@@ -5061,11 +5062,10 @@ mounts:
       refresh_token: test-refresh-token
   - type: system_config
     path: /api/config.yaml
-auth:
-  users:
+users:
     - name: reader
       key: reader-test-key
-  rules:
+rules:
     - user: reader
       paths: [/*]
       actions: [ListBucket]
@@ -5122,12 +5122,11 @@ mounts:
       refresh_token: test-refresh-token
   - type: system_config
     path: /api/config.yaml
-auth:
-  users:
+users:
     # key is accepted only on write and removed on read.
     - name: yaml-reader
       key: yaml-reader-key
-  rules:
+rules:
     - user: yaml-reader
       paths: [/*]
       actions: [ListBucket, GetObject]
@@ -5189,11 +5188,10 @@ mounts:
       refresh_token: test-refresh-token
   - type: system_config
     path: /api/config.yaml
-auth:
-  users:
+users:
     - name: config-editor
       key: config-editor-key
-  rules:
+rules:
     - user: config-editor
       paths: [/api/config.yaml]
       actions: [GetObject, PutObject]
@@ -5259,11 +5257,10 @@ mounts:
       refresh_token: test-refresh-token
   - type: system_config
     path: /system/live.yaml
-auth:
-  users:
+users:
     - name: config-reader
       key: config-reader-key
-  rules:
+rules:
     - user: config-reader
       paths: [/system/live.yaml]
       actions: [GetObject]
@@ -5362,15 +5359,14 @@ cache:
                     options: json!({"size": 15}),
                 },
             ],
-            auth: AuthConfig {
-                keys: Vec::new(),
-                rules: vec![AuthRule {
-                    principal: "anonymous".to_string(),
-                    actions: vec!["GetObject".to_string(), "HeadObject".to_string()],
-                    resources: vec!["/github/*".to_string()],
-                }],
-            },
+            users: Vec::new(),
+            rules: vec![AuthRule {
+                principal: "anonymous".to_string(),
+                actions: vec!["GetObject".to_string(), "HeadObject".to_string()],
+                resources: vec!["/github/*".to_string()],
+            }],
             cache: CacheConfig::default(),
+            legacy_auth: AuthConfig::default(),
         };
         let app = build_app(state.app_state());
 
@@ -5415,7 +5411,9 @@ cache:
                 root_path: None,
                 options: Value::Null,
             }],
-            auth: AuthConfig::default(),
+            users: Vec::new(),
+            rules: Vec::new(),
+            legacy_auth: AuthConfig::default(),
             cache: CacheConfig::default(),
         };
         let app = build_app(state.app_state());
@@ -5443,7 +5441,9 @@ cache:
                 root_path: None,
                 options: Value::Null,
             }],
-            auth: AuthConfig::default(),
+            users: Vec::new(),
+            rules: Vec::new(),
+            legacy_auth: AuthConfig::default(),
             cache: CacheConfig::default(),
         };
         let app = build_app(state.app_state());
@@ -5517,19 +5517,18 @@ cache:
                     options: json!({"size": 2277966}),
                 },
             ],
-            auth: AuthConfig {
-                keys: Vec::new(),
-                rules: vec![AuthRule {
-                    principal: "anonymous".to_string(),
-                    actions: vec!["ListBucket".to_string()],
-                    resources: vec![
-                        "/".to_string(),
-                        "/release".to_string(),
-                        "/release/*".to_string(),
-                    ],
-                }],
-            },
+            users: Vec::new(),
+            rules: vec![AuthRule {
+                principal: "anonymous".to_string(),
+                actions: vec!["ListBucket".to_string()],
+                resources: vec![
+                    "/".to_string(),
+                    "/release".to_string(),
+                    "/release/*".to_string(),
+                ],
+            }],
             cache: CacheConfig::default(),
+            legacy_auth: AuthConfig::default(),
         };
         let app = build_app(state.app_state());
         let response = app
@@ -5590,15 +5589,14 @@ cache:
                     }),
                 },
             ],
-            auth: AuthConfig {
-                keys: Vec::new(),
-                rules: vec![AuthRule {
-                    principal: "anonymous".to_string(),
-                    actions: vec!["ListBucket".to_string()],
-                    resources: vec!["/".to_string(), "/tmp".to_string(), "/tmp/*".to_string()],
-                }],
-            },
+            users: Vec::new(),
+            rules: vec![AuthRule {
+                principal: "anonymous".to_string(),
+                actions: vec!["ListBucket".to_string()],
+                resources: vec!["/".to_string(), "/tmp".to_string(), "/tmp/*".to_string()],
+            }],
             cache: CacheConfig::default(),
+            legacy_auth: AuthConfig::default(),
         };
 
         let (_, root_prefixes) = synthetic_mount_listing(&config, "anonymous", "", Some("/"));
@@ -5643,15 +5641,14 @@ cache:
                     options: Value::Null,
                 },
             ],
-            auth: AuthConfig {
-                keys: Vec::new(),
-                rules: vec![AuthRule {
-                    principal: "anonymous".to_string(),
-                    actions: vec!["ListBucket".to_string()],
-                    resources: vec!["/".to_string(), "/external".to_string()],
-                }],
-            },
+            users: Vec::new(),
+            rules: vec![AuthRule {
+                principal: "anonymous".to_string(),
+                actions: vec!["ListBucket".to_string()],
+                resources: vec!["/".to_string(), "/external".to_string()],
+            }],
             cache: CacheConfig::default(),
+            legacy_auth: AuthConfig::default(),
         };
 
         let hidden = hidden_mount_identities(&config, "anonymous", "", Some("/"));

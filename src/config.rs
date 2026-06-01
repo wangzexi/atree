@@ -19,10 +19,15 @@ pub(crate) struct ServiceConfig {
     pub(crate) s3_bucket: String,
     #[serde(default = "default_mounts")]
     pub(crate) mounts: Vec<MountConfig>,
+    #[serde(rename = "users", alias = "keys")]
     #[serde(default)]
-    pub(crate) auth: AuthConfig,
+    pub(crate) users: Vec<KeyConfig>,
+    #[serde(default)]
+    pub(crate) rules: Vec<AuthRule>,
     #[serde(default)]
     pub(crate) cache: CacheConfig,
+    #[serde(default, rename = "auth", skip_serializing)]
+    pub(crate) legacy_auth: AuthConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -84,8 +89,10 @@ impl Default for ServiceConfig {
         Self {
             s3_bucket: default_bucket(),
             mounts: default_mounts(),
-            auth: AuthConfig::default(),
+            users: Vec::new(),
+            rules: Vec::new(),
             cache: CacheConfig::default(),
+            legacy_auth: AuthConfig::default(),
         }
     }
 }
@@ -188,12 +195,20 @@ pub(crate) fn save_config_to_db(db_path: &Path, config: &ServiceConfig) -> Resul
 }
 
 pub(crate) fn normalize_config(mut config: ServiceConfig) -> Result<ServiceConfig> {
+    if config.users.is_empty() {
+        config.users = std::mem::take(&mut config.legacy_auth.keys);
+    }
+    if config.rules.is_empty() {
+        config.rules = std::mem::take(&mut config.legacy_auth.rules);
+    }
+    config.legacy_auth = AuthConfig::default();
+
     for mount in &mut config.mounts {
         if mount.mount_type == "system_config" {
             mount.root_path = None;
         }
     }
-    for key in &mut config.auth.keys {
+    for key in &mut config.users {
         if let Some(plain) = key.plain_key.take() {
             if plain.len() < 8 {
                 bail!("key for user '{}' must be at least 8 characters", key.name);
@@ -202,7 +217,7 @@ pub(crate) fn normalize_config(mut config: ServiceConfig) -> Result<ServiceConfi
             key.key_hint = key_hint(&plain);
         }
     }
-    for rule in &mut config.auth.rules {
+    for rule in &mut config.rules {
         if let Some(name) = rule.principal.strip_prefix("key:") {
             rule.principal = name.to_string();
         }
@@ -258,21 +273,21 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 #   s3.region: optional, default us-east-1. s3.path_style: optional, default true.
 #   s3.proxy: optional outbound proxy URL.
 #   hide_from_parent: optional boolean. Hides this mount only from its parent directory listing.
-#     Direct requests to path still resolve normally and still use auth.rules.
+#     Direct requests to path still resolve normally and still use rules.
 #     This is discoverability control, not a security boundary.
 #   use {{}} or null when unused.
 # system_config note:
 #   path is one mounted file path, not a directory. Example: {config_path}
-#   if you move this path, auth.rules must target the new path; the old path will 404.
+#   if you move this path, rules must target the new path; the old path will 404.
 #
-# auth.users: named users. Do not store plaintext keys here.
-# auth.users[].key: allowed only in PUT; the service stores key_hash/key_hint and never returns key.
-# auth.users[].key_hash: sha256:<hex> hash generated from key.
-# auth.users[].key_hint: short non-secret hint for humans.
-# auth.rules: default-deny allow-list.
-# auth.rules[].user: anonymous, root, or a name from auth.users.
-# auth.rules[].actions: ListBucket, HeadObject, GetObject, PutObject, DeleteObject, or *.
-# auth.rules[].paths: service paths such as /public, /public/*, or /*.
+# users: named users. Do not store plaintext keys here.
+# users[].key: allowed only in PUT; the service stores key_hash/key_hint and never returns key.
+# users[].key_hash: sha256:<hex> hash generated from key.
+# users[].key_hint: short non-secret hint for humans.
+# rules: default-deny allow-list.
+# rules[].user: anonymous, root, or a name from users.
+# rules[].paths: service paths such as /public, /public/*, or /*.
+# rules[].actions: ListBucket, HeadObject, GetObject, PutObject, DeleteObject, or *.
 #   /public/* matches descendants at any depth, but not /public itself.
 # requests that match no rule are denied unless the caller is `root`.
 #
@@ -497,22 +512,22 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
     }
 
     let mut names = HashSet::new();
-    for key in &config.auth.keys {
+    for key in &config.users {
         if key.name.trim().is_empty() {
-            bail!("auth user name cannot be empty");
+            bail!("user name cannot be empty");
         }
         if !names.insert(key.name.clone()) {
-            bail!("duplicate auth user '{}'", key.name);
+            bail!("duplicate user '{}'", key.name);
         }
         if matches!(key.name.as_str(), "anonymous" | "root") {
-            bail!("auth user '{}' uses a reserved name", key.name);
+            bail!("user '{}' uses a reserved name", key.name);
         }
         if key.enabled && !key.key_hash.starts_with("sha256:") {
-            bail!("auth user '{}' needs key_hash or key", key.name);
+            bail!("user '{}' needs key_hash or key", key.name);
         }
     }
 
-    for rule in &config.auth.rules {
+    for rule in &config.rules {
         let user = rule
             .principal
             .strip_prefix("key:")
@@ -521,7 +536,7 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
             bail!("rule references missing user '{}'", user);
         }
         if rule.actions.is_empty() || rule.resources.is_empty() {
-            bail!("auth rules need non-empty actions and paths");
+            bail!("rules need non-empty actions and paths");
         }
         for action in &rule.actions {
             if action != "*"

@@ -328,11 +328,10 @@ mounts:
     root_path: https://github.com/SagerNet/sing-box/releases/download/v1.12.0
     options:
       proxy: http://127.0.0.1:1080
-auth:
-  rules:
-    - user: anonymous
-      paths: [/github/sing-box/*]
-      actions: [HeadObject, GetObject]
+rules:
+  - user: anonymous
+    paths: [/github/sing-box/*]
+    actions: [HeadObject, GetObject]
 ```
 
 Example GitHub releases mount:
@@ -358,11 +357,10 @@ mounts:
       asset_allow:
         - sing-box-*-linux-amd64.tar.gz
         - sing-box-*-darwin-arm64.tar.gz
-auth:
-  rules:
-    - user: anonymous
-      paths: [/client, /client/*]
-      actions: [ListBucket, HeadObject, GetObject]
+rules:
+  - user: anonymous
+    paths: [/client, /client/*]
+    actions: [ListBucket, HeadObject, GetObject]
 ```
 
 `/github/sing-box/file.tar.gz` maps to `https://github.com/SagerNet/sing-box/releases/download/v1.12.0/file.tar.gz`. The proxy option belongs to this mount only; other mounts can stay direct.
@@ -513,24 +511,23 @@ mounts:
     root_path: https://github.com/SagerNet/sing-box/releases/download/v1.12.0
     options:
       proxy: http://127.0.0.1:1080
-auth:
-  users:
-    - name: admin
-      key_hash: sha256:...
-      key_hint: adm_...abcd
-    - name: reader
-      key_hash: sha256:...
-      key_hint: rdr_...wxyz
-  rules:
-    - user: anonymous
-      paths: [/public/*]
-      actions: [HeadObject, GetObject]
-    - user: anonymous
-      paths: [/github/sing-box/*]
-      actions: [HeadObject, GetObject]
-    - user: reader
-      paths: [/public, /public/*, /share, /share/*]
-      actions: [ListBucket, HeadObject, GetObject]
+users:
+  - name: admin
+    key_hash: sha256:...
+    key_hint: adm_...abcd
+  - name: reader
+    key_hash: sha256:...
+    key_hint: rdr_...wxyz
+rules:
+  - user: anonymous
+    paths: [/public/*]
+    actions: [HeadObject, GetObject]
+  - user: anonymous
+    paths: [/github/sing-box/*]
+    actions: [HeadObject, GetObject]
+  - user: reader
+    paths: [/public, /public/*, /share, /share/*]
+    actions: [ListBucket, HeadObject, GetObject]
 cache:
   max_bytes: 53687091200
 ```
