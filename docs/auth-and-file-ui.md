@@ -332,7 +332,7 @@ auth:
   rules:
     - user: anonymous
       actions: [HeadObject, GetObject]
-      resources: [/github/sing-box/*]
+      paths: [/github/sing-box/*]
 ```
 
 Example GitHub releases mount:
@@ -362,7 +362,7 @@ auth:
   rules:
     - user: anonymous
       actions: [ListBucket, HeadObject, GetObject]
-      resources: [/client, /client/*]
+      paths: [/client, /client/*]
 ```
 
 `/github/sing-box/file.tar.gz` maps to `https://github.com/SagerNet/sing-box/releases/download/v1.12.0/file.tar.gz`. The proxy option belongs to this mount only; other mounts can stay direct.
@@ -524,13 +524,13 @@ auth:
   rules:
     - user: anonymous
       actions: [HeadObject, GetObject]
-      resources: [/public/*]
+      paths: [/public/*]
     - user: anonymous
       actions: [HeadObject, GetObject]
-      resources: [/github/sing-box/*]
+      paths: [/github/sing-box/*]
     - user: reader
       actions: [ListBucket, HeadObject, GetObject]
-      resources: [/public, /public/*, /share, /share/*]
+      paths: [/public, /public/*, /share, /share/*]
 cache:
   max_bytes: 53687091200
 ```
@@ -571,7 +571,7 @@ Example public rule:
 {
   "user": "anonymous",
   "actions": ["HeadObject", "GetObject"],
-  "resources": ["/public/*"]
+  "paths": ["/public/*"]
 }
 ```
 

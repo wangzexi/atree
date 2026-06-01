@@ -64,6 +64,7 @@ pub(crate) struct AuthRule {
     #[serde(rename = "user", alias = "principal")]
     pub(crate) principal: String,
     pub(crate) actions: Vec<String>,
+    #[serde(rename = "paths", alias = "resources")]
     pub(crate) resources: Vec<String>,
 }
 
@@ -270,7 +271,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 # auth.rules: default-deny allow-list.
 # auth.rules[].user: anonymous, root, or a name from auth.users.
 # auth.rules[].actions: ListBucket, HeadObject, GetObject, PutObject, DeleteObject, or *.
-# auth.rules[].resources: service paths such as /public, /public/*, or /*.
+# auth.rules[].paths: service paths such as /public, /public/*, or /*.
 #   /public/* matches descendants at any depth, but not /public itself.
 # requests that match no rule are denied unless the caller is `root`.
 #
@@ -520,7 +521,7 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
             bail!("rule references missing user '{}'", user);
         }
         if rule.actions.is_empty() || rule.resources.is_empty() {
-            bail!("auth rules need non-empty actions and resources");
+            bail!("auth rules need non-empty actions and paths");
         }
         for action in &rule.actions {
             if action != "*"
@@ -532,9 +533,9 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
                 bail!("unsupported action '{}'", action);
             }
         }
-        for resource in &rule.resources {
-            if resource != "*" && !resource.starts_with('/') {
-                bail!("resource '{}' must start with / or be *", resource);
+        for path in &rule.resources {
+            if path != "*" && !path.starts_with('/') {
+                bail!("path '{}' must start with / or be *", path);
             }
         }
     }

@@ -61,13 +61,13 @@ auth:
   rules:
     - user: root
       actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
-      resources: [/, /*]
+      paths: [/, /*]
     - user: anonymous
       actions: [ListBucket]
-      resources: [/]
+      paths: [/]
     - user: public
       actions: [ListBucket, HeadObject, GetObject, PutObject]
-      resources: [/public, /public/*]
+      paths: [/public, /public/*]
 cache:
   enabled: true
   ttl_seconds: 600

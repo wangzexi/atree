@@ -4684,8 +4684,10 @@ auth:
         let yaml = serde_yaml::to_string(&config).unwrap();
         assert!(yaml.contains("users:"));
         assert!(yaml.contains("user: reader"));
+        assert!(yaml.contains("paths:"));
         assert!(!yaml.contains("plain_key:"));
         assert!(!yaml.contains("principal:"));
+        assert!(!yaml.contains("resources:"));
         assert!(!yaml.contains("key:reader"));
     }
 
@@ -5068,7 +5070,7 @@ auth:
   rules:
     - user: reader
       actions: [ListBucket]
-      resources: [/*]
+      paths: [/*]
 cache:
   max_bytes: 1048576
 "#;
@@ -5130,7 +5132,7 @@ auth:
   rules:
     - user: yaml-reader
       actions: [ListBucket, GetObject]
-      resources: [/*]
+      paths: [/*]
 cache:
   max_bytes: 2097152
 "#;
@@ -5196,7 +5198,7 @@ auth:
   rules:
     - user: config-editor
       actions: [GetObject, PutObject]
-      resources: [/api/config.yaml]
+      paths: [/api/config.yaml]
 cache:
   max_bytes: 1048576
 "#;
@@ -5266,7 +5268,7 @@ auth:
   rules:
     - user: config-reader
       actions: [GetObject]
-      resources: [/system/live.yaml]
+      paths: [/system/live.yaml]
 cache:
   max_bytes: 1048576
 "#;
