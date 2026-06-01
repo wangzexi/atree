@@ -1,6 +1,6 @@
 # atree
 
-AI 友好的文件树网关。协议 MIT。感谢 [OpenList](https://github.com/OpenListTeam/OpenList)，QuarkOpen 相关逻辑参考 `drivers/quark_open`。
+AI 友好的文件树网关。
 
 ## Docker
 
@@ -28,3 +28,11 @@ curl -X PUT \
 配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。mount 支持类型在 `src/mounts.rs`。
 
 OpenList QuarkOpen 默认刷新接口是 `https://api.oplist.org/quarkyun/renewapi`。如果需要让 atree 获取 `app_id/sign_key`，看 `docs/oauth-notes.md`。
+
+## 致谢
+
+感谢 [OpenList](https://github.com/OpenListTeam/OpenList)，QuarkOpen 相关逻辑参考 `drivers/quark_open`。
+
+## 协议
+
+MIT
