@@ -62,6 +62,9 @@ auth:
     - principal: key:admin
       actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
       resources: [/*]
+    - principal: anonymous
+      actions: [ListBucket, HeadObject, GetObject]
+      resources: [/public, /public/*]
 cache:
   enabled: true
   ttl_seconds: 600
