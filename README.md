@@ -29,7 +29,7 @@ flowchart LR
 ```bash
 docker run --rm \
   -p 9000:9000 \
-  -e ATREE_ROOT_KEY='replace-with-root-key' \
+  -e ATREE_ROOT_KEY='11525b32eccbdb118df09f60cfe28061b2665fe7a6635ecf' \
   -e ATREE_DB='/data/atree.sqlite' \
   -v atree-data:/data \
   ghcr.io/wangzexi/atree:latest
@@ -67,7 +67,7 @@ cache:
   ttl_seconds: 600
 ```
 
-完整配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。
+完整配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。Driver 配置看 `src/drivers/*.rs`。
 
 ## 致谢
 

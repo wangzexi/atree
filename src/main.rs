@@ -8,15 +8,14 @@ use std::{
 };
 
 mod config;
+mod drivers;
 mod mounts;
 mod ui;
 
 #[cfg(test)]
 use crate::mounts::resolve_remote_key;
 use crate::mounts::{
-    GithubReleasesConfig, QuarkOpenConfig, ResolvedMount, S3Config, backend_from_mount,
-    github_client, is_fnnas_quark_refresh_url, mount_option_u64, quark_open_client,
-    resolve_github_release_mounts, resolve_mount,
+    ResolvedMount, backend_from_mount, resolve_github_release_mounts, resolve_mount,
 };
 use anyhow::{Context, Result, anyhow, bail};
 use axum::{
@@ -31,6 +30,10 @@ use base64::{Engine as _, engine::general_purpose};
 use config::{
     ServiceConfig, commented_yaml, config_db_path, hash_key, load_or_init_config, normalize_config,
     parse_config_yaml, save_config_to_db,
+};
+use drivers::{
+    GithubReleasesConfig, QuarkOpenConfig, S3Config, github_client, is_fnnas_quark_refresh_url,
+    quark_open_client,
 };
 use futures_util::TryStreamExt;
 use reqwest::{Client, Proxy, Url};
@@ -1698,7 +1701,7 @@ fn synthetic_mount_listing(
         if is_file {
             entries.push(S3Entry {
                 key,
-                size: mount_option_u64(&mount.options, "size").unwrap_or(0) as i64,
+                size: drivers::options::u64(&mount.options, "size").unwrap_or(0) as i64,
                 modified: chrono_millis(),
             });
         } else {
