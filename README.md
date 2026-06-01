@@ -55,11 +55,8 @@ mounts:
   - mount_path: /api/config.yaml
     type: system_config
 auth:
-  keys:
-    - name: admin
-      plain_key: fa17258e88926697fffd6be6aedc912e609b612ecffbc256
   rules:
-    - principal: key:admin
+    - principal: root
       actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
       resources: [/*]
     - principal: anonymous
