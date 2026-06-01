@@ -59,13 +59,13 @@ auth:
     - name: public
       plain_key: f834a310973c0f615cff59f4a692d535e7a0ef7f69059c30
   rules:
-    - principal: root
+    - user: root
       actions: [ListBucket, HeadObject, GetObject, PutObject, DeleteObject]
       resources: [/, /*]
-    - principal: anonymous
+    - user: anonymous
       actions: [ListBucket]
       resources: [/]
-    - principal: key:public
+    - user: public
       actions: [ListBucket, HeadObject, GetObject, PutObject]
       resources: [/public, /public/*]
 cache:

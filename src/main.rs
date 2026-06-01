@@ -3643,7 +3643,7 @@ async fn resolve_principal(state: &AppState, headers: &HeaderMap) -> String {
         .keys
         .iter()
         .find(|key| key.enabled && key.key_hash == hash)
-        .map(|key| format!("key:{}", key.name))
+        .map(|key| key.name.clone())
         .unwrap_or_else(|| "anonymous".to_string())
 }
 
@@ -3652,7 +3652,10 @@ fn policy_allows(config: &ServiceConfig, principal: &str, action: &str, resource
         return true;
     }
     config.auth.rules.iter().any(|rule| {
-        rule.principal == principal
+        rule.principal
+            .strip_prefix("key:")
+            .unwrap_or(&rule.principal)
+            == principal
             && rule
                 .actions
                 .iter()
@@ -4641,7 +4644,7 @@ mod tests {
                     plain_key: Some("reader-secret".to_string()),
                 }],
                 rules: vec![AuthRule {
-                    principal: "key:reader".to_string(),
+                    principal: "reader".to_string(),
                     actions: vec!["ListBucket".to_string()],
                     resources: vec!["/*".to_string()],
                 }],
@@ -5034,7 +5037,7 @@ auth:
     - name: reader
       plain_key: reader-test-key
   rules:
-    - principal: key:reader
+    - user: reader
       actions: [ListBucket]
       resources: [/*]
 cache:
@@ -5096,7 +5099,7 @@ auth:
     - name: yaml-reader
       plain_key: yaml-reader-key
   rules:
-    - principal: key:yaml-reader
+    - user: yaml-reader
       actions: [ListBucket, GetObject]
       resources: [/*]
 cache:
@@ -5162,7 +5165,7 @@ auth:
     - name: config-editor
       plain_key: config-editor-key
   rules:
-    - principal: key:config-editor
+    - user: config-editor
       actions: [GetObject, PutObject]
       resources: [/api/config.yaml]
 cache:
@@ -5232,7 +5235,7 @@ auth:
     - name: config-reader
       plain_key: config-reader-key
   rules:
-    - principal: key:config-reader
+    - user: config-reader
       actions: [GetObject]
       resources: [/system/live.yaml]
 cache:

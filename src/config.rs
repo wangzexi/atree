@@ -59,6 +59,7 @@ pub(crate) struct KeyConfig {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct AuthRule {
+    #[serde(rename = "user", alias = "principal")]
     pub(crate) principal: String,
     pub(crate) actions: Vec<String>,
     pub(crate) resources: Vec<String>,
@@ -197,6 +198,11 @@ pub(crate) fn normalize_config(mut config: ServiceConfig) -> Result<ServiceConfi
             key.key_hint = key_hint(&plain);
         }
     }
+    for rule in &mut config.auth.rules {
+        if let Some(name) = rule.principal.strip_prefix("key:") {
+            rule.principal = name.to_string();
+        }
+    }
     validate_config(&config)?;
     Ok(config)
 }
@@ -222,7 +228,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
     format!(
         r#"# atree config
 # This is the live service config. Comments are ignored on PUT.
-# If ATREE_ROOT_KEY is set, that key is treated as principal `root`.
+# If ATREE_ROOT_KEY is set, that key is treated as user `root`.
 #
 # s3_bucket: path-style S3 bucket name used by clients. Default: atree.
 # mounts: ordered mount table. Later mounts have higher priority.
@@ -260,7 +266,7 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 # auth.keys[].key_hash: sha256:<hex> hash generated from plain_key.
 # auth.keys[].key_hint: short non-secret hint for humans.
 # auth.rules: default-deny allow-list.
-# auth.rules[].principal: anonymous, root, or key:<name>.
+# auth.rules[].user: anonymous, root, or a name from auth.keys.
 # auth.rules[].actions: ListBucket, HeadObject, GetObject, PutObject, DeleteObject, or *.
 # auth.rules[].resources: service paths such as /public, /public/*, or /*.
 #   /public/* matches descendants at any depth, but not /public itself.
@@ -495,22 +501,21 @@ pub(crate) fn validate_config(config: &ServiceConfig) -> Result<()> {
         if !names.insert(key.name.clone()) {
             bail!("duplicate auth key '{}'", key.name);
         }
+        if matches!(key.name.as_str(), "anonymous" | "root") {
+            bail!("auth key '{}' uses a reserved name", key.name);
+        }
         if key.enabled && !key.key_hash.starts_with("sha256:") {
             bail!("auth key '{}' needs key_hash or plain_key", key.name);
         }
     }
 
     for rule in &config.auth.rules {
-        if rule.principal != "anonymous"
-            && rule.principal != "root"
-            && !rule.principal.starts_with("key:")
-        {
-            bail!("invalid principal '{}'", rule.principal);
-        }
-        if let Some(name) = rule.principal.strip_prefix("key:")
-            && !names.contains(name)
-        {
-            bail!("rule references missing key '{}'", name);
+        let user = rule
+            .principal
+            .strip_prefix("key:")
+            .unwrap_or(&rule.principal);
+        if user != "anonymous" && user != "root" && !names.contains(user) {
+            bail!("rule references missing user '{}'", user);
         }
         if rule.actions.is_empty() || rule.resources.is_empty() {
             bail!("auth rules need non-empty actions and resources");

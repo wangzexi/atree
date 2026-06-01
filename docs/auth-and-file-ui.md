@@ -330,7 +330,7 @@ mounts:
       proxy: http://127.0.0.1:1080
 auth:
   rules:
-    - principal: anonymous
+    - user: anonymous
       actions: [HeadObject, GetObject]
       resources: [/github/sing-box/*]
 ```
@@ -360,7 +360,7 @@ mounts:
         - sing-box-*-darwin-arm64.tar.gz
 auth:
   rules:
-    - principal: anonymous
+    - user: anonymous
       actions: [ListBucket, HeadObject, GetObject]
       resources: [/client, /client/*]
 ```
@@ -522,13 +522,13 @@ auth:
       key_hash: sha256:...
       key_hint: rdr_...wxyz
   rules:
-    - principal: anonymous
+    - user: anonymous
       actions: [HeadObject, GetObject]
       resources: [/public/*]
-    - principal: anonymous
+    - user: anonymous
       actions: [HeadObject, GetObject]
       resources: [/github/sing-box/*]
-    - principal: key:reader
+    - user: reader
       actions: [ListBucket, HeadObject, GetObject]
       resources: [/public, /public/*, /share, /share/*]
 cache:
@@ -541,10 +541,10 @@ For manual config updates, `PUT /api/config.yaml` can accept a temporary `plain_
 
 ## Policy Model
 
-Each request resolves to a principal:
+Each request resolves to a user:
 
 - `anonymous`: no key
-- `key:<name>`: matched configured key
+- `<name>`: matched configured key
 - `root`: bootstrap/recovery key that bypasses policy checks
 
 Actions:
@@ -560,16 +560,16 @@ Actions:
 Policy check:
 
 ```text
-principal + action + request path -> allow or deny
+user + action + request path -> allow or deny
 ```
 
-Anonymous access is not a separate config field. Public access is just a rule for the `anonymous` principal.
+Anonymous access is not a separate config field. Public access is just a rule for the `anonymous` user.
 
 Example public rule:
 
 ```json
 {
-  "principal": "anonymous",
+  "user": "anonymous",
   "actions": ["HeadObject", "GetObject"],
   "resources": ["/public/*"]
 }
@@ -629,7 +629,7 @@ Config history is not required for the first version.
 Auth rules should use a default-deny allow-list model:
 
 ```text
-if at least one allow rule matches principal + action + path:
+if at least one allow rule matches user + action + path:
   allow
 else:
   deny
