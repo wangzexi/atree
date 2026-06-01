@@ -82,7 +82,7 @@ cache:
 
 ## 致谢
 
-感谢 [OpenList](https://github.com/OpenListTeam/OpenList)。atree 的 mount 设计参考了 OpenList 的 driver 架构及相关 driver 逻辑，其中 QuarkOpen 部分重点参考 `drivers/quark_open`。
+- [OpenList](https://github.com/OpenListTeam/OpenList)
 
 ## 协议
 
