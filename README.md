@@ -88,7 +88,7 @@ cache:
 
 `root` 来自 `ATREE_ROOT_KEY`，不用写进 `users`。`rules` 只授权；可写路径还需要实际可写 mount。
 
-完整配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。Driver 配置看 `src/drivers/*.rs`。主设计思路看 `docs/design.md`。
+完整配置注释由代码生成：看 `src/config.rs` 的 `config_yaml_comments()` 和 `validate_config()`。Driver 配置看 `src/drivers/*.rs`。
 
 ## 致谢
 

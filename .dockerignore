@@ -1,6 +1,3 @@
 target
 .git
-.github
-tmp
-*.sqlite
 .DS_Store
