@@ -116,7 +116,7 @@ pub(crate) fn file_browser_html(config_path: &str) -> String {
       <span class="tagline">S3-style file API</span>
     </div>
     <div class="auth">
-      <input id="keyInput" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="访问 key">
+      <input id="keyInput" type="text" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="User Key">
     </div>
   </header>
   <main>
