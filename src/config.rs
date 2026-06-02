@@ -215,28 +215,11 @@ fn config_yaml_comments(public_base_url: &str, config_path: &str) -> String {
 # mounts[].path: service path, must start with /. Example: /quark or /pub
 # mounts[].type: quark_open, system_config, url_tree, github_releases, or s3.
 # mounts[].root_path: only for mounts backed by a remote tree.
-#   quark_open: human-readable Quark path, such as / or /backup.
-#   url_tree: upstream http(s) URL prefix. Read-only.
-#   github_releases: GitHub repo in owner/repo form. Read-only.
-#   s3: optional object key prefix. Omit it to use the bucket root.
+#   Driver field details are documented where they are parsed: src/drivers/*.rs.
 #   system_config does not use root_path; path is the config file path.
 # Disable a mount by commenting it out of this YAML.
 # mounts[].options:
-#   quark_open requires root_path and options.refresh_token.
-#   quark_open optional strings: access_token, app_id, sign_key, refresh_url, root_fid.
-#   default refresh_url: https://api.oplist.org/quarkyun/renewapi.
-#   use https://oauth.fnnas.com/api/v1/oauth/refreshToken when refresh must also learn app_id/sign_key.
-#   url_tree.proxy: optional outbound proxy URL, such as http://127.0.0.1:1080.
-#   url_tree.size: optional file size for file-shaped URL mounts when upstream HEAD is not reliable.
-#   github_releases.repo: owner/repo. If omitted, root_path can be owner/repo.
-#   github_releases.proxy: optional outbound proxy URL for API and downloads.
-#   github_releases.token: optional GitHub token for higher rate limits or private repos.
-#   github_releases.asset_allow: optional list of asset names or * globs.
-#   github_releases.show_source_code: optional boolean. Exposes GitHub's source zip/tarball links.
-#   Multiple github_releases mounts can share one path to create a flat merged directory.
-#   s3.endpoint/bucket/access_key/secret_key: required for S3-compatible mounts.
-#   s3.region: optional, default us-east-1. atree uses path-style S3 requests.
-#   s3.proxy: optional outbound proxy URL.
+#   Driver-specific fields live here. Read src/drivers/*.rs for exact meaning.
 #   hide_from_parent: optional boolean. Hides this mount only from its parent directory listing.
 #     Direct requests to path still resolve normally and still use rules.
 #     This is discoverability control, not a security boundary.

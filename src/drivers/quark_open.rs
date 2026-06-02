@@ -14,6 +14,16 @@
 //! atree writes refreshed OAuth state back into the same mount options in
 //! `/api/config.yaml`.
 //!
+//! Mount config:
+//! - `path`: atree directory where Quark files appear.
+//! - `root_path`: Quark directory path, such as `/` or `/backup`.
+//! - `options.refresh_token`: required OAuth refresh token.
+//! - `options.access_token`: optional current access token; refreshed when empty or expired.
+//! - `options.app_id`: optional QuarkOpen app id; required after refresh.
+//! - `options.sign_key`: optional request signing key; required after refresh.
+//! - `options.refresh_url`: optional token refresh endpoint.
+//! - `options.root_fid`: optional Quark folder id cache; defaults to `0`.
+//!
 //! OpenList reference:
 //! - driver path: `drivers/quark_open`
 //! - API base: `https://open-api-drive.quark.cn`
@@ -31,11 +41,17 @@ use crate::{QuarkOpenClient, config};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct QuarkOpenConfig {
+    /// Current OAuth access token. Can be empty when refresh can fill it.
     pub(crate) access_token: String,
+    /// OAuth refresh token. This is the minimum required secret.
     pub(crate) refresh_token: String,
+    /// QuarkOpen application id used as `x-pan-client-id`.
     pub(crate) app_id: String,
+    /// Secret used to sign QuarkOpen requests.
     pub(crate) sign_key: String,
+    /// Endpoint used to refresh OAuth tokens.
     pub(crate) refresh_url: String,
+    /// Quark folder id for the configured `root_path`; `0` means account root.
     #[serde(default)]
     pub(crate) root_fid: String,
 }

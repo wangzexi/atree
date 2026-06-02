@@ -3,6 +3,13 @@
 //! This driver maps atree paths onto a remote URL prefix. It is intentionally
 //! thin: atree only joins paths, optionally applies a proxy, and streams the
 //! target response back through the S3-compatible surface.
+//!
+//! Mount config:
+//! - `path`: atree directory exposed to users.
+//! - `root_path`: required upstream HTTP(S) URL prefix. Read-only.
+//! - `options.proxy`: optional outbound proxy.
+//! - `options.size`: optional fixed file size for file-shaped URL mounts when
+//!   upstream `HEAD` is unreliable.
 
 use reqwest::Url;
 
@@ -11,8 +18,11 @@ use crate::drivers::options;
 
 #[derive(Debug, Clone)]
 pub(crate) struct UrlTreeTarget {
+    /// Final upstream URL after joining `root_path` and the requested rest path.
     pub(crate) url: String,
+    /// Optional outbound proxy.
     pub(crate) proxy: Option<String>,
+    /// Optional fixed size exposed in HEAD/List responses.
     pub(crate) size: Option<u64>,
 }
 
