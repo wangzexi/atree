@@ -33,7 +33,7 @@ flowchart LR
 ```bash
 docker run --rm \
   -p 9000:9000 \
-  -e ATREE_ROOT_KEY='root1234' \
+  -e ATREE_ROOT_KEY='RofCYxijYM' \
   -e ATREE_DB='/data/atree.sqlite' \
   -v atree-data:/data \
   ghcr.io/wangzexi/atree:latest
@@ -62,11 +62,11 @@ mounts:
     options:
       endpoint: https://s3.example.com
       bucket: public
-      access_key: key12345
-      secret_key: sec12345
+      access_key: 20i9WXV8Tx
+      secret_key: lrV7zeNdkL
 users:
   - name: public
-    key: public01
+    key: Ok4t2IR4Bp
 rules:
   - user: root
     paths: [/, /*]
