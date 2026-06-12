@@ -22,6 +22,8 @@ function App() {
   const [streamText, setStreamText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
 
   useEffect(() => {
@@ -113,6 +115,34 @@ function App() {
     setSelection({ node, session: node.sessions[0] });
   }
 
+  function startTitleEdit() {
+    if (!selection?.session) return;
+    setTitleDraft(selection.session.title);
+    setEditingTitle(true);
+  }
+
+  async function saveTitle() {
+    if (!selection?.session || !editingTitle) return;
+    const title = titleDraft.trim() || selection.session.title;
+    setEditingTitle(false);
+    if (title === selection.session.title) return;
+
+    const response = await fetch(`/api/nodes/${selection.node.id}/sessions/${selection.session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    const data = await response.json();
+    const updated = data.session as AtreeSessionMeta;
+    setSelection((current) => (current?.session?.id === updated.id ? { node: current.node, session: updated } : current));
+    setNodes((current) => replaceSessionInNodes(current, updated));
+  }
+
+  function cancelTitleEdit() {
+    setTitleDraft(selection?.session?.title ?? "");
+    setEditingTitle(false);
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -140,7 +170,29 @@ function App() {
       <main className="chat">
         <header className="chat-header">
           <div className="chat-heading">
-            <div className="chat-title">{selection?.session?.title ?? selection?.node.title ?? "atree-ng"}</div>
+            {editingTitle ? (
+              <input
+                className="chat-title-input"
+                value={titleDraft}
+                autoFocus
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={() => void saveTitle()}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  }
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    cancelTitleEdit();
+                  }
+                }}
+              />
+            ) : (
+              <button className="chat-title" onClick={startTitleEdit} disabled={!selection?.session} title="点击编辑标题">
+                {selection?.session?.title ?? selection?.node.title ?? "atree-ng"}
+              </button>
+            )}
           </div>
         </header>
 
@@ -218,7 +270,7 @@ function TreeNode({
                 onSelectSession(node, session);
               }}
             >
-              {session.icon || "◌"}
+              {session.icon || "💬"}
             </button>
           ))}
           {hasMore && (
@@ -287,6 +339,14 @@ function getVisibleSessions(node: AtreeNode): AtreeSessionMeta[] {
     .filter((session) => !session.schedule)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
   return [...scheduled, ...normal.slice(0, 1)];
+}
+
+function replaceSessionInNodes(nodes: AtreeNode[], updated: AtreeSessionMeta): AtreeNode[] {
+  return nodes.map((node) => ({
+    ...node,
+    sessions: node.sessions.map((session) => (session.id === updated.id ? updated : session)),
+    children: replaceSessionInNodes(node.children, updated),
+  }));
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

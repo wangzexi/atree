@@ -94,37 +94,53 @@ textarea {
   align-items: center;
   display: flex;
   gap: 4px;
-  opacity: 0;
   padding-right: 6px;
-  pointer-events: none;
-  transition: opacity 120ms ease;
-}
-
-.tree-row:hover .tree-actions,
-.tree-row:focus-within .tree-actions {
-  opacity: 1;
-  pointer-events: auto;
 }
 
 .tree-session,
 .tree-add {
   align-items: center;
-  background: rgba(246, 250, 252, 0.92);
-  border: 1px solid transparent;
-  border-radius: 999px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
   color: #40515f;
   cursor: pointer;
   display: inline-flex;
   height: 24px;
   justify-content: center;
-  min-width: 24px;
-  padding: 0 6px;
+  min-width: 22px;
+  padding: 0 3px;
 }
 
 .tree-session.active {
-  background: #ffffff;
-  border-color: #a9c5d4;
-  box-shadow: 0 1px 6px rgba(68, 105, 125, 0.08);
+  background: transparent;
+  filter: saturate(1.08);
+  transform: translateY(-1px);
+}
+
+.tree-add {
+  color: #6d8592;
+  max-width: 0;
+  min-width: 0;
+  opacity: 0;
+  overflow: hidden;
+  padding: 0;
+  transform: translateX(-6px);
+  transition:
+    max-width 140ms ease,
+    min-width 140ms ease,
+    opacity 120ms ease,
+    padding 140ms ease,
+    transform 140ms ease;
+}
+
+.tree-row:hover .tree-add,
+.tree-row:focus-within .tree-add {
+  max-width: 24px;
+  min-width: 22px;
+  opacity: 1;
+  padding: 0 3px;
+  transform: translateX(0);
 }
 
 .tree-children {
@@ -165,18 +181,38 @@ textarea {
 }
 
 .chat-title {
+  background: transparent;
+  border: 0;
   color: #24313c;
+  cursor: text;
   font-size: 16px;
-  font-weight: 650;
+  font-weight: 400;
   line-height: 1.25;
   overflow: hidden;
+  padding: 2px 0;
+  text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.chat-title:disabled {
+  cursor: default;
+}
+
+.chat-title-input {
+  background: rgba(246, 250, 252, 0.86);
+  border: 1px solid #cfe0e8;
+  border-radius: 7px;
+  color: #24313c;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 1.25;
+  outline: 0;
+  padding: 5px 8px;
+  width: min(360px, 60vw);
+}
+
 .messages {
-  margin: 0 auto;
-  max-width: 920px;
   min-height: 0;
   overflow: auto;
   padding: 24px 28px 190px;
@@ -184,7 +220,10 @@ textarea {
 }
 
 .message {
+  margin-left: auto;
+  margin-right: auto;
   margin-bottom: 26px;
+  max-width: 920px;
 }
 
 .message-role {
@@ -214,6 +253,9 @@ textarea {
 
 .empty {
   color: #999;
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
   margin-top: 30vh;
   text-align: center;
 }
