@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 import type { AtreeNode, AtreeSessionMeta, DisplayMessage } from "../types";
@@ -58,17 +58,6 @@ function App() {
     return () => source.close();
   }, [selection?.node.id, selection?.session?.id]);
 
-  const visibleSessions = useMemo(() => {
-    if (!selection?.node) return [];
-    const scheduled = selection.node.sessions
-      .filter((session) => session.schedule)
-      .sort((a, b) => (a.next_run_at ?? "").localeCompare(b.next_run_at ?? ""));
-    const normal = selection.node.sessions
-      .filter((session) => !session.schedule)
-      .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    return [...scheduled, ...normal.slice(0, 1)];
-  }, [selection?.node]);
-
   async function refreshTree(selectFirst = true) {
     const response = await fetch("/api/tree");
     const data = (await response.json()) as TreeResponse;
@@ -89,16 +78,16 @@ function App() {
     await refreshTree();
   }
 
-  async function createSession() {
-    if (!selection?.node) return;
-    const response = await fetch(`/api/nodes/${selection.node.id}/sessions`, {
+  async function createSession(node = selection?.node) {
+    if (!node) return;
+    const response = await fetch(`/api/nodes/${node.id}/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: "新会话" }),
     });
     const data = await response.json();
     await refreshTree(false);
-    setSelection({ node: selection.node, session: data.session });
+    setSelection({ node, session: data.session });
   }
 
   async function loadMessages(nodeId: string, sessionId: string) {
@@ -124,21 +113,22 @@ function App() {
     setSelection({ node, session: node.sessions[0] });
   }
 
-  function selectSession(session: AtreeSessionMeta) {
-    if (!selection?.node) return;
-    setSelection({ node: selection.node, session });
-  }
-
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-header">目录</div>
-        <div className="root-path" title={rootPath}>
-          {rootPath || "未连接"}
-        </div>
         <div className="tree">
           {nodes.length ? (
-            nodes.map((node) => <TreeNode key={node.id} node={node} selectedId={selection?.node.id} onSelect={selectNode} />)
+            nodes.map((node) => (
+              <TreeNode
+                key={node.id}
+                node={node}
+                selectedId={selection?.node.id}
+                selectedSessionId={selection?.session?.id}
+                onSelect={selectNode}
+                onSelectSession={(targetNode, session) => setSelection({ node: targetNode, session })}
+                onCreateSession={(targetNode) => void createSession(targetNode)}
+              />
+            ))
           ) : (
             <button className="init-button" onClick={initRoot}>
               初始化根目录
@@ -149,32 +139,9 @@ function App() {
 
       <main className="chat">
         <header className="chat-header">
-          <div>
+          <div className="chat-heading">
             <div className="chat-title">{selection?.session?.title ?? selection?.node.title ?? "atree-ng"}</div>
-            <div className="chat-subtitle">{selection?.node.path ?? "选择一个 .agents/atree.yaml 目录"}</div>
           </div>
-          {selection?.node && (
-            <div className="session-icons">
-              {visibleSessions.map((session) => (
-                <button
-                  key={session.id}
-                  className={session.id === selection.session?.id ? "session-icon active" : "session-icon"}
-                  title={tooltip(session)}
-                  onClick={() => selectSession(session)}
-                >
-                  {session.icon || "◌"}
-                </button>
-              ))}
-              {selection.node.sessions.length > visibleSessions.length && (
-                <button className="session-icon" title={selection.node.sessions.map((session) => session.title).join("\n")}>
-                  …
-                </button>
-              )}
-              <button className="new-session" onClick={createSession} title="新会话">
-                +
-              </button>
-            </div>
-          )}
         </header>
 
         <section className="messages">
@@ -216,17 +183,73 @@ function App() {
   );
 }
 
-function TreeNode({ node, selectedId, onSelect }: { node: AtreeNode; selectedId?: string; onSelect: (node: AtreeNode) => void }) {
+function TreeNode({
+  node,
+  selectedId,
+  selectedSessionId,
+  onSelect,
+  onSelectSession,
+  onCreateSession,
+}: {
+  node: AtreeNode;
+  selectedId?: string;
+  selectedSessionId?: string;
+  onSelect: (node: AtreeNode) => void;
+  onSelectSession: (node: AtreeNode, session: AtreeSessionMeta) => void;
+  onCreateSession: (node: AtreeNode) => void;
+}) {
+  const visibleSessions = getVisibleSessions(node);
+  const hasMore = node.sessions.length > visibleSessions.length;
+
   return (
     <div className="tree-node">
-      <button className={node.id === selectedId ? "tree-button selected" : "tree-button"} onClick={() => onSelect(node)}>
-        <span className="folder">▱</span>
-        <span>{node.title}</span>
-      </button>
+      <div className={node.id === selectedId ? "tree-row selected" : "tree-row"}>
+        <button className="tree-button" onClick={() => onSelect(node)} title={node.path}>
+          <span className="tree-title">{node.title}</span>
+        </button>
+        <div className="tree-actions">
+          {visibleSessions.map((session) => (
+            <button
+              key={session.id}
+              className={session.id === selectedSessionId ? "tree-session active" : "tree-session"}
+              title={tooltip(session)}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSelectSession(node, session);
+              }}
+            >
+              {session.icon || "◌"}
+            </button>
+          ))}
+          {hasMore && (
+            <button className="tree-session" title={node.sessions.map((session) => session.title).join("\n")}>
+              …
+            </button>
+          )}
+          <button
+            className="tree-add"
+            title="新会话"
+            onClick={(event) => {
+              event.stopPropagation();
+              onCreateSession(node);
+            }}
+          >
+            +
+          </button>
+        </div>
+      </div>
       {node.children.length > 0 && (
         <div className="tree-children">
           {node.children.map((child) => (
-            <TreeNode key={child.id} node={child} selectedId={selectedId} onSelect={onSelect} />
+            <TreeNode
+              key={child.id}
+              node={child}
+              selectedId={selectedId}
+              selectedSessionId={selectedSessionId}
+              onSelect={onSelect}
+              onSelectSession={onSelectSession}
+              onCreateSession={onCreateSession}
+            />
           ))}
         </div>
       )}
@@ -254,6 +277,16 @@ function roleLabel(role: string): string {
   if (role === "assistant") return "assistant";
   if (role === "user") return "you";
   return role;
+}
+
+function getVisibleSessions(node: AtreeNode): AtreeSessionMeta[] {
+  const scheduled = node.sessions
+    .filter((session) => session.schedule)
+    .sort((a, b) => (a.next_run_at ?? "").localeCompare(b.next_run_at ?? ""));
+  const normal = node.sessions
+    .filter((session) => !session.schedule)
+    .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  return [...scheduled, ...normal.slice(0, 1)];
 }
 
 createRoot(document.getElementById("root")!).render(<App />);

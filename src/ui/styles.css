@@ -1,8 +1,8 @@
 :root {
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #202124;
-  background: #f7f7f6;
+  color: #1f2933;
+  background: #fbfdff;
 }
 
 html,
@@ -27,10 +27,11 @@ textarea {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 300px 1fr;
+  grid-template-columns: 292px 1fr;
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
+  background: #fbfdff;
 }
 
 .sidebar {
@@ -39,58 +40,91 @@ textarea {
   height: 100%;
   min-height: 0;
   min-width: 0;
-  border-right: 1px solid #dedede;
-  background: #ededec;
-  padding: 18px 16px;
+  border-right: 1px solid #e8eef2;
+  background: #f4f9fb;
+  padding: 14px 12px;
   overflow: hidden;
-}
-
-.sidebar-header {
-  color: #929292;
-  font-size: 14px;
-  font-weight: 700;
-  margin-bottom: 10px;
-}
-
-.root-path {
-  color: #737373;
-  font-size: 13px;
-  margin-bottom: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .tree {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
   min-height: 0;
   overflow: auto;
+  padding-top: 2px;
+}
+
+.tree-row {
+  align-items: center;
+  border-radius: 8px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 36px;
+}
+
+.tree-row:hover,
+.tree-row.selected {
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(207, 222, 230, 0.8);
 }
 
 .tree-button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 7px;
-  color: #333;
+  border-radius: 8px;
+  color: #34414c;
   cursor: pointer;
   display: flex;
-  gap: 9px;
-  min-height: 34px;
-  padding: 6px 10px;
+  min-width: 0;
+  min-height: 36px;
+  padding: 7px 8px 7px 10px;
   text-align: left;
   width: 100%;
 }
 
-.tree-button:hover,
-.tree-button.selected {
-  background: #dededc;
+.tree-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.folder {
-  color: #6e6e6e;
+.tree-actions {
+  align-items: center;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  padding-right: 6px;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.tree-row:hover .tree-actions,
+.tree-row:focus-within .tree-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.tree-session,
+.tree-add {
+  align-items: center;
+  background: rgba(246, 250, 252, 0.92);
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: #40515f;
+  cursor: pointer;
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  min-width: 24px;
+  padding: 0 6px;
+}
+
+.tree-session.active {
+  background: #ffffff;
+  border-color: #a9c5d4;
+  box-shadow: 0 1px 6px rgba(68, 105, 125, 0.08);
 }
 
 .tree-children {
@@ -98,75 +132,46 @@ textarea {
 }
 
 .init-button {
-  border: 1px solid #ccccca;
-  border-radius: 7px;
-  background: #f8f8f7;
+  border: 1px solid #dce8ee;
+  border-radius: 8px;
+  background: #ffffff;
   cursor: pointer;
   min-height: 36px;
 }
 
 .chat {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto auto;
+  grid-template-rows: auto minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   min-width: 0;
   background: #ffffff;
   overflow: hidden;
+  position: relative;
 }
 
 .chat-header {
   align-items: center;
-  border-bottom: 1px solid #e6e6e6;
+  border-bottom: 1px solid #edf2f5;
   display: flex;
   gap: 18px;
   justify-content: space-between;
-  min-height: 72px;
-  padding: 14px 28px;
+  min-height: 56px;
+  padding: 10px 28px;
+}
+
+.chat-heading {
+  min-width: 0;
 }
 
 .chat-title {
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.chat-subtitle {
-  color: #888;
-  font-size: 12px;
-  margin-top: 4px;
-  max-width: 680px;
+  color: #24313c;
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.session-icons {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-}
-
-.session-icon,
-.new-session {
-  align-items: center;
-  background: #f2f2f1;
-  border: 1px solid transparent;
-  border-radius: 999px;
-  cursor: pointer;
-  display: inline-flex;
-  height: 34px;
-  justify-content: center;
-  min-width: 34px;
-  padding: 0 10px;
-}
-
-.session-icon.active {
-  border-color: #202124;
-  background: #ffffff;
-}
-
-.new-session {
-  color: #555;
 }
 
 .messages {
@@ -174,7 +179,7 @@ textarea {
   max-width: 920px;
   min-height: 0;
   overflow: auto;
-  padding: 28px;
+  padding: 24px 28px 190px;
   width: 100%;
 }
 
@@ -191,7 +196,7 @@ textarea {
 }
 
 .message-body {
-  background: #f0f0ef;
+  background: #f5f9fb;
   border-radius: 8px;
   line-height: 1.7;
   padding: 14px 16px;
@@ -215,20 +220,32 @@ textarea {
 
 .error {
   color: #b42318;
-  padding: 0 28px 12px;
+  left: 50%;
+  max-width: 920px;
+  padding: 0 28px;
+  position: absolute;
+  bottom: 146px;
+  transform: translateX(-50%);
+  width: 100%;
 }
 
 .composer {
   align-items: end;
-  border: 1px solid #dddddc;
+  backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid #dfeaf0;
   border-radius: 24px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.08);
+  box-shadow: 0 14px 38px rgba(72, 100, 116, 0.14);
+  bottom: 24px;
   display: grid;
   gap: 12px;
   grid-template-columns: 1fr 44px;
-  margin: 18px auto 28px;
+  left: 50%;
+  margin: 0;
   max-width: 920px;
   padding: 12px;
+  position: absolute;
+  transform: translateX(-50%);
   width: calc(100% - 56px);
 }
 
@@ -242,7 +259,7 @@ textarea {
 
 .composer button {
   align-items: center;
-  background: #202124;
+  background: #21313d;
   border: 0;
   border-radius: 999px;
   color: #fff;
