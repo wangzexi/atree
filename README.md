@@ -75,6 +75,18 @@ later. The first goal is to make directories feel executable.
 
 ## References
 
+Project documents:
+
+- [`docs/design.md`](docs/design.md)
+  - Current stable product design: directories, sessions, scheduled sessions,
+    `.agents/` storage, and UI principles.
+- [`docs/mvp.md`](docs/mvp.md)
+  - MVP task brief: local HTTP GUI, directory tree, JSONL sessions,
+    attachments, scheduling, and reference implementations.
+- [`docs/future.md`](docs/future.md)
+  - Untraded-off idea pool for future features such as interface sessions,
+    mounts, SQLite runtime, Pi ecosystem compatibility, and self-configuration.
+
 Core source material:
 
 - `/Users/zexi/workspace/wangzexi/space/知识库的下一步/README.md`
@@ -106,4 +118,3 @@ Supporting material:
 Mirrored or published blog copy:
 
 - `/Users/zexi/workspace/wangzexi/blog/知识库的下一步：从静态文档到持续运行的局部上下文/README.md`
-
