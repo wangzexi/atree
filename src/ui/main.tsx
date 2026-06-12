@@ -251,15 +251,15 @@ function TreeNode({
   onCreateSession: (node: AtreeNode) => void;
 }) {
   const visibleSessions = getVisibleSessions(node);
-  const hasMore = node.sessions.length > visibleSessions.length;
+  const hiddenSessionCount = node.sessions.length - visibleSessions.length;
 
   return (
     <div className="tree-node">
       <div className={node.id === selectedId ? "tree-row selected" : "tree-row"}>
-        <button className="tree-button" onClick={() => onSelect(node)} title={node.path}>
-          <span className="tree-title">{node.title}</span>
-        </button>
-        <div className="tree-actions">
+        <div className="tree-main">
+          <button className="tree-button" onClick={() => onSelect(node)} title={node.path}>
+            <span className="tree-title">{node.title}</span>
+          </button>
           {visibleSessions.map((session) => (
             <button
               key={session.id}
@@ -273,11 +273,13 @@ function TreeNode({
               {session.icon || "💬"}
             </button>
           ))}
-          {hasMore && (
-            <button className="tree-session" title={node.sessions.map((session) => session.title).join("\n")}>
-              …
+          {hiddenSessionCount > 0 && (
+            <button className="tree-session tree-more" title={node.sessions.map((session) => session.title).join("\n")}>
+              +{hiddenSessionCount}
             </button>
           )}
+        </div>
+        <div className="tree-actions">
           <button
             className="tree-add"
             title="新会话"

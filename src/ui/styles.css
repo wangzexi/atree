@@ -69,6 +69,14 @@ textarea {
   box-shadow: inset 0 0 0 1px rgba(207, 222, 230, 0.8);
 }
 
+.tree-main {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 10px;
+}
+
 .tree-button {
   align-items: center;
   background: transparent;
@@ -79,9 +87,9 @@ textarea {
   display: flex;
   min-width: 0;
   min-height: 36px;
-  padding: 7px 8px 7px 10px;
+  padding: 7px 3px 7px 0;
   text-align: left;
-  width: 100%;
+  flex: 0 1 auto;
 }
 
 .tree-title {
@@ -110,6 +118,11 @@ textarea {
   justify-content: center;
   min-width: 22px;
   padding: 0 3px;
+}
+
+.tree-more {
+  color: #7a8f9b;
+  font-size: 12px;
 }
 
 .tree-session.active {
