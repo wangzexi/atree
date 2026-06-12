@@ -199,13 +199,11 @@ function App() {
         <section className="messages">
           {messages.map((message) => (
             <article key={message.id} className={`message ${message.role}`}>
-              <div className="message-role">{roleLabel(message.role)}</div>
               <div className="message-body">{message.text}</div>
             </article>
           ))}
           {streamText && (
             <article className="message assistant">
-              <div className="message-role">assistant</div>
               <div className="message-body">{streamText}</div>
             </article>
           )}
@@ -325,12 +323,6 @@ function tooltip(session: AtreeSessionMeta): string {
 
 function formatTime(value: string): string {
   return new Date(value).toLocaleString();
-}
-
-function roleLabel(role: string): string {
-  if (role === "assistant") return "assistant";
-  if (role === "user") return "you";
-  return role;
 }
 
 function getVisibleSessions(node: AtreeNode): AtreeSessionMeta[] {
