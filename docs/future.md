@@ -211,19 +211,18 @@ Secrets 不进目录
 
 - 本地参考仓库是 `/Users/zexi/workspace/refs/pi-mono`。
 - 主要 SDK 是 TypeScript。
-- Python 接入更像 RPC 模式，不是独立 Python SDK。
 - Pi 会话是 JSONL。
 - Pi 支持 skills、extensions、ResourceLoader 等机制。
 
 可能路线：
 
 ```text
-MVP：参考 Pi SDK + 兼容 Pi skills 目录
+MVP：直接使用 Pi SDK + 兼容 Pi skills 目录
 v2：兼容 Pi extension discovery / ResourceLoader
 v3：让 atree 目录成为 Pi extension runtime 的上下文
 ```
 
-暂不承诺直接兼容所有 Pi 扩展。扩展系统涉及工具生命周期、权限、UI renderer、配置发现、沙箱和事件协议，需要单独评估。
+目标是尽可能接入 Pi 生态。MVP 先保证核心会话运行、JSONL、skills 与 Pi 对齐；完整扩展兼容涉及工具生命周期、权限、UI renderer、配置发现、沙箱和事件协议，需要单独评估。
 
 ## 11. 会话历史的自动模式提取
 
@@ -321,4 +320,3 @@ MVP 可以先做简单串行执行，不做复杂恢复。
 - 示例目录。
 
 这类文档本身也应该被 Agent 自动注入，让 Agent 能指导用户配置 atree。
-

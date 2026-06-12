@@ -67,11 +67,63 @@ The first useful version should stay small:
 - directory-bound AI chat
 - persistent sessions
 - loops or scheduled sessions
-- autonomous directory marker
-- interface agent for selected directories
+- session icons and CRON metadata in `.agents/atree.yaml`
 
-File preview, rich media browsing, graph views, and simulation-style UI can come
-later. The first goal is to make directories feel executable.
+Interface sessions, file preview, rich media browsing, graph views, and
+simulation-style UI can come later. The first goal is to make directories feel
+executable.
+
+## Current MVP
+
+This repository now contains a Bun + TypeScript + React local HTTP app.
+
+Run the API and UI in development:
+
+```bash
+bun install
+ATREE_ROOT=/path/to/root bun run server
+bun run dev
+```
+
+Open:
+
+```text
+http://127.0.0.1:5173/
+```
+
+The API listens on `0.0.0.0:8787` by default, so another machine can reach it
+if the host network allows that port.
+
+Useful environment variables:
+
+```bash
+ATREE_ROOT=/path/to/root
+PORT=8787
+ATREE_MODEL_PROVIDER=zexi
+ATREE_MODEL_ID=gpt-5.3-codex-spark
+ATREE_THINKING_LEVEL=minimal
+```
+
+MVP storage:
+
+```text
+.agents/atree.yaml
+.agents/sessions/<session-id>.jsonl
+.agents/attachments/<session-id>/
+.agents/skills/
+```
+
+Notes:
+
+- The UI left side is only a directory tree of `.agents/atree.yaml` nodes.
+- Sessions are Pi Coding Agent sessions. atree-ng does not wrap Pi messages in
+  another runtime format.
+- CRON schedule is stored directly in `.agents/atree.yaml`.
+- Attachments are stored as files under `.agents/attachments/<session-id>/`.
+- In local smoke testing, `deepseek/deepseek-v4-flash` completed a real Pi SDK
+  response. `zexi/gpt-5.3-codex-spark` is wired as the default, but currently
+  returns `400 status code (no body)` through the installed Pi SDK/provider
+  configuration on this machine.
 
 ## References
 
