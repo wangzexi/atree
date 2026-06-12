@@ -67,7 +67,7 @@ function App() {
     setNodes(data.nodes);
     if (selectFirst && !selection && data.nodes[0]) {
       const first = firstNode(data.nodes[0]);
-      setSelection({ node: first, session: first.sessions[0] });
+      setSelection({ node: first });
     }
   }
 
@@ -112,7 +112,8 @@ function App() {
   }
 
   function selectNode(node: AtreeNode) {
-    setSelection({ node, session: node.sessions[0] });
+    setSelection({ node });
+    setEditingTitle(false);
   }
 
   function startTitleEdit() {
@@ -207,7 +208,7 @@ function App() {
               <div className="message-body">{streamText}</div>
             </article>
           )}
-          {!selection?.session && <div className="empty">选择目录后创建或打开一个会话。</div>}
+          {!selection?.session && <div className="empty">点击左侧会话 icon 打开会话，或点击加号创建新会话。</div>}
         </section>
 
         {error && <div className="error">{error}</div>}
