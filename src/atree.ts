@@ -76,7 +76,7 @@ export function upsertSessionMeta(dir: string, meta: AtreeSessionMeta): AtreeCon
 export function patchSessionMeta(
   dir: string,
   sessionId: string,
-  patch: Partial<Pick<AtreeSessionMeta, "title" | "icon" | "schedule" | "last_run_at" | "next_run_at" | "updated_at">>,
+  patch: Partial<Pick<AtreeSessionMeta, "title" | "icon" | "schedule" | "last_run_at" | "next_run_at" | "updated_at" | "archived">>,
 ): AtreeSessionMeta {
   const config = readAtreeConfig(dir);
   const session = config.sessions.find((item) => item.id === sessionId);
@@ -90,6 +90,7 @@ export function patchSessionMeta(
   }
   if ("last_run_at" in patch) session.last_run_at = patch.last_run_at;
   if ("next_run_at" in patch) session.next_run_at = patch.next_run_at;
+  if ("archived" in patch) session.archived = Boolean(patch.archived);
   session.updated_at = patch.updated_at ?? new Date().toISOString();
 
   writeAtreeConfig(dir, config);
@@ -163,6 +164,7 @@ function normalizeSession(value: unknown): AtreeSessionMeta | undefined {
     last_run_at: typeof input.last_run_at === "string" ? input.last_run_at : undefined,
     next_run_at: typeof input.next_run_at === "string" ? input.next_run_at : undefined,
     updated_at: typeof input.updated_at === "string" ? input.updated_at : new Date().toISOString(),
+    archived: Boolean(input.archived),
   };
 }
 

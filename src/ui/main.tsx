@@ -24,6 +24,7 @@ function App() {
   const [error, setError] = useState<string | undefined>();
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
+  const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
 
   useEffect(() => {
@@ -68,6 +69,7 @@ function App() {
     if (selectFirst && !selection && data.nodes[0]) {
       const first = firstNode(data.nodes[0]);
       setSelection({ node: first });
+      setExpandedNodeIds(new Set([first.id]));
     }
   }
 
@@ -89,6 +91,7 @@ function App() {
     });
     const data = await response.json();
     await refreshTree(false);
+    setExpandedNodeIds((current) => new Set(current).add(node.id));
     setSelection({ node, session: data.session });
   }
 
@@ -114,6 +117,28 @@ function App() {
   function selectNode(node: AtreeNode) {
     setSelection({ node });
     setEditingTitle(false);
+  }
+
+  function toggleNode(node: AtreeNode) {
+    selectNode(node);
+    setExpandedNodeIds((current) => {
+      const next = new Set(current);
+      if (next.has(node.id)) next.delete(node.id);
+      else next.add(node.id);
+      return next;
+    });
+  }
+
+  async function archiveSession(node: AtreeNode, session: AtreeSessionMeta) {
+    const response = await fetch(`/api/nodes/${node.id}/sessions/${session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ archived: true }),
+    });
+    const data = await response.json();
+    const updated = data.session as AtreeSessionMeta;
+    setNodes((current) => replaceSessionInNodes(current, updated));
+    setSelection((current) => (current?.session?.id === updated.id ? { node: current.node } : current));
   }
 
   function startTitleEdit() {
@@ -155,9 +180,11 @@ function App() {
                 node={node}
                 selectedId={selection?.node.id}
                 selectedSessionId={selection?.session?.id}
-                onSelect={selectNode}
+                expandedIds={expandedNodeIds}
+                onToggle={toggleNode}
                 onSelectSession={(targetNode, session) => setSelection({ node: targetNode, session })}
                 onCreateSession={(targetNode) => void createSession(targetNode)}
+                onArchiveSession={(targetNode, session) => void archiveSession(targetNode, session)}
               />
             ))
           ) : (
@@ -208,7 +235,7 @@ function App() {
               <div className="message-body">{streamText}</div>
             </article>
           )}
-          {!selection?.session && <div className="empty">点击左侧会话 icon 打开会话，或点击加号创建新会话。</div>}
+          {!selection?.session && <div className="empty">展开左侧目录并选择会话，或点击加号创建新会话。</div>}
         </section>
 
         {error && <div className="error">{error}</div>}
@@ -238,28 +265,33 @@ function TreeNode({
   node,
   selectedId,
   selectedSessionId,
-  onSelect,
+  expandedIds,
+  onToggle,
   onSelectSession,
   onCreateSession,
+  onArchiveSession,
 }: {
   node: AtreeNode;
   selectedId?: string;
   selectedSessionId?: string;
-  onSelect: (node: AtreeNode) => void;
+  expandedIds: Set<string>;
+  onToggle: (node: AtreeNode) => void;
   onSelectSession: (node: AtreeNode, session: AtreeSessionMeta) => void;
   onCreateSession: (node: AtreeNode) => void;
+  onArchiveSession: (node: AtreeNode, session: AtreeSessionMeta) => void;
 }) {
-  const visibleSessions = getVisibleSessions(node);
-  const hiddenSessionCount = node.sessions.length - visibleSessions.length;
+  const activeSessions = getActiveSessions(node);
+  const loopSessions = getLoopSessions(node);
+  const isExpanded = expandedIds.has(node.id);
 
   return (
     <div className="tree-node">
       <div className={node.id === selectedId ? "tree-row selected" : "tree-row"}>
         <div className="tree-main">
-          <button className="tree-button" onClick={() => onSelect(node)} title={node.path}>
+          <button className="tree-button" onClick={() => onToggle(node)} title={node.path}>
             <span className="tree-title">{node.title}</span>
           </button>
-          {visibleSessions.map((session) => (
+          {loopSessions.map((session) => (
             <button
               key={session.id}
               className={session.id === selectedSessionId ? "tree-session active" : "tree-session"}
@@ -272,11 +304,6 @@ function TreeNode({
               {session.icon || "💬"}
             </button>
           ))}
-          {hiddenSessionCount > 0 && (
-            <button className="tree-session tree-more" title={node.sessions.map((session) => session.title).join("\n")}>
-              +{hiddenSessionCount}
-            </button>
-          )}
         </div>
         <div className="tree-actions">
           <button
@@ -291,6 +318,21 @@ function TreeNode({
           </button>
         </div>
       </div>
+      {isExpanded && activeSessions.length > 0 && (
+        <div className="tree-sessions">
+          {activeSessions.map((session) => (
+            <div key={session.id} className={session.id === selectedSessionId ? "tree-session-row active" : "tree-session-row"}>
+              <button className="tree-session-title" title={tooltip(session)} onClick={() => onSelectSession(node, session)}>
+                <span className="tree-session-row-icon">{session.icon || "💬"}</span>
+                <span className="tree-session-row-text">{session.title}</span>
+              </button>
+              <button className="tree-archive" title="归档" onClick={() => onArchiveSession(node, session)}>
+                归档
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
       {node.children.length > 0 && (
         <div className="tree-children">
           {node.children.map((child) => (
@@ -299,9 +341,11 @@ function TreeNode({
               node={child}
               selectedId={selectedId}
               selectedSessionId={selectedSessionId}
-              onSelect={onSelect}
+              expandedIds={expandedIds}
+              onToggle={onToggle}
               onSelectSession={onSelectSession}
               onCreateSession={onCreateSession}
+              onArchiveSession={onArchiveSession}
             />
           ))}
         </div>
@@ -326,14 +370,17 @@ function formatTime(value: string): string {
   return new Date(value).toLocaleString();
 }
 
-function getVisibleSessions(node: AtreeNode): AtreeSessionMeta[] {
-  const scheduled = node.sessions
-    .filter((session) => session.schedule)
-    .sort((a, b) => (a.next_run_at ?? "").localeCompare(b.next_run_at ?? ""));
-  const normal = node.sessions
-    .filter((session) => !session.schedule)
+function getActiveSessions(node: AtreeNode): AtreeSessionMeta[] {
+  return node.sessions
+    .filter((session) => !session.archived)
     .sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-  return [...scheduled, ...normal.slice(0, 1)];
+}
+
+function getLoopSessions(node: AtreeNode): AtreeSessionMeta[] {
+  const scheduled = node.sessions
+    .filter((session) => session.schedule && !session.archived)
+    .sort((a, b) => (a.next_run_at ?? "").localeCompare(b.next_run_at ?? ""));
+  return scheduled;
 }
 
 function replaceSessionInNodes(nodes: AtreeNode[], updated: AtreeSessionMeta): AtreeNode[] {

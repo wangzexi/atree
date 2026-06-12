@@ -6,6 +6,7 @@ export interface AtreeSessionMeta {
   last_run_at?: string;
   next_run_at?: string;
   updated_at: string;
+  archived?: boolean;
 }
 
 export interface AtreeConfig {

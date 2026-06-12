@@ -65,8 +65,7 @@ textarea {
 
 .tree-row:hover,
 .tree-row.selected {
-  background: rgba(255, 255, 255, 0.78);
-  box-shadow: inset 0 0 0 1px rgba(207, 222, 230, 0.8);
+  background: rgba(255, 255, 255, 0.66);
 }
 
 .tree-main {
@@ -158,6 +157,65 @@ textarea {
 
 .tree-children {
   margin-left: 18px;
+}
+
+.tree-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  margin: 1px 0 6px 14px;
+}
+
+.tree-session-row {
+  align-items: center;
+  border-radius: 7px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 30px;
+}
+
+.tree-session-row:hover,
+.tree-session-row.active {
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.tree-session-title {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: #52616b;
+  cursor: pointer;
+  display: flex;
+  gap: 6px;
+  min-width: 0;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.tree-session-row-icon {
+  flex: 0 0 auto;
+  width: 18px;
+}
+
+.tree-session-row-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree-archive {
+  background: transparent;
+  border: 0;
+  color: #8aa0ac;
+  cursor: pointer;
+  font-size: 12px;
+  opacity: 0;
+  padding: 4px 8px;
+}
+
+.tree-session-row:hover .tree-archive,
+.tree-session-row:focus-within .tree-archive {
+  opacity: 1;
 }
 
 .init-button {

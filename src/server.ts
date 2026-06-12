@@ -3,7 +3,6 @@ import {
   decodeNodeId,
   ensureAtreeDirectory,
   encodeNodeId,
-  nextRunAt,
   patchSessionMeta,
   readAtreeConfig,
   scanAtreeTree,
@@ -104,12 +103,12 @@ async function handleApi(request: Request, url: URL): Promise<Response> {
 
       if (request.method === "PATCH" && parts.length === 5) {
         const body = await request.json().catch(() => ({})) as Partial<AtreeSessionMeta>;
-        const meta = patchSessionMeta(dir, sessionId, {
-          title: body.title,
-          icon: body.icon,
-          schedule: body.schedule,
-          next_run_at: body.schedule ? nextRunAt(body.schedule) : undefined,
-        });
+        const patch: Partial<AtreeSessionMeta> = {};
+        if ("title" in body) patch.title = body.title;
+        if ("icon" in body) patch.icon = body.icon;
+        if ("schedule" in body) patch.schedule = body.schedule;
+        if ("archived" in body) patch.archived = body.archived;
+        const meta = patchSessionMeta(dir, sessionId, patch);
         return json({ session: meta });
       }
 
