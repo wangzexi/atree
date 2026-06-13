@@ -39,21 +39,13 @@ import {
 } from "../groups/session"
 import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
+import { buildScheduleCreateInput } from "@/session/schedule-input"
 
 const tryParseJson = (text: string) =>
   Effect.try({
     try: () => JSON.parse(text) as unknown,
     catch: () => new HttpApiError.BadRequest({}),
   })
-
-const parseScheduleAt = (value: number | string | undefined) => {
-  if (typeof value === "number") return value
-  if (typeof value === "string") {
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : Number.NaN
-  }
-  return undefined
-}
 
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
@@ -116,14 +108,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof SchedulePayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
-      const type = ctx.payload.type ?? (ctx.payload.kind === "once" ? "at" : "cron")
-      const kind: Schedule.Kind = type === "at" ? "once" : "recurring"
+      const resolved = buildScheduleCreateInput(ctx.payload)
       return yield* scheduleSvc
         .create({
           sessionID: ctx.params.sessionID,
-          kind,
-          expression: type === "cron" ? (ctx.payload.cron ?? ctx.payload.expression)?.trim() : undefined,
-          runAt: type === "at" ? parseScheduleAt(ctx.payload.at ?? ctx.payload.runAt) : undefined,
+          kind: resolved.kind,
+          expression: resolved.expression?.trim(),
+          runAt: resolved.runAt,
           message: ctx.payload.message,
         })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))

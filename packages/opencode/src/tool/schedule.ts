@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { Schedule } from "../session/schedule"
+import { buildScheduleCreateInput } from "../session/schedule-input"
 import * as Tool from "./tool"
 
 const DESCRIPTION = `Manage scheduled tasks attached to the current session.
@@ -63,21 +64,6 @@ type Metadata = {
   count?: number
 }
 
-function scheduleType(params: Schema.Schema.Type<typeof Parameters>): "cron" | "at" {
-  if (params.type) return params.type
-  if (params.kind === "once") return "at"
-  return "cron"
-}
-
-function parseAt(value: Schema.Schema.Type<typeof AtValue> | undefined) {
-  if (typeof value === "number") return value
-  if (typeof value === "string") {
-    const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : Number.NaN
-  }
-  return undefined
-}
-
 function serialize(info: Schedule.Info) {
   const type = info.kind === "once" ? "at" : "cron"
   return {
@@ -106,10 +92,10 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
         Effect.gen(function* () {
           switch (params.action) {
             case "create": {
-              const type = scheduleType(params)
-              const kind: Schedule.Kind = type === "at" ? "once" : "recurring"
-              const expression = type === "cron" ? (params.cron ?? params.expression)?.trim() : undefined
-              const runAt = type === "at" ? parseAt(params.at ?? params.runAt) : undefined
+              const resolved = buildScheduleCreateInput(params)
+              const type = resolved.kind === "once" ? "at" : "cron"
+              const expression = resolved.expression?.trim()
+              const runAt = resolved.runAt
               if (!params.message || (type === "cron" && !expression) || (type === "at" && runAt === undefined)) {
                 return {
                   title: "Missing fields",
@@ -119,7 +105,9 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
                 }
               }
               const message = params.message
-              return yield* schedule.create({ sessionID: ctx.sessionID, kind, expression, runAt, message }).pipe(
+              return yield* schedule
+                .create({ sessionID: ctx.sessionID, kind: resolved.kind, expression, runAt, message })
+                .pipe(
                 Effect.map((info) => ({
                   title: info.kind === "once" ? "Scheduled at" : `Scheduled: ${info.expression}`,
                   output: JSON.stringify(serialize(info), null, 2),

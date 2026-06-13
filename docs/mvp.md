@@ -421,6 +421,10 @@ MVP 完成时应能做到：
 
 MVP 必须被完整跑通和验证，因为它是纯网页应用，天然适合通过浏览器验证。
 
+行为层面的验收测试放在：
+
+- [docs/acceptance/atree-mvp-bdd.md](docs/acceptance/atree-mvp-bdd.md)
+
 测试策略以真实体验为主：
 
 - 优先使用 Agent Browser 或本机 Chrome CDP 做端到端验证。
