@@ -197,7 +197,7 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
       });
-      if (!response.ok) throw new Error(`Send failed: ${response.status}`);
+      if (!response.ok) throw new Error(await responseErrorMessage(response, "Send failed"));
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
       setEntries((current) => current.filter((entry) => entry.id !== optimisticEntry.id));
@@ -916,6 +916,11 @@ function stringifyJson(value: unknown): string | undefined {
   } catch {
     return String(value);
   }
+}
+
+async function responseErrorMessage(response: Response, fallback: string): Promise<string> {
+  const body = await response.json().catch(() => undefined) as { error?: string } | undefined;
+  return body?.error ? `${fallback}: ${body.error}` : `${fallback}: ${response.status}`;
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
