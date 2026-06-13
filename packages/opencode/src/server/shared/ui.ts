@@ -2,9 +2,13 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Effect, Stream } from "effect"
 import { HttpBody, HttpClient, HttpClientRequest, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createHash } from "node:crypto"
+import { readdir } from "node:fs/promises"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { ProxyUtil } from "../proxy-util"
 
 let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
+let localUIPromise: Promise<Record<string, string> | null> | undefined
 
 export const UI_UPSTREAM = new URL("https://app.opencode.ai")
 
@@ -48,6 +52,29 @@ export function embeddedUI(disableEmbeddedWebUi: boolean) {
     import("opencode-web-ui.gen.ts").then((module) => module.default as Record<string, string>).catch(() => null))
 }
 
+async function scanDistFiles(dir: string, root = dir): Promise<Record<string, string>> {
+  const result: Record<string, string> = {}
+  const entries = await readdir(dir, { withFileTypes: true })
+
+  for (const entry of entries) {
+    const absolute = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      Object.assign(result, await scanDistFiles(absolute, root))
+      continue
+    }
+    if (!entry.isFile() || entry.name.endsWith(".map")) continue
+
+    const relative = path.relative(root, absolute).replaceAll(path.sep, "/")
+    result[relative] = absolute
+  }
+
+  return result
+}
+
+export function localUI() {
+  return (localUIPromise ??= scanDistFiles(fileURLToPath(new URL("../../../../app/dist", import.meta.url))).catch(() => null))
+}
+
 function notFound() {
   return HttpServerResponse.jsonUnsafe({ error: "Not Found" }, { status: 404 })
 }
@@ -80,7 +107,9 @@ export function serveUIEffect(
   services: { fs: FSUtil.Interface; client: HttpClient.HttpClient; disableEmbeddedWebUi: boolean },
 ) {
   return Effect.gen(function* () {
-    const embeddedWebUI = yield* Effect.promise(() => embeddedUI(services.disableEmbeddedWebUi))
+    const localWebUI = yield* Effect.promise(() => localUI())
+    const embeddedWebUI =
+      localWebUI ?? (yield* Effect.promise(() => embeddedUI(services.disableEmbeddedWebUi)))
     const path = new URL(request.url, "http://localhost").pathname
 
     if (embeddedWebUI) return yield* serveEmbeddedUIEffect(path, services.fs, embeddedWebUI)

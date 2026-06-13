@@ -123,6 +123,59 @@ export default function Home() {
 }
 
 function HomeDesign() {
+  const pickDirectory = useDirectoryPicker()
+  const layout = useLayout()
+  const navigate = useNavigate()
+  const server = useServer()
+  const language = useLanguage()
+
+  function openProject(directory: string, shouldNavigate = true) {
+    layout.projects.open(directory)
+    if (shouldNavigate) navigate(`/${base64Encode(directory)}/session`)
+  }
+
+  function chooseProject() {
+    const currentServer = server.current
+    if (!currentServer) return
+
+    function resolve(result: string | string[] | null) {
+      if (Array.isArray(result)) {
+        for (const directory of result) openProject(directory, false)
+        if (result[0]) openProject(result[0])
+      } else if (result) {
+        openProject(result)
+      }
+    }
+
+    pickDirectory({
+      server: currentServer,
+      title: language.t("command.project.open"),
+      multiple: true,
+      onSelect: resolve,
+    })
+  }
+
+  return (
+    <div class="flex h-full min-h-0 w-full items-center justify-center bg-white">
+      <div class="flex w-full max-w-[520px] flex-col items-center gap-4 px-6 text-center">
+        <div class="flex size-12 items-center justify-center rounded-[12px] border border-v2-border-border-muted bg-v2-background-bg-layer-02 text-[24px]">
+          🌳
+        </div>
+        <div class="flex flex-col gap-1">
+          <div class="text-[15px] leading-6 text-v2-text-text-base [font-weight:520]">选择一个根目录开始</div>
+          <div class="text-[13px] leading-5 text-v2-text-text-muted">
+            atree 会把打开的目录作为关键节点，并在左侧形成你的工作树。
+          </div>
+        </div>
+        <ButtonV2 size="small" variant="contrast" icon="folder-plus" onClick={chooseProject}>
+          打开目录
+        </ButtonV2>
+      </div>
+    </div>
+  )
+}
+
+function OpenCodeHomeDesign() {
   const sync = useServerSync()
   const layout = useLayout()
   const platform = usePlatform()

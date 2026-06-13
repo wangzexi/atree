@@ -25,6 +25,8 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Dialog } from "@opencode-ai/ui/dialog"
+import { Icon as IconV2 } from "@opencode-ai/ui/v2/icon"
+import { IconButtonV2 } from "@opencode-ai/ui/v2/icon-button-v2"
 import { getFilename } from "@opencode-ai/core/util/path"
 import { Session, type Message } from "@opencode-ai/sdk/v2/client"
 import { usePlatform } from "@/context/platform"
@@ -2352,6 +2354,106 @@ export default function Layout(props: ParentProps) {
     />
   )
 
+  const AtreeSidebar = () => {
+    const activeRoot = createMemo(() => currentProject()?.worktree ?? (currentDir() ? projectRoot(currentDir()) : ""))
+    const homedir = createMemo(() => serverSync.data.path.home)
+    const label = (directory: string) => getFilename(directory) || directory
+    const shortPath = (directory: string) => directory.replace(homedir(), "~")
+    const projectSessions = (project: LocalProject) => {
+      const [store] = serverSync.child(project.worktree, { bootstrap: false })
+      return sortedRootSessions(store, sortNow()).slice(0, 4)
+    }
+
+    return (
+      <aside class="w-[260px] shrink-0 border-r border-v2-border-border-muted bg-v2-background-bg-base/85 backdrop-blur flex flex-col min-h-0">
+        <div class="h-12 shrink-0 flex items-center justify-between gap-2 px-3 border-b border-v2-border-border-muted">
+          <button
+            type="button"
+            class="min-w-0 flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-v2-text-text-base hover:bg-v2-overlay-simple-overlay-hover"
+            onClick={() => navigateWithSidebarReset("/")}
+          >
+            <span class="text-base leading-none">🌳</span>
+            <span class="min-w-0 truncate text-[13px] [font-weight:560]">atree</span>
+          </button>
+          <IconButtonV2
+            type="button"
+            variant="ghost-muted"
+            size="small"
+            icon={<IconV2 name="folder-add-left" />}
+            aria-label="选择根目录"
+            onClick={chooseProject}
+          />
+        </div>
+
+        <div class="flex-1 min-h-0 overflow-y-auto px-2 py-2">
+          <Show
+            when={layout.projects.list().length > 0}
+            fallback={
+              <div class="flex min-h-72 flex-col items-center justify-center gap-3 px-4 text-center">
+                <div class="text-[13px] text-v2-text-text-muted">选择一个根目录开始</div>
+                <Button size="large" icon="folder-add-left" onClick={chooseProject}>
+                  打开目录
+                </Button>
+              </div>
+            }
+          >
+            <div class="flex flex-col gap-1">
+              <For each={layout.projects.list()}>
+                {(project) => {
+                  const active = createMemo(() => pathKey(activeRoot()) === pathKey(project.worktree))
+                  const sessions = createMemo(() => projectSessions(project))
+                  const nodeHref = () => `/${base64Encode(project.worktree)}/session`
+                  return (
+                    <div class="group/node min-w-0">
+                      <div
+                        classList={{
+                          "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 text-v2-text-text-muted": true,
+                          "bg-v2-background-bg-layer-03 text-v2-text-text-base": active(),
+                          "hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base": !active(),
+                        }}
+                      >
+                        <button
+                          type="button"
+                          class="min-w-0 flex-1 flex items-center gap-2 text-left"
+                          title={shortPath(project.worktree)}
+                          onClick={() => void navigateToProject(project.worktree)}
+                        >
+                          <span class="text-[13px] leading-none">▾</span>
+                          <span class="min-w-0 truncate text-[13px] [font-weight:520]">{label(project.worktree)}</span>
+                        </button>
+                        <div class="flex shrink-0 items-center gap-0.5">
+                          <For each={sessions()}>
+                            {(session) => (
+                              <a
+                                class="inline-flex h-5 w-5 items-center justify-center text-[13px] opacity-80 hover:opacity-100"
+                                href={`/${base64Encode(session.directory)}/session/${session.id}`}
+                                title={session.title || "会话"}
+                                onMouseEnter={() => prefetchSession(session, "high")}
+                              >
+                                💬
+                              </a>
+                            )}
+                          </For>
+                          <a
+                            class="inline-flex h-5 w-5 items-center justify-center rounded text-v2-text-text-muted opacity-0 transition-[opacity,transform] group-hover/node:translate-x-0 group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base"
+                            href={nodeHref()}
+                            title="新会话"
+                          >
+                            +
+                          </a>
+                        </div>
+                      </div>
+                    </div>
+                  )
+                }}
+              </For>
+            </div>
+          </Show>
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <Show
       when={!newDesign()}
@@ -2359,11 +2461,14 @@ export default function Layout(props: ParentProps) {
         <div class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
           {autoselecting() ?? ""}
           <Titlebar update={titlebarUpdate} />
-          <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
-            <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
-              {props.children}
-            </Show>
-          </main>
+          <div class="flex-1 min-h-0 min-w-0 flex">
+            <AtreeSidebar />
+            <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
+              <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
+                {props.children}
+              </Show>
+            </main>
+          </div>
           {import.meta.env.DEV && <DebugBar />}
           <HelpButton />
           <ToastRegion v2={newDesign()} />
