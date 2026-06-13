@@ -14,6 +14,7 @@ import { SessionRunState } from "@/session/run-state"
 import { SessionStatus } from "@/session/status"
 import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
+import { Schedule } from "@/session/schedule"
 import { MessageID, PartID, SessionID } from "@/session/schema"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
@@ -31,11 +32,12 @@ import {
   PermissionResponsePayload,
   PromptPayload,
   RevertPayload,
+  SchedulePayload,
   ShellPayload,
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError } from "../errors"
+import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 
 const tryParseJson = (text: string) =>
@@ -56,6 +58,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const permissionSvc = yield* Permission.Service
     const statusSvc = yield* SessionStatus.Service
     const todoSvc = yield* Todo.Service
+    const scheduleSvc = yield* Schedule.Service
     const summary = yield* SessionSummary.Service
     const events = yield* EventV2Bridge.Service
     const scope = yield* Scope.Scope
@@ -92,6 +95,35 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const todo = Effect.fn("SessionHttpApi.todo")(function* (ctx: { params: { sessionID: SessionID } }) {
       yield* requireSession(ctx.params.sessionID)
       return yield* todoSvc.get(ctx.params.sessionID)
+    })
+
+    const schedules = Effect.fn("SessionHttpApi.schedules")(function* (ctx: { params: { sessionID: SessionID } }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* scheduleSvc.list(ctx.params.sessionID)
+    })
+
+    const createSchedule = Effect.fn("SessionHttpApi.createSchedule")(function* (ctx: {
+      params: { sessionID: SessionID }
+      payload: typeof SchedulePayload.Type
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* scheduleSvc
+        .create({
+          sessionID: ctx.params.sessionID,
+          expression: ctx.payload.expression,
+          message: ctx.payload.message,
+        })
+        .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
+    })
+
+    const deleteSchedule = Effect.fn("SessionHttpApi.deleteSchedule")(function* (ctx: {
+      params: { sessionID: SessionID; scheduleID: Schedule.ID }
+    }) {
+      yield* requireSession(ctx.params.sessionID)
+      return yield* scheduleSvc.delete(ctx.params.scheduleID).pipe(
+        Effect.map(() => true),
+        Effect.catchTag("ScheduleNotFound", () => Effect.fail(notFound("Schedule not found"))),
+      )
     })
 
     const diff = Effect.fn("SessionHttpApi.diff")(function* (ctx: {
@@ -414,6 +446,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       .handle("get", get)
       .handle("children", children)
       .handle("todo", todo)
+      .handle("schedules", schedules)
+      .handle("createSchedule", createSchedule)
+      .handle("deleteSchedule", deleteSchedule)
       .handle("diff", diff)
       .handle("messages", messages)
       .handle("message", message)

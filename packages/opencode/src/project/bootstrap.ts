@@ -49,7 +49,7 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer: Layer.Layer<Service> = layer.pipe(
+export const defaultLayer = layer.pipe(
   Layer.provide([
     Config.defaultLayer,
     Format.defaultLayer,
