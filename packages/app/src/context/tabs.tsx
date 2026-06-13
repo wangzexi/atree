@@ -1,7 +1,7 @@
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { createSimpleContext } from "@opencode-ai/ui/context"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { createStore, produce } from "solid-js/store"
+import { createStore, produce, reconcile } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
 import { createEffect, startTransition } from "solid-js"
@@ -101,6 +101,18 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
             if (tabs.some((item) => tabKey(item) === tabKey(next))) return
             tabs.push(next)
           }),
+        )
+      },
+      replaceWithSessions: (targetServer: ServerConnection.Key, sessions: Session[]) => {
+        setStore(
+          reconcile(
+            sessions.map((session) => ({
+              type: "session" as const,
+              server: targetServer,
+              dirBase64: base64Encode(session.directory),
+              sessionId: session.id,
+            })),
+          ),
         )
       },
       draft(draftID: string) {

@@ -70,6 +70,7 @@ import { Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { ServerConnection, useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
+import { useTabs } from "@/context/tabs"
 import { pathKey } from "@/utils/path-key"
 import {
   displayName,
@@ -126,6 +127,7 @@ export default function Layout(props: ParentProps) {
   const server = useServer()
   const notification = useNotification()
   const permission = usePermission()
+  const sessionTabs = useTabs()
   const navigate = useNavigate()
   setNavigate(navigate)
   const providers = useProviders()
@@ -2354,13 +2356,26 @@ export default function Layout(props: ParentProps) {
   )
 
   const AtreeSidebar = () => {
-    const activeRoot = createMemo(() => currentProject()?.worktree ?? (currentDir() ? projectRoot(currentDir()) : ""))
+    const activeRoot = createMemo(
+      () => currentProject()?.worktree ?? (currentDir() ? projectRoot(currentDir()) : layout.projects.list()[0]?.worktree ?? ""),
+    )
     const homedir = createMemo(() => serverSync.data.path.home)
     const label = (directory: string) => getFilename(directory) || directory
     const shortPath = (directory: string) => directory.replace(homedir(), "~")
     const projectSessions = (project: LocalProject) => {
       const [store] = serverSync.child(project.worktree, { bootstrap: false })
       return sortedRootSessions(store, sortNow()).slice(0, 4)
+    }
+    const openNodeSessions = (project: LocalProject, sessions: Session[]) => {
+      server.projects.touch(project.worktree)
+      sessionTabs.replaceWithSessions(server.key, sessions)
+      const first = sessions[0]
+      if (!first) {
+        navigateWithSidebarReset("/")
+        return
+      }
+      setStore("lastProjectSession", project.worktree, { directory: first.directory, id: first.id, at: Date.now() })
+      navigateWithSidebarReset(`/${base64Encode(first.directory)}/session/${first.id}`)
     }
 
     return (
@@ -2406,8 +2421,8 @@ export default function Layout(props: ParentProps) {
                     <div class="group/node min-w-0">
                       <div
                         classList={{
-                          "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 text-v2-text-text-muted": true,
-                          "bg-v2-background-bg-layer-03 text-v2-text-text-base": active(),
+                          "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color]": true,
+                          "bg-v2-background-bg-layer-03 text-v2-text-text-base shadow-[inset_0_0_0_1px_var(--v2-border-border-strong)]": active(),
                           "hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base": !active(),
                         }}
                       >
@@ -2415,7 +2430,7 @@ export default function Layout(props: ParentProps) {
                           type="button"
                           class="min-w-0 flex-1 flex items-center gap-2 text-left"
                           title={shortPath(project.worktree)}
-                          onClick={() => void navigateToProject(project.worktree)}
+                          onClick={() => openNodeSessions(project, sessions())}
                         >
                           <span class="text-[13px] leading-none">▾</span>
                           <span class="min-w-0 truncate text-[13px] [font-weight:520]">{label(project.worktree)}</span>

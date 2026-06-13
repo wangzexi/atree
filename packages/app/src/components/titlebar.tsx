@@ -12,7 +12,7 @@ import {
   untrack,
 } from "solid-js"
 import { createStore } from "solid-js/store"
-import { useLocation, useMatch, useNavigate, useParams } from "@solidjs/router"
+import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
 import { Button } from "@opencode-ai/ui/button"
@@ -251,7 +251,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
           {(_) => {
             const serverSync = useServerSync()
             const navigate = useNavigate()
-            const homeMatch = useMatch(() => "/")
             const layout = useLayout()
 
             const newSessionHref = () => {
@@ -421,20 +420,9 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   "pl-4": !mac(),
                 }}
               >
-                <ChannelIndicator />
                 <Show when={windows() || linux()}>
                   <WindowsAppMenu command={command} platform={platform} variant="v2" />
                 </Show>
-                <IconButtonV2
-                  variant="ghost-muted"
-                  size="large"
-                  as="a"
-                  href="/"
-                  class="!w-9 shrink-0"
-                  icon={<IconV2 name="grid-plus" />}
-                  state={!!homeMatch() ? "pressed" : undefined}
-                />
-
                 <div
                   class="flex min-w-0 flex-row items-center gap-1.5 overflow-x-auto no-scrollbar [app-region:no-drag]"
                   ref={tabScrollRef}
@@ -522,18 +510,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     </Show>
                   </div>
                 </div>
-                <Show when={!(creating() && params.dir)}>
-                  <IconButtonV2
-                    type="button"
-                    variant="ghost-muted"
-                    size="large"
-                    class="shrink-0"
-                    icon={<IconV2 name="plus" />}
-                    as="a"
-                    href={newSessionHref()}
-                    aria-label={language.t("command.session.new")}
-                  />
-                </Show>
                 <div class="flex-1" />
                 <TitlebarV2Right state={v2RightState()} />
                 <Show when={windows() && !electronWindows()}>
