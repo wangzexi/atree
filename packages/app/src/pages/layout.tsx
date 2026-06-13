@@ -79,6 +79,7 @@ import {
   effectiveWorkspaceOrder,
   errorMessage,
   latestRootSession,
+  asScheduleTime,
   sessionEmoji,
   sessionHasSchedule,
   sessionNextScheduleRun,
@@ -2501,13 +2502,6 @@ export default function Layout(props: ParentProps) {
           path: node.path,
           absolute: node.absolute,
         }))
-    const asScheduleTime = (value: unknown) => {
-      if (typeof value === "number" && Number.isFinite(value)) return value
-      if (typeof value === "string") {
-        const parsed = Date.parse(value)
-        if (Number.isFinite(parsed)) return parsed
-      }
-    }
     const scheduleHeaders = () => {
       const headers = new Headers()
       const current = server.current

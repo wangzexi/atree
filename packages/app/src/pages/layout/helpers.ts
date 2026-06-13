@@ -16,7 +16,7 @@ export type SessionScheduleSummary = {
 
 export type SessionScheduleIndex = Record<string, readonly SessionScheduleSummary[] | undefined>
 
-function asTime(value: number | string | null | undefined) {
+export function asScheduleTime(value: number | string | null | undefined) {
   if (typeof value === "number" && Number.isFinite(value)) return value
   if (typeof value === "string") {
     const parsed = Date.parse(value)
@@ -35,7 +35,7 @@ export function sessionNextScheduleRun(session: Pick<Session, "id">, schedules?:
   if (!items?.length) return
   let next: number | undefined
   for (const item of items) {
-    const value = asTime(item.nextRunAt ?? item.nextRun ?? item.runAt)
+    const value = asScheduleTime(item.nextRunAt ?? item.nextRun ?? item.runAt)
     if (value === undefined) continue
     if (next === undefined || value < next) next = value
   }

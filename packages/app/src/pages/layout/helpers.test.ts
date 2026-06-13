@@ -8,6 +8,7 @@ import {
 } from "./deep-links"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import {
+  asScheduleTime,
   childSessionOnPath,
   closeHomeProject,
   displayName,
@@ -155,7 +156,7 @@ describe("layout workspace helpers", () => {
   })
 
   test("sorts automated sessions by next run before recent manual sessions", () => {
-    const result = sortedRootSessions(
+  const result = sortedRootSessions(
       {
         path: { directory: "/workspace" },
         session: [
@@ -189,6 +190,14 @@ describe("layout workspace helpers", () => {
     )
 
     expect(result.map((item) => item.id)).toEqual(["auto-sooner", "auto-later", "manual-new", "manual-old"])
+  })
+
+  test("parses scheduled run times from number or ISO string", () => {
+    expect(asScheduleTime(undefined)).toBeUndefined()
+    expect(asScheduleTime(null)).toBeUndefined()
+    expect(asScheduleTime(1700000000000)).toBe(1700000000000)
+    expect(asScheduleTime("2026-06-14T00:00:00+08:00")).toBeTypeOf("number")
+    expect(asScheduleTime("bad time")).toBeUndefined()
   })
 
   test("detects project permissions with a filter", () => {

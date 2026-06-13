@@ -8,6 +8,7 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { authTokenFromCredentials } from "@/utils/server"
 import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
+import { asScheduleTime } from "@/pages/layout/helpers"
 
 type ScheduleInfo = {
   id: string
@@ -18,14 +19,6 @@ type ScheduleInfo = {
   nextRunAt?: number
   lastRunAt?: number
   lastRunStatus?: "ran" | "skipped" | null
-}
-
-function asNumber(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) return value
-  if (typeof value === "string") {
-    const parsed = Date.parse(value)
-    if (Number.isFinite(parsed)) return parsed
-  }
 }
 
 function formatTime(value?: number) {
@@ -99,15 +92,15 @@ export function SessionScheduleDock(props: {
         lastRanAt?: number | string | null
         lastRunStatus?: "ran" | "skipped" | null
       }>
-      return json
+        return json
         .map((item) => ({
           id: item.id,
           kind: item.kind ?? "recurring",
           expression: item.expression,
-          runAt: asNumber(item.runAt ?? undefined),
+          runAt: asScheduleTime(item.runAt ?? undefined),
           message: item.message,
-          nextRunAt: asNumber(item.nextRun ?? undefined),
-          lastRunAt: asNumber(item.lastRanAt ?? undefined),
+          nextRunAt: asScheduleTime(item.nextRun ?? undefined),
+          lastRunAt: asScheduleTime(item.lastRanAt ?? undefined),
           lastRunStatus: item.lastRunStatus ?? null,
         }))
         .sort((a, b) => (a.nextRunAt ?? Number.MAX_SAFE_INTEGER) - (b.nextRunAt ?? Number.MAX_SAFE_INTEGER))
