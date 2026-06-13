@@ -113,7 +113,7 @@ export function readDisplayMessages(dir: string, sessionId: string): DisplayMess
         return [{
           id: entry.id,
           role: "system",
-          text: typeof entry.content === "string" ? entry.content : contentToText(entry.content),
+          text: sanitizeMessageText(typeof entry.content === "string" ? entry.content : contentToText(entry.content)),
           timestamp: Date.parse(entry.timestamp),
         }];
       }
@@ -122,7 +122,7 @@ export function readDisplayMessages(dir: string, sessionId: string): DisplayMess
       return [{
         id: entry.id,
         role: message.role,
-        text: "content" in message ? contentToText(message.content) : contentToText(message),
+        text: sanitizeMessageText("content" in message ? contentToText(message.content) : contentToText(message)),
         timestamp: typeof message.timestamp === "number" ? message.timestamp : Date.parse(entry.timestamp),
       }];
     })
@@ -240,6 +240,13 @@ function contentToText(content: unknown): string {
     })
     .filter(Boolean)
     .join("\n");
+}
+
+function sanitizeMessageText(text: string): string {
+  return text
+    .replace(/(?:^|\n)\s*TOOLCALL\s*(?=\n|$)/gi, "\n")
+    .replace(/[：:]\s*TOOLCALL\s*$/gi, "")
+    .trim();
 }
 
 function mimeFromPath(path: string): string {

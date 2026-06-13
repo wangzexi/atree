@@ -18,6 +18,7 @@ interface ActivityItem {
   label: string;
   detail?: string;
   status: "running" | "done" | "error";
+  kind: "thinking" | "tool";
 }
 
 const SESSION_ICON_OPTIONS = ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐸", "🐵", "🐧", "🐦", "🦉", "🐢", "🐳", "🐙", "🦋", "🌿", "☕", "📚", "🧰", "💡", "✏️", "📌", "📦", "🔧", "🗂️", "💬"];
@@ -38,9 +39,12 @@ function App() {
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | undefined>();
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
+  const [openActivityIds, setOpenActivityIds] = useState<Set<string>>(new Set());
+  const [pendingUserMessages, setPendingUserMessages] = useState<DisplayMessage[]>([]);
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const displayedStreamText = usePacedText(streamText, Boolean(streamText && isSending));
+  const sanitizedStreamText = sanitizeAssistantText(streamText);
+  const displayedStreamText = usePacedText(sanitizedStreamText, Boolean(sanitizedStreamText && isSending));
 
   useEffect(() => {
     void refreshTree();
@@ -55,6 +59,8 @@ function App() {
     setMessages([]);
     setStreamText("");
     setActivityItems([]);
+    setOpenActivityIds(new Set());
+    setPendingUserMessages([]);
     if (!selection?.session) return;
 
     void loadMessages(selection.node.id, selection.session.id);
@@ -62,7 +68,7 @@ function App() {
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "agent_start" || data.type === "turn_start") {
-        upsertActivity(setActivityItems, { id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running" });
+        upsertActivity(setActivityItems, setOpenActivityIds, { id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running", kind: "thinking" });
       }
       if (data.type === "message_update" && data.assistantMessageEvent?.type === "text_delta") {
         setStreamText((text) => text + data.assistantMessageEvent.delta);
@@ -70,20 +76,26 @@ function App() {
       if (data.type === "message_update") {
         const assistantEvent = data.assistantMessageEvent;
         if (assistantEvent?.type === "thinking_start" || assistantEvent?.type === "thinking_delta") {
-          upsertActivity(setActivityItems, { id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running" });
+          upsertActivity(setActivityItems, setOpenActivityIds, {
+            id: THINKING_ACTIVITY_ID,
+            label: "正在思考",
+            detail: assistantEvent.partial?.thinking ?? assistantEvent.delta,
+            status: "running",
+            kind: "thinking",
+          });
         }
         if (assistantEvent?.type === "toolcall_start" || assistantEvent?.type === "toolcall_delta") {
-          upsertActivity(setActivityItems, { id: THINKING_ACTIVITY_ID, label: "正在准备工具调用", status: "running" });
+          upsertActivity(setActivityItems, setOpenActivityIds, { id: THINKING_ACTIVITY_ID, label: "正在准备工具调用", status: "running", kind: "thinking" });
         }
         if (assistantEvent?.type === "text_start" || assistantEvent?.type === "text_delta") {
           setActivityItems((current) => current.filter((item) => item.id !== THINKING_ACTIVITY_ID));
         }
       }
       if (data.type === "tool_execution_start" || data.type === "tool_execution_update") {
-        upsertActivity(setActivityItems, formatToolActivity(data, "running"));
+        upsertActivity(setActivityItems, setOpenActivityIds, formatToolActivity(data, "running"));
       }
       if (data.type === "tool_execution_end") {
-        upsertActivity(setActivityItems, formatToolActivity(data, data.isError ? "error" : "done"));
+        upsertActivity(setActivityItems, setOpenActivityIds, formatToolActivity(data, data.isError ? "error" : "done"));
       }
       if (data.type === "message_end" || data.type === "atree_messages_changed") {
         setStreamText("");
@@ -140,21 +152,28 @@ function App() {
   async function loadMessages(nodeId: string, sessionId: string) {
     const response = await fetch(`/api/nodes/${nodeId}/sessions/${sessionId}/messages`);
     const data = await response.json();
-    setMessages(data.messages ?? []);
+    const loaded = (data.messages ?? []) as DisplayMessage[];
+    setPendingUserMessages((pending) => {
+      const remaining = pending.filter((message) => !loaded.some((item) => item.role === "user" && item.text === message.text));
+      setMessages([...loaded, ...remaining]);
+      return remaining;
+    });
   }
 
   async function sendMessage() {
-    if (!selection?.session || !draft.trim() || isSending) return;
+    const text = (draft || composerRef.current?.value || "").trim();
+    if (!selection?.session || !text || isSending) return;
     setError(undefined);
     setIsSending(true);
-    setActivityItems([{ id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running" }]);
-    const text = draft;
+    setActivityItems([{ id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running", kind: "thinking" }]);
+    setOpenActivityIds(new Set([THINKING_ACTIVITY_ID]));
     const optimisticMessage: DisplayMessage = {
       id: `optimistic-${crypto.randomUUID()}`,
       role: "user",
       text,
       timestamp: Date.now(),
     };
+    setPendingUserMessages((current) => [...current, optimisticMessage]);
     setMessages((current) => [...current, optimisticMessage]);
     setDraft("");
     try {
@@ -167,6 +186,7 @@ function App() {
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
       setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
+      setPendingUserMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
       setDraft(text);
       setIsSending(false);
     }
@@ -360,9 +380,19 @@ function App() {
           {activityItems.length > 0 && (
             <div className="activity-feed">
               {activityItems.map((item) => (
-                <div key={item.id} className={`activity-item ${item.status}`}>
-                  <div className="activity-label">{item.label}</div>
-                  {item.detail && <div className="activity-detail">{item.detail}</div>}
+                <div key={item.id} className={`activity-item ${item.status} ${item.kind}`}>
+                  <button
+                    className="activity-trigger"
+                    onClick={() => setOpenActivityIds((current) => toggleSetValue(current, item.id))}
+                    title={openActivityIds.has(item.id) ? "折叠" : "展开"}
+                  >
+                    <span className="activity-chevron">{openActivityIds.has(item.id) ? "⌄" : "›"}</span>
+                    <span className="activity-label">
+                      {item.status === "running" ? <TextShimmer text={item.label} /> : item.label}
+                    </span>
+                    {item.detail && <span className="activity-summary">{summarizeActivityDetail(item.detail)}</span>}
+                  </button>
+                  {item.detail && openActivityIds.has(item.id) && <div className="activity-detail">{item.detail}</div>}
                 </div>
               ))}
             </div>
@@ -377,6 +407,7 @@ function App() {
             rows={1}
             value={draft}
             onChange={(event) => updateDraft(event.target.value)}
+            onInput={(event) => updateDraft(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -386,7 +417,7 @@ function App() {
             placeholder={selection?.session ? "输入消息" : "先创建会话"}
             disabled={!selection?.session}
           />
-          <button onClick={sendMessage} disabled={!selection?.session || !draft.trim() || isSending}>
+          <button onClick={sendMessage} disabled={!selection?.session || isSending}>
             ↑
           </button>
         </footer>
@@ -614,10 +645,36 @@ function nextPacedTextEnd(text: string, start: number): number {
   return end;
 }
 
-function upsertActivity(setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>, item: ActivityItem) {
+function toggleSetValue(values: Set<string>, value: string): Set<string> {
+  const next = new Set(values);
+  if (next.has(value)) next.delete(value);
+  else next.add(value);
+  return next;
+}
+
+function TextShimmer({ text }: { text: string }) {
+  return (
+    <span className="text-shimmer" aria-label={text}>
+      <span className="text-shimmer-base" aria-hidden="true">{text}</span>
+      <span className="text-shimmer-sweep" aria-hidden="true">{text}</span>
+    </span>
+  );
+}
+
+function upsertActivity(
+  setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>,
+  setOpenIds: React.Dispatch<React.SetStateAction<Set<string>>>,
+  item: ActivityItem,
+) {
+  setOpenIds((current) => {
+    if (current.has(item.id) || item.status !== "running") return current;
+    return new Set(current).add(item.id);
+  });
   setItems((current) => {
     const next = current.filter((existing) => existing.id !== item.id);
-    return [...next, item].slice(-5);
+    const existing = current.find((entry) => entry.id === item.id);
+    const merged = { ...existing, ...item, detail: item.detail ?? existing?.detail };
+    return [...next, merged].slice(-5);
   });
 }
 
@@ -625,11 +682,13 @@ function formatToolActivity(event: any, status: ActivityItem["status"]): Activit
   const toolName = String(event.toolName ?? "tool");
   const args = event.args ?? {};
   const prefix = status === "running" ? runningToolPrefix(toolName, args) : doneToolPrefix(toolName, status);
+  const detail = [formatToolDetail(toolName, args), formatToolOutput(event.partialResult ?? event.result)].filter(Boolean).join("\n\n");
   return {
     id: String(event.toolCallId ?? `${toolName}-${Date.now()}`),
     label: prefix,
-    detail: formatToolDetail(toolName, args),
+    detail: detail || undefined,
     status,
+    kind: "tool",
   };
 }
 
@@ -659,6 +718,29 @@ function formatToolDetail(toolName: string, args: any): string | undefined {
   if (query) return query;
   const summary = safeJson(args);
   return summary === "{}" ? undefined : summary;
+}
+
+function formatToolOutput(result: any): string | undefined {
+  const content = result?.content;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .map((item) => (item?.type === "text" && typeof item.text === "string" ? item.text : ""))
+    .filter(Boolean)
+    .join("\n");
+  return text.trim() || undefined;
+}
+
+function summarizeActivityDetail(detail: string): string {
+  const first = detail.trim().split("\n").find(Boolean);
+  if (!first) return "";
+  return first.length > 80 ? `${first.slice(0, 80)}...` : first;
+}
+
+function sanitizeAssistantText(text: string): string {
+  return text
+    .replace(/(?:^|\n)\s*TOOLCALL\s*(?=\n|$)/gi, "\n")
+    .replace(/[：:]\s*TOOLCALL\s*$/gi, "")
+    .trimStart();
 }
 
 function isEditTool(toolName: string): boolean {
