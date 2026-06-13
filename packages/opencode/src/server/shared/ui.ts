@@ -8,7 +8,6 @@ import { fileURLToPath } from "node:url"
 import { ProxyUtil } from "../proxy-util"
 
 let embeddedUIPromise: Promise<Record<string, string> | null> | undefined
-let localUIPromise: Promise<Record<string, string> | null> | undefined
 
 export const UI_UPSTREAM = new URL("https://app.opencode.ai")
 
@@ -72,7 +71,7 @@ async function scanDistFiles(dir: string, root = dir): Promise<Record<string, st
 }
 
 export function localUI() {
-  return (localUIPromise ??= scanDistFiles(fileURLToPath(new URL("../../../../app/dist", import.meta.url))).catch(() => null))
+  return scanDistFiles(fileURLToPath(new URL("../../../../app/dist", import.meta.url))).catch(() => null)
 }
 
 function notFound() {
