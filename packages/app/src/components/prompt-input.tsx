@@ -7,6 +7,7 @@ import {
   splitProps,
   For,
   Show,
+  onMount,
   onCleanup,
   createMemo,
   createSignal,
@@ -150,6 +151,19 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let fileInputRef: HTMLInputElement | undefined
   let scrollRef!: HTMLDivElement
   let slashPopoverRef!: HTMLDivElement
+
+  const focusOnMountIfIdle = () => {
+    const focus = () => {
+      const active = document.activeElement
+      if (active && active !== document.body && active !== document.documentElement) return
+      editorRef?.focus()
+    }
+    for (const delay of [0, 50, 150, 300]) {
+      window.setTimeout(() => requestAnimationFrame(focus), delay)
+    }
+  }
+
+  onMount(focusOnMountIfIdle)
 
   const mirror = { input: false }
   const inset = 56

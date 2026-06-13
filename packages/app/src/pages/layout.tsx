@@ -346,6 +346,33 @@ export default function Layout(props: ParentProps) {
     navigate(href)
     layout.mobileSidebar.hide()
   }
+  const focusSessionPrompt = () => {
+    const focus = () => {
+      const active = document.activeElement
+      if (active instanceof HTMLElement && active.closest("[data-component='session-prompt-dock']")) return
+      const input = document.querySelector<HTMLElement>(
+        "[data-component='session-prompt-dock'] [data-component='prompt-input'][contenteditable='true']",
+      )
+      input?.focus()
+    }
+    for (const delay of [0, 50, 150, 300]) {
+      window.setTimeout(() => requestAnimationFrame(focus), delay)
+    }
+  }
+  createEffect(
+    on(
+      () => {
+        const path = `${location.pathname}${location.search}`
+        if (location.pathname === "/new-session" && location.search.includes("draftId=")) return path
+        if (location.pathname.includes("/session")) return path
+        return ""
+      },
+      (key) => {
+        if (key) focusSessionPrompt()
+      },
+      { defer: true },
+    ),
+  )
 
   function cycleTheme(direction = 1) {
     const ids = availableThemeEntries().map(([id]) => id)
@@ -2536,6 +2563,8 @@ export default function Layout(props: ParentProps) {
         { session: directoryState(directory)?.sessions ?? [], path: { directory } },
         Date.now(),
       )
+    const sessionListKey = (sessions: Session[]) =>
+      sessions.map((session) => `${session.directory}\n${session.id}`).join("\n\n")
     const navigateDirectorySession = (root: string, directory: string, sessions: Session[], targetSessionID?: string) => {
       const first = targetSessionID ? sessions.find((session) => session.id === targetSessionID) : sessions[0]
       if (!first) {
@@ -2553,6 +2582,7 @@ export default function Layout(props: ParentProps) {
       server.projects.touch(root)
       if (existing?.type === "draft") {
         navigateWithSidebarReset(draftHref(existing.draftID))
+        focusSessionPrompt()
         return
       }
       sessionTabs.replaceWithSessions(server.key, rootSessionsForDirectory(directory))
@@ -2560,18 +2590,32 @@ export default function Layout(props: ParentProps) {
         server: server.key,
         directory,
       })
+      focusSessionPrompt()
     }
     const openDirectorySessions = async (root: string, directory: string, targetSessionID?: string) => {
       const run = ++openDirectoryRun
+      const switchToSessions = (sessions: Session[]) => {
+        batch(() => {
+          server.projects.touch(root)
+          sessionTabs.replaceWithSessions(server.key, sessions)
+          navigateDirectorySession(root, directory, sessions, targetSessionID)
+          focusSessionPrompt()
+        })
+      }
+
       const cachedSessions = rootSessionsForDirectory(directory)
-      sessionTabs.replaceWithSessions(server.key, cachedSessions)
-      navigateDirectorySession(root, directory, cachedSessions, targetSessionID)
+      const cachedKey = sessionListKey(cachedSessions)
+      let switchedWithCache = false
+      if (directoryState(directory)?.loaded) {
+        switchToSessions(cachedSessions)
+        switchedWithCache = true
+      }
+
       await loadDirectory(root, directory, { force: true, probeChildren: true })
       if (run !== openDirectoryRun) return
       const sessions = rootSessionsForDirectory(directory)
-      server.projects.touch(root)
-      sessionTabs.replaceWithSessions(server.key, sessions)
-      navigateDirectorySession(root, directory, sessions, targetSessionID)
+      if (switchedWithCache && cachedKey === sessionListKey(sessions)) return
+      switchToSessions(sessions)
     }
     const rootProject = createMemo(() => layout.projects.list()[0])
 
@@ -2602,6 +2646,7 @@ export default function Layout(props: ParentProps) {
             style={{ "padding-left": `${6 + props.depth * 14}px` }}
             title={shortPath(props.directory)}
             onClick={() => void openDirectorySessions(props.root, props.directory)}
+            onPointerUp={() => focusSessionPrompt()}
           >
             <div
               class="min-w-0 flex items-center gap-1.5 text-left"

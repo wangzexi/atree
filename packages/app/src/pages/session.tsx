@@ -1638,7 +1638,10 @@ export default function Page() {
     on(
       () => params.id,
       (id) => {
-        if (!id) requestAnimationFrame(() => inputRef?.focus())
+        if (isChildSession()) return
+        for (const delay of id ? [0, 100, 300, 700, 1200] : [0]) {
+          window.setTimeout(() => requestAnimationFrame(() => inputRef?.focus()), delay)
+        }
       },
     ),
   )
