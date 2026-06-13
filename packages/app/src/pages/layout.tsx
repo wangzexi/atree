@@ -3,6 +3,7 @@ import {
   createEffect,
   createMemo,
   createResource,
+  createSignal,
   For,
   on,
   onCleanup,
@@ -22,6 +23,7 @@ import { decode64 } from "@/utils/base64"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
+import { Icon } from "@opencode-ai/ui/icon"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { DropdownMenu } from "@opencode-ai/ui/dropdown-menu"
 import { Dialog } from "@opencode-ai/ui/dialog"
@@ -2378,9 +2380,16 @@ export default function Layout(props: ParentProps) {
       directory: {},
     })
 
-    const activeDirectory = createMemo(
-      () => currentDir() ?? currentProject()?.worktree ?? layout.projects.list()[0]?.worktree ?? "",
-    )
+    const [selectedDirectory, setSelectedDirectory] = createSignal<string>()
+    createEffect(() => {
+      const directory = currentDir()
+      if (directory) {
+        setSelectedDirectory(directory)
+        return
+      }
+      if (!params.dir) setSelectedDirectory(undefined)
+    })
+    const activeDirectory = createMemo(() => selectedDirectory() ?? currentDir() ?? "")
     const homedir = createMemo(() => serverSync.data.path.home)
     const label = (directory: string) => getFilename(directory) || directory
     const shortPath = (directory: string) => directory.replace(homedir(), "~")
@@ -2502,15 +2511,22 @@ export default function Layout(props: ParentProps) {
         setTree("directory", key, (prev) => ({ ...prev, expanded: true }))
       })
     }
-    const openDirectorySessions = async (root: string, directory: string) => {
-      await loadDirectory(root, directory)
-      const sessions = sortedRootSessions(
+    let openDirectoryRun = 0
+    const rootSessionsForDirectory = (directory: string) =>
+      sortedRootSessions(
         { session: directoryState(directory)?.sessions ?? [], path: { directory } },
         Date.now(),
       )
+    const openDirectorySessions = async (root: string, directory: string, targetSessionID?: string) => {
+      const run = ++openDirectoryRun
+      setSelectedDirectory(directory)
+      sessionTabs.replaceWithSessions(server.key, rootSessionsForDirectory(directory))
+      await loadDirectory(root, directory, { force: true, probeChildren: true })
+      if (run !== openDirectoryRun) return
+      const sessions = rootSessionsForDirectory(directory)
       server.projects.touch(root)
       sessionTabs.replaceWithSessions(server.key, sessions)
-      const first = sessions[0]
+      const first = targetSessionID ? sessions.find((session) => session.id === targetSessionID) : sessions[0]
       if (!first) {
         setStore("lastProjectSession", root, { directory, id: "", at: Date.now() })
         navigateWithSidebarReset(`/${base64Encode(directory)}/session`)
@@ -2538,35 +2554,42 @@ export default function Layout(props: ParentProps) {
       return (
         <div class="min-w-0">
           <div
+            data-active={active() ? "true" : undefined}
             classList={{
-              "group/node flex h-8 min-w-0 items-center gap-1 rounded-md pr-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color,opacity]": true,
+              "group/node relative flex h-8 min-w-0 items-center gap-1 rounded-md pr-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color,opacity]": true,
               "bg-v2-background-bg-layer-03 text-v2-text-text-base": active(),
               "hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base": !active(),
-              "opacity-55 hover:opacity-100": dimmed(),
+              "opacity-55 hover:opacity-100": dimmed() && !active(),
             }}
             style={{ "padding-left": `${6 + props.depth * 14}px` }}
           >
-            <Show when={hasChildren()} fallback={<span class="size-5 shrink-0" />}>
+            <Show when={active()}>
+              <span class="absolute inset-y-1 left-0 w-0.5 rounded-full bg-v2-icon-icon-accent" />
+            </Show>
+            <button
+              type="button"
+              class="min-w-0 flex items-center gap-1.5 text-left"
+              title={shortPath(props.directory)}
+              onClick={() => void openDirectorySessions(props.root, props.directory)}
+            >
+              <span class="flex size-4 shrink-0 items-center justify-center text-v2-icon-icon-muted">
+                <IconV2 name={hasChildren() && state()?.expanded ? "folder-open" : "folder"} />
+              </span>
+              <span class="min-w-0 truncate text-[13px] [font-weight:520]">{props.name}</span>
+            </button>
+            <Show when={hasChildren()}>
               <button
                 type="button"
-                class="flex size-5 shrink-0 items-center justify-center rounded text-[12px] hover:bg-v2-overlay-simple-overlay-hover"
+                class="flex size-5 shrink-0 items-center justify-center rounded text-[12px] opacity-0 transition-opacity group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--v2-border-border-focus)]"
                 title={state()?.expanded ? "收起" : "展开"}
                 onClick={(event) => {
                   event.stopPropagation()
                   toggleDirectory(props.root, props.directory)
                 }}
               >
-                <span>{state()?.expanded ? "▾" : "▸"}</span>
+                <Icon name={state()?.expanded ? "chevron-down" : "chevron-right"} size="small" />
               </button>
             </Show>
-            <button
-              type="button"
-              class="min-w-0 flex-1 flex items-center gap-1.5 text-left"
-              title={shortPath(props.directory)}
-              onClick={() => void openDirectorySessions(props.root, props.directory)}
-            >
-              <span class="min-w-0 truncate text-[13px] [font-weight:520]">{props.name}</span>
-            </button>
             <div class="flex shrink-0 items-center gap-0.5">
               <For each={scheduledSessions(props.directory)}>
                 {(session) => (
@@ -2575,19 +2598,30 @@ export default function Layout(props: ParentProps) {
                     href={`/${base64Encode(session.directory)}/session/${session.id}`}
                     title={session.title || "会话"}
                     onMouseEnter={() => prefetchSession(session, "high")}
+                    onClick={(event) => {
+                      event.preventDefault()
+                      void openDirectorySessions(props.root, props.directory, session.id)
+                    }}
                   >
                     {sessionEmoji(session)}
                   </a>
                 )}
               </For>
-              <a
-                class="inline-flex h-5 w-5 items-center justify-center rounded text-v2-text-text-muted opacity-0 transition-[opacity,transform] group-hover/node:translate-x-0 group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base"
-                href={nodeHref()}
-                title="新会话"
-              >
-                +
-              </a>
             </div>
+            <div class="min-w-0 flex-1" />
+            <a
+              class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-v2-text-text-muted opacity-0 transition-[opacity,transform] group-hover/node:translate-x-0 group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base"
+              href={nodeHref()}
+              title="新会话"
+              onClick={() => {
+                setSelectedDirectory(props.directory)
+                sessionTabs.replaceWithSessions(server.key, directorySessions(props.directory))
+              }}
+            >
+              <span class="flex size-3.5 rotate-90 items-center justify-center">
+                <IconV2 name="edit" />
+              </span>
+            </a>
           </div>
           <Show when={state()?.expanded}>
             <For each={sortedChildren(state()?.children ?? [])}>
@@ -2603,17 +2637,10 @@ export default function Layout(props: ParentProps) {
     return (
       <aside class="w-[260px] shrink-0 border-r border-v2-border-border-muted bg-v2-background-bg-base/85 backdrop-blur flex flex-col min-h-0">
         <div class="h-12 shrink-0 flex items-center justify-between gap-2 px-3 border-b border-v2-border-border-muted">
-          <button
-            type="button"
-            class="min-w-0 flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-v2-text-text-base hover:bg-v2-overlay-simple-overlay-hover"
-            onClick={() => {
-              sessionTabs.replaceWithSessions(server.key, [])
-              navigateWithSidebarReset("/")
-            }}
-          >
+          <div class="min-w-0 flex items-center gap-2 px-2 py-1.5 text-v2-text-text-base">
             <span class="text-base leading-none">🌳</span>
             <span class="min-w-0 truncate text-[13px] [font-weight:560]">atree</span>
-          </button>
+          </div>
           <IconButtonV2
             type="button"
             variant="ghost-muted"

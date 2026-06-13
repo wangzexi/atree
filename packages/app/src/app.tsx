@@ -44,7 +44,7 @@ import { ServerConnection, ServerProvider, serverName, useServer } from "@/conte
 import { SettingsProvider, useSettings } from "@/context/settings"
 import { TerminalProvider } from "@/context/terminal"
 import { TabsProvider, useTabs, type DraftTab } from "@/context/tabs"
-import { SDKProvider, useSDK } from "@/context/sdk"
+import { SDKProvider } from "@/context/sdk"
 import { WslServersProvider } from "@/wsl/context"
 import DirectoryLayout, { DirectoryDataProvider } from "@/pages/directory-layout"
 import Layout from "@/pages/layout"
@@ -57,25 +57,13 @@ const NewSession = lazy(() => import("@/pages/new-session"))
 
 const SessionRoute = Object.assign(
   () => {
-    const settings = useSettings()
     const params = useParams()
-    const [search] = useSearchParams<{ draftId?: string; prompt?: string }>()
-    const sdk = useSDK()
-    const server = useServer()
-    const tabs = useTabs()
-
-    // When the new layout is enabled, the legacy new-session route (/:dir/session with no id)
-    // is replaced by a draft at /new-session?draftId=…
-    createEffect(() => {
-      if (!settings.general.newLayoutDesigns()) return
-      if (params.id || search.draftId) return
-      if (!tabs.ready() || !sdk.directory) return
-      tabs.newDraft({ server: server.key, directory: sdk.directory }, search.prompt)
-    })
 
     return (
       <SessionProviders>
-        <Session />
+        <Show when={params.id} fallback={<NewSession />}>
+          <Session />
+        </Show>
       </SessionProviders>
     )
   },

@@ -305,15 +305,13 @@ export default function Page() {
     return next
   }
 
-  const openReviewPanel = () => {
-    if (!view().reviewPanel.opened()) view().reviewPanel.open()
-  }
+  const openReviewPanel = () => {}
 
   const info = createMemo(() => (params.id ? sync.session.get(params.id) : undefined))
   const isChildSession = createMemo(() => !!info()?.parentID)
   const diffs = createMemo(() => (params.id ? list(sync.data.session_diff[params.id]) : []))
-  const canReview = createMemo(() => !!sync.project)
-  const reviewTab = createMemo(() => isDesktop())
+  const canReview = createMemo(() => false)
+  const reviewTab = createMemo(() => false)
   const tabState = createSessionTabs({
     tabs,
     pathFromTab: file.pathFromTab,

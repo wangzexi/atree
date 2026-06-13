@@ -490,7 +490,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                                   navigateTab(tab)
                                   ref.scrollIntoView({ behavior: "instant" })
                                 }}
-                                onClose={() => closeTab(tab, i())}
                               />
                             </>
                           )
@@ -531,6 +530,15 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     />
                   )}
                 </Show>
+                <Tooltip placement="bottom" value={language.t("command.fileTree.toggle")} openDelay={600}>
+                  <IconButtonV2
+                    size="small"
+                    variant="ghost-muted"
+                    icon={<IconV2 name="sidebar-right" />}
+                    aria-label={language.t("command.fileTree.toggle")}
+                    onClick={() => layout.fileTree.toggle()}
+                  />
+                </Tooltip>
                 <TitlebarV2Right state={v2RightState()} />
                 <Show when={windows() && !electronWindows()}>
                   <div data-tauri-decorum-tb class="flex flex-row" />
@@ -848,13 +856,16 @@ function TabNavItem(props: {
       <Show when={session.latest}>
         {(session) => {
           return (
-            <div class="flex size-6 shrink-0 items-center justify-center" title={session().title || "会话"}>
-              <SessionEmojiPicker
-                session={session()}
-                directory={props.directory}
-                serverCtx={serverCtx()}
-              />
-            </div>
+            <Tooltip placement="bottom" value={session().title || "会话"} openDelay={0}>
+              <div class="flex size-6 shrink-0 items-center justify-center">
+                <SessionEmojiPicker
+                  session={session()}
+                  directory={props.directory}
+                  serverCtx={serverCtx()}
+                  enabled={props.active}
+                />
+              </div>
+            </Tooltip>
           )
         }}
       </Show>
@@ -892,11 +903,12 @@ function ArchivedSessionsMenu(props: {
   const navigate = useNavigate()
   const tabs = useTabs()
   const server = useServer()
+  const serverSync = useServerSync()
   const serverCtx = createMemo(() => {
     const conn = global.servers.list().find((item) => ServerConnection.key(item) === props.serverKey)
     if (conn) return global.createServerCtx(conn)
   })
-  const [sessions, { refetch }] = createResource(
+  const [sessions, { refetch, mutate }] = createResource(
     () => [serverCtx(), props.directory, props.version] as const,
     async ([serverCtx, directory]) => {
       if (!serverCtx) return [] as Session[]
@@ -907,7 +919,17 @@ function ArchivedSessionsMenu(props: {
     },
     { initialValue: [] as Session[] },
   )
-  const count = createMemo(() => sessions.latest?.length ?? 0)
+  const visibleSessions = createMemo(() => {
+    const openSessionIds = new Set<string>()
+    for (const tab of tabs.store) {
+      if (tab.type !== "session") continue
+      if (tab.server !== props.serverKey) continue
+      if (decode64(tab.dirBase64) !== props.directory) continue
+      openSessionIds.add(tab.sessionId)
+    }
+    return (sessions() ?? []).filter((session) => !openSessionIds.has(session.id))
+  })
+  const count = createMemo(() => visibleSessions().length)
 
   const openSession = async (session: Session) => {
     const ctx = serverCtx()
@@ -917,6 +939,29 @@ function ArchivedSessionsMenu(props: {
       sessionID: session.id,
       time: { archived: null } as unknown as { archived?: number },
     })
+    const restored = {
+      ...session,
+      time: { ...session.time },
+    } as Session
+    delete (restored.time as { archived?: number }).archived
+    const [directoryStore, setDirectoryStore] = serverSync.child(props.directory)
+    const alreadyVisible = directoryStore.session.some((item) => item.id === restored.id)
+    setDirectoryStore("session", (list: Session[]) => {
+      const next = list.slice()
+      const existing = next.findIndex((item) => item.id === restored.id)
+      if (existing >= 0) {
+        next[existing] = restored
+        return next
+      }
+      const insertAt = next.findIndex((item) => item.id > restored.id)
+      if (insertAt === -1) return [...next, restored]
+      next.splice(insertAt, 0, restored)
+      return next
+    })
+    if (!alreadyVisible && !restored.parentID) {
+      setDirectoryStore("sessionTotal", (value) => value + 1)
+    }
+    mutate((items) => items.filter((item) => item.id !== session.id))
     props.onChanged()
     void refetch()
     tabs.addSessionTab({
@@ -942,21 +987,18 @@ function ArchivedSessionsMenu(props: {
         aria-label="归档会话"
         title="归档会话"
       >
-        <IconV2 name="outline-dots" />
-        <Show when={count() > 0}>
-          <span class="absolute right-0.5 top-0.5 size-1.5 rounded-full bg-v2-icon-icon-accent" />
-        </Show>
+        <IconV2 name="folder-open" />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="w-[260px] p-1">
           <Show
-            when={sessions.latest.length > 0}
+            when={visibleSessions().length > 0}
             fallback={
               <div class="px-2 py-2 text-[12px] leading-5 text-v2-text-text-muted">没有归档会话</div>
             }
           >
             <div class="px-2 py-1 text-[11px] leading-4 text-v2-text-text-muted">归档会话</div>
-            <For each={sessions.latest}>
+            <For each={visibleSessions()}>
               {(session) => (
                 <DropdownMenu.Item
                   class="flex min-w-0 items-center gap-2 rounded-md px-2 py-1.5 hover:bg-v2-overlay-simple-overlay-hover data-[highlighted]:bg-v2-overlay-simple-overlay-hover data-[highlighted]:outline-none"
@@ -982,6 +1024,7 @@ function SessionEmojiPicker(props: {
   session: Session
   directory: string
   serverCtx?: ReturnType<ReturnType<typeof useGlobal>["createServerCtx"]>
+  enabled?: boolean
 }) {
   const [optimisticEmoji, setOptimisticEmoji] = createSignal<string>()
   const currentEmoji = () => optimisticEmoji() ?? sessionEmoji(props.session)
@@ -1010,29 +1053,34 @@ function SessionEmojiPicker(props: {
   }
 
   return (
-    <DropdownMenu gutter={4} placement="bottom-start">
-      <DropdownMenu.Trigger
-        class="flex size-5 shrink-0 items-center justify-center rounded text-[14px] leading-none hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--v2-border-border-focus)]"
-        aria-label="设置会话图标"
-        onClick={(event) => event.stopPropagation()}
-      >
-        {currentEmoji()}
-      </DropdownMenu.Trigger>
-      <DropdownMenu.Portal>
-        <DropdownMenu.Content class="grid w-[184px] grid-cols-6 gap-1 p-1">
-          <For each={sessionEmojiOptions}>
-            {(emoji) => (
-              <DropdownMenu.Item
-                class="flex size-7 items-center justify-center rounded-md text-[17px] hover:bg-v2-overlay-simple-overlay-hover data-[highlighted]:bg-v2-overlay-simple-overlay-hover data-[highlighted]:outline-none"
-                onSelect={() => void updateEmoji(emoji)}
-              >
-                <DropdownMenu.ItemLabel>{emoji}</DropdownMenu.ItemLabel>
-              </DropdownMenu.Item>
-            )}
-          </For>
-        </DropdownMenu.Content>
-      </DropdownMenu.Portal>
-    </DropdownMenu>
+    <Show
+      when={props.enabled}
+      fallback={<span class="flex size-5 shrink-0 items-center justify-center text-[14px] leading-none">{currentEmoji()}</span>}
+    >
+      <DropdownMenu gutter={4} placement="bottom-start">
+        <DropdownMenu.Trigger
+          class="flex size-5 shrink-0 items-center justify-center rounded text-[14px] leading-none hover:bg-v2-overlay-simple-overlay-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[var(--v2-border-border-focus)]"
+          aria-label="设置会话图标"
+          onClick={(event) => event.stopPropagation()}
+        >
+          {currentEmoji()}
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content class="grid w-[184px] grid-cols-6 gap-1 p-1">
+            <For each={sessionEmojiOptions}>
+              {(emoji) => (
+                <DropdownMenu.Item
+                  class="flex size-7 items-center justify-center rounded-md text-[17px] hover:bg-v2-overlay-simple-overlay-hover data-[highlighted]:bg-v2-overlay-simple-overlay-hover data-[highlighted]:outline-none"
+                  onSelect={() => void updateEmoji(emoji)}
+                >
+                  <DropdownMenu.ItemLabel>{emoji}</DropdownMenu.ItemLabel>
+                </DropdownMenu.Item>
+              )}
+            </For>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu>
+    </Show>
   )
 }
 
@@ -1042,22 +1090,12 @@ function DraftTabItem(props: {
   title: string
   active?: boolean
   onNavigate: () => void
-  onClose: () => void
 }) {
-  const closeTab = (event: MouseEvent) => {
-    event.preventDefault()
-    event.stopPropagation()
-    props.onClose()
-  }
   return (
     <div
       ref={props.ref}
       data-active={props.active}
-      class="group relative flex h-7 w-9 shrink-0 flex-row items-center justify-start overflow-hidden whitespace-nowrap rounded-[6px] bg-[var(--tab-bg)] px-1.5 transition-[width,background-color] duration-150 ease-out [--tab-bg:var(--v2-background-bg-deep)] hover:w-[52px] hover:[--tab-bg:var(--v2-background-bg-layer-02)] data-[active='true']:[--tab-bg:var(--v2-overlay-simple-overlay-pressed)] focus-within:w-[52px] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
-      onMouseDown={(event) => {
-        if (event.button !== 1) return
-        closeTab(event)
-      }}
+      class="group relative flex h-7 w-9 shrink-0 flex-row items-center justify-start overflow-hidden whitespace-nowrap rounded-[6px] bg-[var(--tab-bg)] px-1.5 transition-[background-color] duration-150 ease-out [--tab-bg:var(--v2-background-bg-deep)] hover:[--tab-bg:var(--v2-background-bg-layer-02)] data-[active='true']:[--tab-bg:var(--v2-overlay-simple-overlay-pressed)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
     >
       <a
         href={props.href}
@@ -1073,20 +1111,6 @@ function DraftTabItem(props: {
           <IconV2 name="edit" />
         </span>
       </a>
-      <div class="pointer-events-none absolute inset-y-0 right-0 flex w-6 items-center justify-center opacity-0 transition-opacity duration-150 group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100">
-        <IconButtonV2
-          size="small"
-          variant="ghost-muted"
-          class="opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
-          onMouseDown={(event) => {
-            event.preventDefault()
-            event.stopPropagation()
-          }}
-          onClick={closeTab}
-          icon={<IconV2 name="xmark-small" />}
-          aria-label="Close tab"
-        />
-      </div>
     </div>
   )
 }

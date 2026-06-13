@@ -9,6 +9,14 @@ const icons = {
     viewBox: "0 0 16 16",
     body: `<path d="M7.5 13.3333H1.5V2H6.83333L8.83333 4H14.8333V6M10.1667 11.3333H15.5M12.8333 8.66667V14" stroke="currentColor" stroke-miterlimit="10" stroke-linecap="square"/>`,
   },
+  folder: {
+    viewBox: "0 0 16 16",
+    body: `<path d="M1.5 13.3333V2H6.83333L8.83333 4H14.8333V13.3333H1.5Z" stroke="currentColor" stroke-miterlimit="10" stroke-linecap="square"/>`,
+  },
+  "folder-open": {
+    viewBox: "0 0 16 16",
+    body: `<path d="M1.5 13.3333V2.66667H6.83333L8.83333 4.66667H14.8333V7M1.5 13.3333L3.16667 6.66667H15.1667L13.5 13.3333H1.5Z" stroke="currentColor" stroke-linejoin="round" stroke-linecap="square"/>`,
+  },
   "grid-plus": {
     viewBox: "0 0 16 16",
     body: `<path d="M13.9948 11.668H9.32812M11.6641 9.33203V13.9987M6.66667 9.33203V13.9987H2V9.33203H6.66667ZM6.66667 2V6.66667H2V2H6.66667ZM13.9948 2V6.66667H9.32812V2H13.9948Z" stroke="currentColor" stroke-miterlimit="10" stroke-linecap="square"/>`,

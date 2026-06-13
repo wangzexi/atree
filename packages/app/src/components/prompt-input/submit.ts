@@ -393,7 +393,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             dirBase64: base64Encode(sessionDirectory),
             sessionId: session.id,
           })
-        else navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
+        else {
+          tabs.addSessionTab({
+            server: server.key,
+            dirBase64: base64Encode(sessionDirectory),
+            sessionId: session.id,
+          })
+          navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
+        }
       }
     }
     if (!session) {
