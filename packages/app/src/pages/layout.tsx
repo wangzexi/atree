@@ -77,6 +77,8 @@ import {
   effectiveWorkspaceOrder,
   errorMessage,
   latestRootSession,
+  sessionEmoji,
+  sessionHasSchedule,
   sortedRootSessions,
 } from "./layout/helpers"
 import {
@@ -2356,26 +2358,246 @@ export default function Layout(props: ParentProps) {
   )
 
   const AtreeSidebar = () => {
-    const activeRoot = createMemo(
-      () => currentProject()?.worktree ?? (currentDir() ? projectRoot(currentDir()) : layout.projects.list()[0]?.worktree ?? ""),
+    type AtreeDirectoryNode = {
+      name: string
+      path: string
+      absolute: string
+    }
+    type AtreeDirectoryState = {
+      expanded?: boolean
+      loaded?: boolean
+      loading?: boolean
+      childrenProbed?: boolean
+      children?: AtreeDirectoryNode[]
+      sessions?: Session[]
+    }
+
+    const [tree, setTree] = createStore<{
+      directory: Record<string, AtreeDirectoryState>
+    }>({
+      directory: {},
+    })
+
+    const activeDirectory = createMemo(
+      () => currentDir() ?? currentProject()?.worktree ?? layout.projects.list()[0]?.worktree ?? "",
     )
     const homedir = createMemo(() => serverSync.data.path.home)
     const label = (directory: string) => getFilename(directory) || directory
     const shortPath = (directory: string) => directory.replace(homedir(), "~")
-    const projectSessions = (project: LocalProject) => {
-      const [store] = serverSync.child(project.worktree, { bootstrap: false })
-      return sortedRootSessions(store, sortNow()).slice(0, 4)
+    const normalizeRelative = (path: string) => path.replace(/^\/+/, "").replace(/\/+$/, "")
+    const relativePath = (root: string, directory: string) => {
+      const rootKey = pathKey(root)
+      const directoryKey = pathKey(directory)
+      if (rootKey === directoryKey) return ""
+      if (!directoryKey.startsWith(rootKey + "/")) return ""
+      return normalizeRelative(directoryKey.slice(rootKey.length + 1))
     }
-    const openNodeSessions = (project: LocalProject, sessions: Session[]) => {
-      server.projects.touch(project.worktree)
+    const directoryKey = (directory: string) => pathKey(directory)
+    const directoryState = (directory: string) => tree.directory[directoryKey(directory)]
+    const directorySessions = (directory: string) =>
+      sortedRootSessions(
+        { session: directoryState(directory)?.sessions ?? [], path: { directory } },
+        sortNow(),
+      )
+    const scheduledSessions = (directory: string) => directorySessions(directory).filter(sessionHasSchedule).slice(0, 4)
+    const hasScheduledSessions = (directory: string) => scheduledSessions(directory).length > 0
+    const sortedChildren = (children: AtreeDirectoryNode[]) =>
+      [...children].sort((a, b) => {
+        const aScheduled = hasScheduledSessions(a.absolute)
+        const bScheduled = hasScheduledSessions(b.absolute)
+        if (aScheduled !== bScheduled) return aScheduled ? -1 : 1
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+      })
+    const ensureDirectory = (directory: string, expanded = false) => {
+      const key = directoryKey(directory)
+      if (tree.directory[key]) return
+      setTree("directory", key, { expanded })
+    }
+    const toDirectoryNodes = (nodes: { type: string; name: string; path: string; absolute: string }[] | undefined) =>
+      (nodes ?? [])
+        .filter((node) => node.type === "directory")
+        .map((node) => ({
+          name: node.name,
+          path: node.path,
+          absolute: node.absolute,
+        }))
+    const probeChildDirectories = async (root: string, children: AtreeDirectoryNode[]) => {
+      const client = serverSDK.createClient({ directory: root, throwOnError: true })
+      await Promise.all(
+        children.map(async (child) => {
+          const childKey = directoryKey(child.absolute)
+          if (tree.directory[childKey]?.loaded) return
+          try {
+            const [files, sessions] = await Promise.all([
+              client.file.list({ directory: root, path: relativePath(root, child.absolute) }),
+              serverSDK
+                .createClient({ directory: child.absolute, throwOnError: true })
+                .session.list({ directory: child.absolute, roots: true }),
+            ])
+            const childChildren = toDirectoryNodes(files.data)
+            setTree("directory", childKey, (prev) => ({
+              ...prev,
+              loaded: true,
+              loading: false,
+              children: childChildren,
+              sessions: sessions.data ?? [],
+            }))
+            for (const grandchild of childChildren) ensureDirectory(grandchild.absolute)
+          } catch {
+            // Keep tree browsing usable even if a child directory cannot expose sessions or files.
+          }
+        }),
+      )
+    }
+    const loadDirectory = async (root: string, directory: string, opts?: { force?: boolean; probeChildren?: boolean }) => {
+      const key = directoryKey(directory)
+      ensureDirectory(directory, directoryKey(root) === key)
+      const state = tree.directory[key]
+      if (!opts?.force && state?.loaded) {
+        if (opts?.probeChildren && !state.childrenProbed) {
+          await probeChildDirectories(root, state.children ?? [])
+          setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
+        }
+        return
+      }
+      if (state?.loading) return
+
+      setTree("directory", key, (prev) => ({ ...prev, loading: true }))
+      const client = serverSDK.createClient({ directory: root, throwOnError: true })
+      const sessionClient = serverSDK.createClient({ directory, throwOnError: true })
+
+      try {
+        const [files, sessions] = await Promise.all([
+          client.file.list({ directory: root, path: relativePath(root, directory) }),
+          sessionClient.session.list({ directory, roots: true }),
+        ])
+        const children = toDirectoryNodes(files.data)
+        setTree("directory", key, (prev) => ({
+          ...prev,
+          loaded: true,
+          loading: false,
+          children,
+          sessions: sessions.data ?? [],
+        }))
+        for (const child of children) ensureDirectory(child.absolute)
+        await probeChildDirectories(root, children)
+        setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
+      } catch (error) {
+        setTree("directory", key, (prev) => ({ ...prev, loading: false }))
+        showToast({
+          variant: "error",
+          title: "目录读取失败",
+          description: errorMessage(error, directory),
+        })
+      }
+    }
+    const toggleDirectory = (root: string, directory: string) => {
+      const key = directoryKey(directory)
+      const expanded = !tree.directory[key]?.expanded
+      if (!expanded) {
+        setTree("directory", key, (prev) => ({ ...prev, expanded: false }))
+        return
+      }
+      void loadDirectory(root, directory, { probeChildren: true }).then(() => {
+        setTree("directory", key, (prev) => ({ ...prev, expanded: true }))
+      })
+    }
+    const openDirectorySessions = async (root: string, directory: string) => {
+      await loadDirectory(root, directory)
+      const sessions = sortedRootSessions(
+        { session: directoryState(directory)?.sessions ?? [], path: { directory } },
+        Date.now(),
+      )
+      server.projects.touch(root)
       sessionTabs.replaceWithSessions(server.key, sessions)
       const first = sessions[0]
       if (!first) {
-        navigateWithSidebarReset("/")
+        setStore("lastProjectSession", root, { directory, id: "", at: Date.now() })
+        navigateWithSidebarReset(`/${base64Encode(directory)}/session`)
         return
       }
-      setStore("lastProjectSession", project.worktree, { directory: first.directory, id: first.id, at: Date.now() })
+      setStore("lastProjectSession", root, { directory: first.directory, id: first.id, at: Date.now() })
       navigateWithSidebarReset(`/${base64Encode(first.directory)}/session/${first.id}`)
+    }
+    const rootProject = createMemo(() => layout.projects.list()[0])
+
+    createEffect(() => {
+      const root = rootProject()?.worktree
+      if (!root) return
+      ensureDirectory(root, true)
+      void loadDirectory(root, root)
+    })
+
+    const DirectoryRow = (props: { root: string; directory: string; depth: number; name: string }) => {
+      const state = () => directoryState(props.directory)
+      const active = createMemo(() => pathKey(activeDirectory()) === pathKey(props.directory))
+      const hasChildren = () => (state()?.children?.length ?? 0) > 0 || !state()?.loaded
+      const dimmed = () => props.depth > 0 && !hasScheduledSessions(props.directory)
+      const nodeHref = () => `/${base64Encode(props.directory)}/session`
+
+      return (
+        <div class="min-w-0">
+          <div
+            classList={{
+              "group/node flex h-8 min-w-0 items-center gap-1 rounded-md pr-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color,opacity]": true,
+              "bg-v2-background-bg-layer-03 text-v2-text-text-base": active(),
+              "hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base": !active(),
+              "opacity-55 hover:opacity-100": dimmed(),
+            }}
+            style={{ "padding-left": `${6 + props.depth * 14}px` }}
+          >
+            <Show when={hasChildren()} fallback={<span class="size-5 shrink-0" />}>
+              <button
+                type="button"
+                class="flex size-5 shrink-0 items-center justify-center rounded text-[12px] hover:bg-v2-overlay-simple-overlay-hover"
+                title={state()?.expanded ? "收起" : "展开"}
+                onClick={(event) => {
+                  event.stopPropagation()
+                  toggleDirectory(props.root, props.directory)
+                }}
+              >
+                <span>{state()?.expanded ? "▾" : "▸"}</span>
+              </button>
+            </Show>
+            <button
+              type="button"
+              class="min-w-0 flex-1 flex items-center gap-1.5 text-left"
+              title={shortPath(props.directory)}
+              onClick={() => void openDirectorySessions(props.root, props.directory)}
+            >
+              <span class="min-w-0 truncate text-[13px] [font-weight:520]">{props.name}</span>
+            </button>
+            <div class="flex shrink-0 items-center gap-0.5">
+              <For each={scheduledSessions(props.directory)}>
+                {(session) => (
+                  <a
+                    class="inline-flex h-5 w-5 items-center justify-center text-[13px] opacity-80 hover:opacity-100"
+                    href={`/${base64Encode(session.directory)}/session/${session.id}`}
+                    title={session.title || "会话"}
+                    onMouseEnter={() => prefetchSession(session, "high")}
+                  >
+                    {sessionEmoji(session)}
+                  </a>
+                )}
+              </For>
+              <a
+                class="inline-flex h-5 w-5 items-center justify-center rounded text-v2-text-text-muted opacity-0 transition-[opacity,transform] group-hover/node:translate-x-0 group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base"
+                href={nodeHref()}
+                title="新会话"
+              >
+                +
+              </a>
+            </div>
+          </div>
+          <Show when={state()?.expanded}>
+            <For each={sortedChildren(state()?.children ?? [])}>
+              {(child) => (
+                <DirectoryRow root={props.root} directory={child.absolute} depth={props.depth + 1} name={child.name} />
+              )}
+            </For>
+          </Show>
+        </div>
+      )
     }
 
     return (
@@ -2384,7 +2606,10 @@ export default function Layout(props: ParentProps) {
           <button
             type="button"
             class="min-w-0 flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-v2-text-text-base hover:bg-v2-overlay-simple-overlay-hover"
-            onClick={() => navigateWithSidebarReset("/")}
+            onClick={() => {
+              sessionTabs.replaceWithSessions(server.key, [])
+              navigateWithSidebarReset("/")
+            }}
           >
             <span class="text-base leading-none">🌳</span>
             <span class="min-w-0 truncate text-[13px] [font-weight:560]">atree</span>
@@ -2393,15 +2618,15 @@ export default function Layout(props: ParentProps) {
             type="button"
             variant="ghost-muted"
             size="small"
-            icon={<IconV2 name="folder-add-left" />}
-            aria-label="选择根目录"
+            icon={<IconV2 name="switch" />}
+            aria-label="切换根目录"
             onClick={chooseProject}
           />
         </div>
 
         <div class="flex-1 min-h-0 overflow-y-auto px-2 py-2">
           <Show
-            when={layout.projects.list().length > 0}
+            when={rootProject()}
             fallback={
               <div class="flex min-h-72 flex-col items-center justify-center gap-3 px-4 text-center">
                 <div class="text-[13px] text-v2-text-text-muted">选择一个根目录开始</div>
@@ -2411,57 +2636,11 @@ export default function Layout(props: ParentProps) {
               </div>
             }
           >
-            <div class="flex flex-col gap-1">
-              <For each={layout.projects.list()}>
-                {(project) => {
-                  const active = createMemo(() => pathKey(activeRoot()) === pathKey(project.worktree))
-                  const sessions = createMemo(() => projectSessions(project))
-                  const nodeHref = () => `/${base64Encode(project.worktree)}/session`
-                  return (
-                    <div class="group/node min-w-0">
-                      <div
-                        classList={{
-                          "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color]": true,
-                          "bg-v2-background-bg-layer-03 text-v2-text-text-base": active(),
-                          "hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base": !active(),
-                        }}
-                      >
-                        <button
-                          type="button"
-                          class="min-w-0 flex-1 flex items-center gap-2 text-left"
-                          title={shortPath(project.worktree)}
-                          onClick={() => openNodeSessions(project, sessions())}
-                        >
-                          <span class="text-[13px] leading-none">▾</span>
-                          <span class="min-w-0 truncate text-[13px] [font-weight:520]">{label(project.worktree)}</span>
-                        </button>
-                        <div class="flex shrink-0 items-center gap-0.5">
-                          <For each={sessions()}>
-                            {(session) => (
-                              <a
-                                class="inline-flex h-5 w-5 items-center justify-center text-[13px] opacity-80 hover:opacity-100"
-                                href={`/${base64Encode(session.directory)}/session/${session.id}`}
-                                title={session.title || "会话"}
-                                onMouseEnter={() => prefetchSession(session, "high")}
-                              >
-                                💬
-                              </a>
-                            )}
-                          </For>
-                          <a
-                            class="inline-flex h-5 w-5 items-center justify-center rounded text-v2-text-text-muted opacity-0 transition-[opacity,transform] group-hover/node:translate-x-0 group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base"
-                            href={nodeHref()}
-                            title="新会话"
-                          >
-                            +
-                          </a>
-                        </div>
-                      </div>
-                    </div>
-                  )
-                }}
-              </For>
-            </div>
+            {(project) => (
+              <div class="flex flex-col gap-1">
+                <DirectoryRow root={project().worktree} directory={project().worktree} depth={0} name={label(project().worktree)} />
+              </div>
+            )}
           </Show>
         </div>
       </aside>

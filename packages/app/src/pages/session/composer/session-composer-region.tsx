@@ -13,6 +13,7 @@ import { SessionPermissionDock } from "@/pages/session/composer/session-permissi
 import { SessionQuestionDock } from "@/pages/session/composer/session-question-dock"
 import { SessionFollowupDock } from "@/pages/session/composer/session-followup-dock"
 import { SessionRevertDock } from "@/pages/session/composer/session-revert-dock"
+import { SessionScheduleDock, readAtreeSchedule } from "@/pages/session/composer/session-schedule-dock"
 import type { SessionComposerState } from "@/pages/session/composer/session-composer-state"
 import { SessionTodoDock } from "@/pages/session/composer/session-todo-dock"
 import type { FollowupDraft } from "@/components/prompt-input/submit"
@@ -58,6 +59,7 @@ export function SessionComposerRegion(props: {
 
   const handoffPrompt = createMemo(() => getSessionHandoff(route.sessionKey())?.prompt)
   const info = createMemo(() => (route.params.id ? sync.session.get(route.params.id) : undefined))
+  const schedule = createMemo(() => readAtreeSchedule(info()))
   const parentID = createMemo(() => info()?.parentID)
   const child = createMemo(() => !!parentID())
   const showComposer = createMemo(() => !props.state.blocked() || child())
@@ -257,6 +259,9 @@ export function SessionComposerRegion(props: {
                   onSend={props.followup!.onSend}
                   onEdit={props.followup!.onEdit}
                 />
+              </Show>
+              <Show when={schedule()} keyed>
+                {(item) => <SessionScheduleDock schedule={item} />}
               </Show>
               <Show
                 when={child()}

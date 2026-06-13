@@ -33,6 +33,27 @@ export const sortedRootSessions = (store: SessionStore, now: number) => roots(st
 export const latestRootSession = (stores: SessionStore[], now: number) =>
   stores.flatMap(roots).sort(sortSessions(now))[0]
 
+function atreeMetadata(session: Pick<Session, "metadata">) {
+  const metadata = session.metadata
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return
+  const atree = metadata.atree
+  if (!atree || typeof atree !== "object" || Array.isArray(atree)) return
+  return atree as Record<string, unknown>
+}
+
+export const defaultSessionEmoji = "💬"
+
+export function sessionEmoji(session: Pick<Session, "metadata">) {
+  const emoji = atreeMetadata(session)?.emoji
+  return typeof emoji === "string" && emoji.trim() ? emoji : defaultSessionEmoji
+}
+
+export function sessionHasSchedule(session: Pick<Session, "metadata">) {
+  const atree = atreeMetadata(session)
+  if (!atree) return false
+  return Boolean(atree.schedule || atree.cron || atree.scheduled)
+}
+
 export function hasProjectPermissions<T>(
   request: Record<string, T[] | undefined> | undefined,
   include: (item: T) => boolean = () => true,
