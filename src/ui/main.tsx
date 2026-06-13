@@ -17,6 +17,7 @@ interface ActivityItem {
   id: string;
   label: string;
   detail?: string;
+  output?: string;
   status: "running" | "done" | "error";
   kind: "thinking" | "tool";
 }
@@ -75,14 +76,17 @@ function App() {
       }
       if (data.type === "message_update") {
         const assistantEvent = data.assistantMessageEvent;
-        if (assistantEvent?.type === "thinking_start" || assistantEvent?.type === "thinking_delta") {
+        if (assistantEvent?.type === "thinking_start") {
           upsertActivity(setActivityItems, setOpenActivityIds, {
             id: THINKING_ACTIVITY_ID,
             label: "正在思考",
-            detail: assistantEvent.partial?.thinking ?? assistantEvent.delta,
+            detail: assistantEvent.partial?.thinking,
             status: "running",
             kind: "thinking",
           });
+        }
+        if (assistantEvent?.type === "thinking_delta") {
+          updateThinkingActivity(setActivityItems, setOpenActivityIds, assistantEvent);
         }
         if (assistantEvent?.type === "toolcall_start" || assistantEvent?.type === "toolcall_delta") {
           upsertActivity(setActivityItems, setOpenActivityIds, { id: THINKING_ACTIVITY_ID, label: "正在准备工具调用", status: "running", kind: "thinking" });
@@ -392,7 +396,22 @@ function App() {
                     </span>
                     {item.detail && <span className="activity-summary">{summarizeActivityDetail(item.detail)}</span>}
                   </button>
-                  {item.detail && openActivityIds.has(item.id) && <div className="activity-detail">{item.detail}</div>}
+                  {(item.detail || item.output) && openActivityIds.has(item.id) && (
+                    <div className="activity-detail">
+                      {item.detail && (
+                        <div className="activity-section">
+                          {item.kind === "tool" && <div className="activity-section-label">输入</div>}
+                          <pre>{item.detail}</pre>
+                        </div>
+                      )}
+                      {item.output && (
+                        <div className="activity-section">
+                          <div className="activity-section-label">输出</div>
+                          <pre>{item.output}</pre>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               ))}
             </div>
@@ -667,14 +686,39 @@ function upsertActivity(
   item: ActivityItem,
 ) {
   setOpenIds((current) => {
-    if (current.has(item.id) || item.status !== "running") return current;
+    if (current.has(item.id) || item.status !== "running" || item.kind !== "thinking") return current;
     return new Set(current).add(item.id);
   });
   setItems((current) => {
     const next = current.filter((existing) => existing.id !== item.id);
     const existing = current.find((entry) => entry.id === item.id);
-    const merged = { ...existing, ...item, detail: item.detail ?? existing?.detail };
+    const merged = { ...existing, ...item, detail: item.detail ?? existing?.detail, output: item.output ?? existing?.output };
     return [...next, merged].slice(-5);
+  });
+}
+
+function updateThinkingActivity(
+  setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>,
+  setOpenIds: React.Dispatch<React.SetStateAction<Set<string>>>,
+  assistantEvent: any,
+) {
+  setOpenIds((current) => (current.has(THINKING_ACTIVITY_ID) ? current : new Set(current).add(THINKING_ACTIVITY_ID)));
+  setItems((current) => {
+    const existing = current.find((item) => item.id === THINKING_ACTIVITY_ID);
+    const next = current.filter((item) => item.id !== THINKING_ACTIVITY_ID);
+    const accumulated = readableValue(assistantEvent.partial?.thinking);
+    const delta = readableValue(assistantEvent.delta);
+    const detail = accumulated ?? `${existing?.detail ?? ""}${delta ?? ""}`;
+    return [
+      ...next,
+      {
+        id: THINKING_ACTIVITY_ID,
+        label: "正在思考",
+        detail: detail || existing?.detail,
+        status: "running" as const,
+        kind: "thinking" as const,
+      },
+    ].slice(-5);
   });
 }
 
@@ -682,11 +726,11 @@ function formatToolActivity(event: any, status: ActivityItem["status"]): Activit
   const toolName = String(event.toolName ?? "tool");
   const args = event.args ?? {};
   const prefix = status === "running" ? runningToolPrefix(toolName, args) : doneToolPrefix(toolName, status);
-  const detail = [formatToolDetail(toolName, args), formatToolOutput(event.partialResult ?? event.result)].filter(Boolean).join("\n\n");
   return {
     id: String(event.toolCallId ?? `${toolName}-${Date.now()}`),
     label: prefix,
-    detail: detail || undefined,
+    detail: formatToolDetail(toolName, args),
+    output: formatToolOutput(event.partialResult ?? event.result),
     status,
     kind: "tool",
   };
