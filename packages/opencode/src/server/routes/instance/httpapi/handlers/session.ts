@@ -46,6 +46,15 @@ const tryParseJson = (text: string) =>
     catch: () => new HttpApiError.BadRequest({}),
   })
 
+const parseScheduleAt = (value: number | string | undefined) => {
+  if (typeof value === "number") return value
+  if (typeof value === "string") {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? parsed : Number.NaN
+  }
+  return undefined
+}
+
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
     const session = yield* Session.Service
@@ -107,10 +116,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof SchedulePayload.Type
     }) {
       yield* requireSession(ctx.params.sessionID)
+      const type = ctx.payload.type ?? (ctx.payload.kind === "once" ? "at" : "cron")
+      const kind: Schedule.Kind = type === "at" ? "once" : "recurring"
       return yield* scheduleSvc
         .create({
           sessionID: ctx.params.sessionID,
-          expression: ctx.payload.expression,
+          kind,
+          expression: type === "cron" ? (ctx.payload.cron ?? ctx.payload.expression)?.trim() : undefined,
+          runAt: type === "at" ? parseScheduleAt(ctx.payload.at ?? ctx.payload.runAt) : undefined,
           message: ctx.payload.message,
         })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))

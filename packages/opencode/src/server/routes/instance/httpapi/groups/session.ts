@@ -73,7 +73,12 @@ export const CommandPayload = Schema.Struct(Struct.omit(SessionPrompt.CommandInp
 export const ShellPayload = Schema.Struct(Struct.omit(SessionPrompt.ShellInput.fields, ["sessionID"]))
 export const RevertPayload = Schema.Struct(Struct.omit(SessionRevert.RevertInput.fields, ["sessionID"]))
 export const SchedulePayload = Schema.Struct({
-  expression: Schema.String,
+  type: Schema.optional(Schema.Literals(["cron", "at"])),
+  cron: Schema.optional(Schema.String),
+  at: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
+  kind: Schema.optional(Schedule.KindSchema),
+  expression: Schema.optional(Schema.String),
+  runAt: Schema.optional(Schema.Number),
   message: Schema.String,
 })
 export const PermissionResponsePayload = Schema.Struct({
@@ -183,7 +188,7 @@ export const SessionApi = HttpApi.make("session")
             identifier: "session.schedules",
             summary: "List session scheduled tasks",
             description:
-              "Retrieve the scheduled tasks (cron-driven recurring messages) configured for the specified session.",
+              "Retrieve scheduled tasks configured for the specified session, including recurring cron messages and one-time at messages.",
           }),
         ),
         HttpApiEndpoint.post("createSchedule", SessionPaths.createSchedule, {
@@ -196,7 +201,8 @@ export const SessionApi = HttpApi.make("session")
           OpenApi.annotations({
             identifier: "session.createSchedule",
             summary: "Create session scheduled task",
-            description: "Create a cron-driven recurring message for the specified session.",
+            description:
+              "Create a scheduled message for the specified session. Use type='cron' with cron for recurring tasks, or type='at' with at for one-time tasks.",
           }),
         ),
         HttpApiEndpoint.delete("deleteSchedule", SessionPaths.deleteSchedule, {

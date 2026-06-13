@@ -18,6 +18,7 @@ import {
   homeProjectDirectories,
   homeSessionServerStatus,
   latestRootSession,
+  sortedRootSessions,
   toggleHomeProjectSelection,
 } from "./helpers"
 import { pathKey } from "@/utils/path-key"
@@ -151,6 +152,43 @@ describe("layout workspace helpers", () => {
     )
 
     expect(result?.id).toBe("workspace")
+  })
+
+  test("sorts automated sessions by next run before recent manual sessions", () => {
+    const result = sortedRootSessions(
+      {
+        path: { directory: "/workspace" },
+        session: [
+          session({
+            id: "manual-new",
+            directory: "/workspace",
+            time: { created: 1, updated: 90_000, archived: undefined },
+          }),
+          session({
+            id: "auto-later",
+            directory: "/workspace",
+            time: { created: 1, updated: 1, archived: undefined },
+          }),
+          session({
+            id: "auto-sooner",
+            directory: "/workspace",
+            time: { created: 1, updated: 1, archived: undefined },
+          }),
+          session({
+            id: "manual-old",
+            directory: "/workspace",
+            time: { created: 1, updated: 10_000, archived: undefined },
+          }),
+        ],
+      },
+      120_000,
+      {
+        "auto-later": [{ nextRunAt: 300_000 }],
+        "auto-sooner": [{ nextRunAt: 200_000 }],
+      },
+    )
+
+    expect(result.map((item) => item.id)).toEqual(["auto-sooner", "auto-later", "manual-new", "manual-old"])
   })
 
   test("detects project permissions with a filter", () => {

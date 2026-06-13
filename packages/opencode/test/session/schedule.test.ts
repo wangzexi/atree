@@ -75,7 +75,9 @@ const initScheduleTables = Effect.gen(function* () {
   yield* db.run(sql`CREATE TABLE IF NOT EXISTS schedule (
     id text PRIMARY KEY NOT NULL,
     session_id text NOT NULL,
+    kind text DEFAULT 'recurring' NOT NULL,
     expression text NOT NULL,
+    run_at integer,
     message text NOT NULL,
     created_at integer NOT NULL
   )`)
@@ -179,6 +181,70 @@ it.instance("creates, lists, triggers, records, and deletes a scheduled task", (
     yield* schedules.delete(created.id)
     expect(yield* schedules.list(session.id)).toEqual([])
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
+  }),
+)
+
+it.instance("runs a one-time scheduled task once", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    const queue = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+    promptQueue = queue
+    yield* initScheduleTables
+
+    const session = yield* createFixtureSession("schedule once test")
+    const runAt = Date.now() + 60_000
+    const created = yield* schedules.create({
+      sessionID: session.id,
+      kind: "once",
+      runAt,
+      message: "scheduled once",
+    })
+
+    expect(created.kind).toBe("once")
+    expect(created.runAt).toBe(runAt)
+    expect(created.nextRun).toBe(runAt)
+
+    yield* schedules.tick(created.id)
+    const prompt = yield* takePrompt(queue)
+    expect(prompt.parts).toEqual([
+      {
+        type: "text",
+        text: "scheduled once",
+        metadata: { source: "schedule", scheduleId: created.id },
+      },
+    ])
+
+    const ran = yield* waitForRunStatus(schedules, session.id, "ran")
+    expect(ran.lastRanAt).toBeNumber()
+    expect(ran.nextRun).toBeNull()
+  }),
+)
+
+it.instance("rejects a second scheduled task for the same session", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    promptQueue = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+    yield* initScheduleTables
+
+    const session = yield* createFixtureSession("schedule single automation test")
+    yield* schedules.create({
+      sessionID: session.id,
+      expression: "* * * * *",
+      message: "first automation",
+    })
+
+    const error = yield* schedules
+      .create({
+        sessionID: session.id,
+        expression: "*/5 * * * *",
+        message: "second automation",
+      })
+      .pipe(Effect.flip)
+
+    expect(error._tag).toBe("ScheduleLimitExceeded")
+    if (error._tag === "ScheduleLimitExceeded") {
+      expect(error.limit).toBe(1)
+    }
   }),
 )
 

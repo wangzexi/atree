@@ -61,12 +61,12 @@ import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
+import { authTokenFromCredentials } from "@/utils/server"
 
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
 import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
-import { DebugBar } from "@/components/debug-bar"
 import { HelpButton } from "@/components/help-button"
 import { SquarePenIcon, Titlebar, type TitlebarUpdate } from "@/components/titlebar"
 import { useDirectoryPicker } from "@/components/directory-picker"
@@ -81,7 +81,9 @@ import {
   latestRootSession,
   sessionEmoji,
   sessionHasSchedule,
+  sessionNextScheduleRun,
   sortedRootSessions,
+  type SessionScheduleSummary,
 } from "./layout/helpers"
 import {
   collectNewSessionDeepLinks,
@@ -2400,11 +2402,18 @@ export default function Layout(props: ParentProps) {
       children?: AtreeDirectoryNode[]
       sessions?: Session[]
     }
+    type AtreeScheduleState = {
+      loaded?: boolean
+      loading?: boolean
+      schedules?: SessionScheduleSummary[]
+    }
 
     const [tree, setTree] = createStore<{
       directory: Record<string, AtreeDirectoryState>
+      schedule: Record<string, AtreeScheduleState>
     }>({
       directory: {},
+      schedule: {},
     })
 
     const activeDirectory = createMemo(() => {
@@ -2428,14 +2437,25 @@ export default function Layout(props: ParentProps) {
     }
     const directoryKey = (directory: string) => pathKey(directory)
     const directoryState = (directory: string) => tree.directory[directoryKey(directory)]
+    const scheduleIndex = createMemo(() =>
+      Object.fromEntries(Object.entries(tree.schedule).map(([sessionID, state]) => [sessionID, state.schedules ?? []])),
+    )
     const directorySessions = (directory: string) =>
       sortedRootSessions(
         { session: directoryState(directory)?.sessions ?? [], path: { directory } },
         sortNow(),
+        scheduleIndex(),
       )
     const isSessionNode = (directory: string) => directorySessions(directory).length > 0
-    const scheduledSessions = (directory: string) => directorySessions(directory).filter(sessionHasSchedule).slice(0, 4)
+    const scheduledSessions = (directory: string) =>
+      directorySessions(directory)
+        .filter((session) => sessionHasSchedule(session, scheduleIndex()))
+        .slice(0, 4)
     const hasScheduledSessions = (directory: string) => scheduledSessions(directory).length > 0
+    const firstScheduleRun = (directory: string) =>
+      scheduledSessions(directory)
+        .map((session) => sessionNextScheduleRun(session, scheduleIndex()) ?? Number.MAX_SAFE_INTEGER)
+        .sort((a, b) => a - b)[0]
     const isVisiblePath = (directory: string): boolean => {
       if (isSessionNode(directory)) return true
       const state = directoryState(directory)
@@ -2461,6 +2481,11 @@ export default function Layout(props: ParentProps) {
         const aScheduled = hasScheduledSessions(a.absolute)
         const bScheduled = hasScheduledSessions(b.absolute)
         if (aScheduled !== bScheduled) return aScheduled ? -1 : 1
+        if (aScheduled && bScheduled) {
+          const aNext = firstScheduleRun(a.absolute) ?? Number.MAX_SAFE_INTEGER
+          const bNext = firstScheduleRun(b.absolute) ?? Number.MAX_SAFE_INTEGER
+          if (aNext !== bNext) return aNext - bNext
+        }
         return a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
       })
     const ensureDirectory = (directory: string, expanded = false) => {
@@ -2476,6 +2501,61 @@ export default function Layout(props: ParentProps) {
           path: node.path,
           absolute: node.absolute,
         }))
+    const asScheduleTime = (value: unknown) => {
+      if (typeof value === "number" && Number.isFinite(value)) return value
+      if (typeof value === "string") {
+        const parsed = Date.parse(value)
+        if (Number.isFinite(parsed)) return parsed
+      }
+    }
+    const scheduleHeaders = () => {
+      const headers = new Headers()
+      const current = server.current
+      if (current?.http.password) {
+        headers.set(
+          "Authorization",
+          `Basic ${authTokenFromCredentials({
+            username: current.http.username,
+            password: current.http.password,
+          })}`,
+        )
+      }
+      return headers
+    }
+    const fetchSessionSchedules = async (session: Session) => {
+      const current = server.current
+      if (!current) return
+      const state = tree.schedule[session.id]
+      if (state?.loading) return
+      setTree("schedule", session.id, (prev) => ({ ...prev, loading: true }))
+      try {
+        const url = new URL(`/session/${session.id}/schedule`, current.http.url)
+        const response = await fetch(url, { headers: scheduleHeaders() })
+        if (!response.ok) throw new Error(`Failed to load schedules: ${response.status}`)
+        const json = (await response.json()) as Array<{
+          id: string
+          nextRun?: number | string | null
+          runAt?: number | string | null
+        }>
+        setTree("schedule", session.id, {
+          loaded: true,
+          loading: false,
+          schedules: json.map((item) => ({
+            nextRunAt: asScheduleTime(item.nextRun ?? item.runAt ?? undefined),
+            nextRun: item.nextRun,
+            runAt: item.runAt,
+          })),
+        })
+      } catch {
+        setTree("schedule", session.id, { loaded: true, loading: false, schedules: [] })
+      }
+    }
+    const preloadSessionSchedules = (sessions: Session[]) => {
+      for (const session of sessions) {
+        if (session.parentID || session.time?.archived) continue
+        void fetchSessionSchedules(session)
+      }
+    }
     const probeChildDirectories = async (root: string, children: AtreeDirectoryNode[]) => {
       const client = serverSDK.createClient({ directory: root, throwOnError: true })
       await Promise.all(
@@ -2497,6 +2577,7 @@ export default function Layout(props: ParentProps) {
               children: childChildren,
               sessions: sessions.data ?? [],
             }))
+            preloadSessionSchedules(sessions.data ?? [])
             for (const grandchild of childChildren) ensureDirectory(grandchild.absolute)
           } catch {
             // Keep tree browsing usable even if a child directory cannot expose sessions or files.
@@ -2504,7 +2585,11 @@ export default function Layout(props: ParentProps) {
         }),
       )
     }
-    const loadDirectory = async (root: string, directory: string, opts?: { force?: boolean; probeChildren?: boolean }) => {
+    const loadDirectory = async (
+      root: string,
+      directory: string,
+      opts?: { force?: boolean; probeChildren?: boolean },
+    ) => {
       const key = directoryKey(directory)
       ensureDirectory(directory, directoryKey(root) === key)
       const state = tree.directory[key]
@@ -2534,6 +2619,7 @@ export default function Layout(props: ParentProps) {
           children,
           sessions: sessions.data ?? [],
         }))
+        preloadSessionSchedules(sessions.data ?? [])
         for (const child of children) ensureDirectory(child.absolute)
         await probeChildDirectories(root, children)
         setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
@@ -2562,10 +2648,16 @@ export default function Layout(props: ParentProps) {
       sortedRootSessions(
         { session: directoryState(directory)?.sessions ?? [], path: { directory } },
         Date.now(),
+        scheduleIndex(),
       )
     const sessionListKey = (sessions: Session[]) =>
       sessions.map((session) => `${session.directory}\n${session.id}`).join("\n\n")
-    const navigateDirectorySession = (root: string, directory: string, sessions: Session[], targetSessionID?: string) => {
+    const navigateDirectorySession = (
+      root: string,
+      directory: string,
+      sessions: Session[],
+      targetSessionID?: string,
+    ) => {
       const first = targetSessionID ? sessions.find((session) => session.id === targetSessionID) : sessions[0]
       if (!first) {
         setStore("lastProjectSession", root, { directory, id: "", at: Date.now() })
@@ -2585,7 +2677,7 @@ export default function Layout(props: ParentProps) {
         focusSessionPrompt()
         return
       }
-      sessionTabs.replaceWithSessions(server.key, rootSessionsForDirectory(directory))
+      sessionTabs.replaceDirectorySessions(server.key, directory, rootSessionsForDirectory(directory))
       sessionTabs.newDraft({
         server: server.key,
         directory,
@@ -2597,7 +2689,7 @@ export default function Layout(props: ParentProps) {
       const switchToSessions = (sessions: Session[]) => {
         batch(() => {
           server.projects.touch(root)
-          sessionTabs.replaceWithSessions(server.key, sessions)
+          sessionTabs.replaceDirectorySessions(server.key, directory, sessions)
           navigateDirectorySession(root, directory, sessions, targetSessionID)
           focusSessionPrompt()
         })
@@ -2618,6 +2710,42 @@ export default function Layout(props: ParentProps) {
       switchToSessions(sessions)
     }
     const rootProject = createMemo(() => layout.projects.list()[0])
+    const knownSession = (sessionID: string) => {
+      for (const state of Object.values(tree.directory)) {
+        const session = state.sessions?.find((item) => item.id === sessionID)
+        if (session) return session
+      }
+    }
+
+    const stopScheduleEvents = serverSDK.event.listen((event) => {
+      const details = event.details as { type?: string; properties?: Record<string, unknown> }
+      if (details.type !== "schedule.created" && details.type !== "schedule.deleted" && details.type !== "schedule.ran")
+        return
+      const sessionID = details.properties?.sessionID
+      if (typeof sessionID !== "string") return
+      const session = knownSession(sessionID)
+      if (!session) return
+      void fetchSessionSchedules(session)
+    })
+    onCleanup(stopScheduleEvents)
+
+    createEffect(() => {
+      const directory = activeDirectory()
+      if (!directory) return
+      if (!directoryState(directory)?.loaded) return
+      const sessions = rootSessionsForDirectory(directory)
+      const sessionIDs = sessions.map((session) => session.id).join("\n")
+      const tabIDs = sessionTabs.store
+        .flatMap((tab) => {
+          if (tab.type !== "session") return []
+          if (tab.server !== server.key) return []
+          if (pathKey(decode64(tab.dirBase64) ?? "") !== pathKey(directory)) return []
+          return [tab.sessionId]
+        })
+        .join("\n")
+      if (sessionIDs === tabIDs) return
+      sessionTabs.replaceDirectorySessions(server.key, directory, sessions)
+    })
 
     createEffect(() => {
       const root = rootProject()?.worktree
@@ -2632,6 +2760,8 @@ export default function Layout(props: ParentProps) {
       const hasChildren = () => (state()?.children?.length ?? 0) > 0 || !state()?.loaded
       const hasPlainChildren = () => hasHiddenPlainDirectories(state()?.children ?? [])
       const dimmed = () => props.depth > 0 && !isSessionNode(props.directory)
+      const primaryScheduledSession = createMemo(() => scheduledSessions(props.directory)[0])
+      const trailingScheduledSessions = createMemo(() => scheduledSessions(props.directory).slice(1))
 
       return (
         <div class="min-w-0">
@@ -2648,11 +2778,14 @@ export default function Layout(props: ParentProps) {
             onClick={() => void openDirectorySessions(props.root, props.directory)}
             onPointerUp={() => focusSessionPrompt()}
           >
-            <div
-              class="min-w-0 flex items-center gap-1.5 text-left"
-            >
+            <div class="min-w-0 flex items-center gap-1.5 text-left">
               <span class="flex size-4 shrink-0 items-center justify-center text-v2-icon-icon-muted">
-                <IconV2 name={hasChildren() && state()?.expanded ? "folder-open" : "folder"} />
+                <Show
+                  when={primaryScheduledSession()}
+                  fallback={<IconV2 name={hasChildren() && state()?.expanded ? "folder-open" : "folder"} />}
+                >
+                  {(session) => <span class="text-[13px] leading-none">{sessionEmoji(session())}</span>}
+                </Show>
               </span>
               <span class="min-w-0 truncate text-[13px] [font-weight:520]">{props.name}</span>
             </div>
@@ -2670,7 +2803,7 @@ export default function Layout(props: ParentProps) {
               </button>
             </Show>
             <div class="flex shrink-0 items-center gap-0.5">
-              <For each={scheduledSessions(props.directory)}>
+              <For each={trailingScheduledSessions()}>
                 {(session) => (
                   <a
                     class="inline-flex h-5 w-5 items-center justify-center text-[13px] opacity-80 hover:opacity-100"
@@ -2718,7 +2851,7 @@ export default function Layout(props: ParentProps) {
       <aside class="w-[260px] shrink-0 border-r border-v2-border-border-muted bg-v2-background-bg-base/85 backdrop-blur flex flex-col min-h-0">
         <div class="h-12 shrink-0 flex items-center justify-between gap-2 px-3">
           <div class="min-w-0 flex items-center gap-2 px-2 py-1.5 text-v2-text-text-base">
-            <span class="text-base leading-none">🌳</span>
+            <span class="text-base leading-none">🌲</span>
             <span class="min-w-0 truncate text-[13px] [font-weight:560]">aTree</span>
           </div>
           <IconButtonV2
@@ -2745,7 +2878,12 @@ export default function Layout(props: ParentProps) {
           >
             {(project) => (
               <div class="flex flex-col gap-1">
-                <DirectoryRow root={project().worktree} directory={project().worktree} depth={0} name={label(project().worktree)} />
+                <DirectoryRow
+                  root={project().worktree}
+                  directory={project().worktree}
+                  depth={0}
+                  name={label(project().worktree)}
+                />
               </div>
             )}
           </Show>
@@ -2778,7 +2916,6 @@ export default function Layout(props: ParentProps) {
               </Show>
             </main>
           </div>
-          {import.meta.env.DEV && <DebugBar />}
           <ToastRegion v2={newDesign()} />
         </div>
       }
@@ -2930,7 +3067,6 @@ export default function Layout(props: ParentProps) {
               </div>
             </div>
           </div>
-          {import.meta.env.DEV && <DebugBar />}
         </div>
         <HelpButton />
         <ToastRegion v2={newDesign()} />

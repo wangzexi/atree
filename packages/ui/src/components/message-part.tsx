@@ -1057,6 +1057,10 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
   )
 
   const text = createMemo(() => textPart()?.text || "")
+  const scheduled = createMemo(() => {
+    const metadata = (textPart() as TextPart & { metadata?: Record<string, unknown> } | undefined)?.metadata
+    return metadata?.source === "schedule"
+  })
 
   const files = createMemo(() => (props.parts?.filter((p) => p.type === "file") as FilePart[]) ?? [])
 
@@ -1212,6 +1216,13 @@ export function UserMessageDisplay(props: { message: UserMessage; parts: PartTyp
                 aria-label={copied() ? i18n.t("ui.message.copied") : i18n.t("ui.message.copyMessage")}
               />
             </Tooltip>
+            <Show when={scheduled()}>
+              <Tooltip value="自动化消息" placement="top" gutter={4}>
+                <span data-slot="user-message-automation">
+                  <Icon name="bot" size="small" />
+                </span>
+              </Tooltip>
+            </Show>
           </div>
         </>
       </Show>

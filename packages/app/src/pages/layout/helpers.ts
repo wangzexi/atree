@@ -8,9 +8,51 @@ type SessionStore = {
   path: { directory: string }
 }
 
-function sortSessions(now: number) {
+export type SessionScheduleSummary = {
+  nextRun?: number | string | null
+  nextRunAt?: number | string | null
+  runAt?: number | string | null
+}
+
+export type SessionScheduleIndex = Record<string, readonly SessionScheduleSummary[] | undefined>
+
+function asTime(value: number | string | null | undefined) {
+  if (typeof value === "number" && Number.isFinite(value)) return value
+  if (typeof value === "string") {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
+}
+
+function scheduleEntry(session: Pick<Session, "id">, schedules?: SessionScheduleIndex) {
+  if (!schedules) return
+  if (!Object.prototype.hasOwnProperty.call(schedules, session.id)) return
+  return schedules[session.id] ?? []
+}
+
+export function sessionNextScheduleRun(session: Pick<Session, "id">, schedules?: SessionScheduleIndex) {
+  const items = scheduleEntry(session, schedules)
+  if (!items?.length) return
+  let next: number | undefined
+  for (const item of items) {
+    const value = asTime(item.nextRunAt ?? item.nextRun ?? item.runAt)
+    if (value === undefined) continue
+    if (next === undefined || value < next) next = value
+  }
+  return next
+}
+
+function sortSessions(now: number, schedules?: SessionScheduleIndex) {
   const oneMinuteAgo = now - 60 * 1000
   return (a: Session, b: Session) => {
+    const aScheduled = sessionHasSchedule(a, schedules)
+    const bScheduled = sessionHasSchedule(b, schedules)
+    if (aScheduled !== bScheduled) return aScheduled ? -1 : 1
+    if (aScheduled && bScheduled) {
+      const aNext = sessionNextScheduleRun(a, schedules) ?? Number.MAX_SAFE_INTEGER
+      const bNext = sessionNextScheduleRun(b, schedules) ?? Number.MAX_SAFE_INTEGER
+      if (aNext !== bNext) return aNext - bNext
+    }
     const aUpdated = a.time.updated ?? a.time.created
     const bUpdated = b.time.updated ?? b.time.created
     const aRecent = aUpdated > oneMinuteAgo
@@ -28,7 +70,8 @@ const isRootVisibleSession = (session: Session, directory: string) =>
 export const roots = (store: SessionStore) =>
   (store.session ?? []).filter((session) => isRootVisibleSession(session, store.path.directory))
 
-export const sortedRootSessions = (store: SessionStore, now: number) => roots(store).sort(sortSessions(now))
+export const sortedRootSessions = (store: SessionStore, now: number, schedules?: SessionScheduleIndex) =>
+  roots(store).sort(sortSessions(now, schedules))
 
 export const latestRootSession = (stores: SessionStore[], now: number) =>
   stores.flatMap(roots).sort(sortSessions(now))[0]
@@ -98,7 +141,9 @@ export function sessionEmoji(session: Pick<Session, "metadata">) {
   return typeof emoji === "string" && emoji.trim() ? emoji : defaultSessionEmoji
 }
 
-export function sessionHasSchedule(session: Pick<Session, "metadata">) {
+export function sessionHasSchedule(session: Pick<Session, "id" | "metadata">, schedules?: SessionScheduleIndex) {
+  const items = scheduleEntry(session, schedules)
+  if (items) return items.length > 0
   const atree = atreeMetadata(session)
   if (!atree) return false
   return Boolean(atree.schedule || atree.cron || atree.scheduled)

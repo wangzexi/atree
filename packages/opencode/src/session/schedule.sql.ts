@@ -6,7 +6,9 @@ export const ScheduleTable = sqliteTable(
   {
     id: text().primaryKey(),
     session_id: text().$type<SessionID>().notNull(),
+    kind: text().$type<"once" | "recurring">().notNull().default("recurring"),
     expression: text().notNull(),
+    run_at: integer(),
     message: text().notNull(),
     created_at: integer().notNull(),
   },

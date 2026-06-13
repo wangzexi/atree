@@ -173,7 +173,7 @@ function HomeDesign() {
         fallback={
           <div class="flex w-full max-w-[520px] flex-col items-center gap-4 px-6 text-center">
             <div class="flex size-12 items-center justify-center rounded-[12px] border border-v2-border-border-muted bg-v2-background-bg-layer-02 text-[24px]">
-              🌳
+              🌲
             </div>
             <div class="flex flex-col gap-1">
               <div class="text-[15px] leading-6 text-v2-text-text-base [font-weight:520]">选择一个根目录开始</div>

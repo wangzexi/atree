@@ -115,6 +115,21 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           ),
         )
       },
+      replaceDirectorySessions: (targetServer: ServerConnection.Key, directory: string, sessions: Session[]) => {
+        setStore(
+          reconcile([
+            ...sessions.map((session) => ({
+              type: "session" as const,
+              server: targetServer,
+              dirBase64: base64Encode(session.directory),
+              sessionId: session.id,
+            })),
+            ...store.filter(
+              (tab) => tab.type === "draft" && tab.server === targetServer && tab.directory === directory,
+            ),
+          ]),
+        )
+      },
       draft(draftID: string) {
         const tab = store.find((item) => item.type === "draft" && item.draftID === draftID)
         if (!tab || tab.type !== "draft") throw new Error(`Draft not found: ${draftID}`)

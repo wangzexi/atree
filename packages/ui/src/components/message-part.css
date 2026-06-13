@@ -116,9 +116,52 @@
     width: fit-content;
     max-width: min(82%, 64ch);
     margin-left: auto;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
+  }
+
+  [data-slot="user-message-automation"] {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    color: var(--icon-weak);
+    pointer-events: auto;
+  }
+
+  [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"]) {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-slot="user-message-meta-wrap"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-component="tooltip-trigger"] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-component="tooltip-trigger"]:has([data-slot="user-message-automation"]),
+  &:hover [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-component="tooltip-trigger"],
+  &:focus-within [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-component="tooltip-trigger"] {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  &:hover [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-slot="user-message-meta-wrap"],
+  &:focus-within [data-slot="user-message-copy-wrapper"]:has([data-slot="user-message-automation"])
+    [data-slot="user-message-meta-wrap"] {
+    opacity: 1;
+    pointer-events: auto;
   }
 
   [data-slot="user-message-attachments"] + [data-slot="user-message-body"] {

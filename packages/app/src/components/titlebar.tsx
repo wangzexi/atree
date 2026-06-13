@@ -5,6 +5,7 @@ import {
   createSignal,
   For,
   Match,
+  onCleanup,
   onMount,
   Show,
   startTransition,
@@ -40,6 +41,7 @@ import { ServerConnection, useServer } from "@/context/server"
 import { tabHref, tabKey, useTabs, type Tab } from "@/context/tabs"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
+import { authTokenFromCredentials } from "@/utils/server"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -268,7 +270,46 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const tabsStore = tabs.store
             const tabsStoreActions = tabs
             const [archiveVersion, setArchiveVersion] = createSignal(0)
+            const [archiveConfirmKey, setArchiveConfirmKey] = createSignal<string>()
+            let archiveConfirmTimer: ReturnType<typeof setTimeout> | undefined
             const refreshArchivedSessions = () => setArchiveVersion((value) => value + 1)
+            const scheduleHeaders = (conn: ServerConnection.Any) => {
+              const headers = new Headers()
+              if (conn.http.password) {
+                headers.set(
+                  "Authorization",
+                  `Basic ${authTokenFromCredentials({ username: conn.http.username, password: conn.http.password })}`,
+                )
+              }
+              return headers
+            }
+            const listSchedules = async (conn: ServerConnection.Any, sessionID: string) => {
+              const url = new URL(`/session/${sessionID}/schedule`, conn.http.url)
+              const response = await fetch(url, { headers: scheduleHeaders(conn) })
+              if (!response.ok) throw new Error(`Failed to list schedules: ${response.status}`)
+              return (await response.json()) as Array<{ id: string }>
+            }
+            const deleteSchedules = async (
+              conn: ServerConnection.Any,
+              sessionID: string,
+              schedules: Array<{ id: string }>,
+            ) => {
+              await Promise.all(
+                schedules.map(async (schedule) => {
+                  const url = new URL(`/session/${sessionID}/schedule/${schedule.id}`, conn.http.url)
+                  const response = await fetch(url, { method: "DELETE", headers: scheduleHeaders(conn) })
+                  if (!response.ok) throw new Error(`Failed to delete schedule: ${response.status}`)
+                }),
+              )
+            }
+            const requireArchiveConfirm = (key: string) => {
+              setArchiveConfirmKey(key)
+              if (archiveConfirmTimer) clearTimeout(archiveConfirmTimer)
+              archiveConfirmTimer = setTimeout(() => setArchiveConfirmKey(undefined), 4_000)
+            }
+            onCleanup(() => {
+              if (archiveConfirmTimer) clearTimeout(archiveConfirmTimer)
+            })
             const navigateTab = (tab: Tab) => {
               const href = tabHref(tab)
               if (tab.server === server.key) {
@@ -295,16 +336,23 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               }
 
               const serverCtx = global.createServerCtx(conn)
-              void serverCtx.sdk.client.session
-                .update({
+              const key = tabKey(tab)
+              void (async () => {
+                const schedules = await listSchedules(conn, tab.sessionId).catch(() => [] as Array<{ id: string }>)
+                if (schedules.length > 0 && archiveConfirmKey() !== key) {
+                  requireArchiveConfirm(key)
+                  return
+                }
+                setArchiveConfirmKey(undefined)
+                await deleteSchedules(conn, tab.sessionId, schedules)
+                await serverCtx.sdk.client.session.update({
                   directory,
                   sessionID: tab.sessionId,
                   time: { archived: Date.now() },
                 })
-                .then(() => {
-                  refreshArchivedSessions()
-                  tabsStoreActions.removeTab(index)
-                })
+                refreshArchivedSessions()
+                tabsStoreActions.removeTab(index)
+              })()
             }
 
             const matchRoute = (route: LayoutRoute) => {
@@ -459,7 +507,8 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               const directory = currentDirectory()
               if (!directory) return
               return tabsStore.find(
-                (tab) => tab.type === "draft" && tab.server === server.key && pathKey(tab.directory) === pathKey(directory),
+                (tab) =>
+                  tab.type === "draft" && tab.server === server.key && pathKey(tab.directory) === pathKey(directory),
               )
             })
             const openCurrentDirectoryDraft = () => {
@@ -543,6 +592,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                               }}
                               onClose={() => closeTab(tab, i())}
                               active={isCurrentTab(tab)}
+                              archiveConfirm={archiveConfirmKey() === tabKey(tab)}
                               forceTruncate={tabsAreOverflowing()}
                             />
                           </>
@@ -814,6 +864,7 @@ function TabNavItem(props: {
   onClose: () => void
   onNavigate: () => void
   active?: boolean
+  archiveConfirm?: boolean
   forceTruncate?: boolean
 }) {
   const closeTab = (event: MouseEvent) => {
@@ -883,13 +934,23 @@ function TabNavItem(props: {
             "--active-bg": "linear-gradient(90deg, transparent 0%, var(--tab-bg) 40%)",
           }}
         />
-        <IconButtonV2
-          size="small"
-          variant="ghost-muted"
-          class="z-10 opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
-          onClick={closeTab}
-          icon={<IconV2 name="xmark-small" />}
-        />
+        <Tooltip
+          value={props.archiveConfirm ? "再次点击归档并取消自动化消息" : "归档会话"}
+          placement="bottom"
+          openDelay={0}
+        >
+          <IconButtonV2
+            size="small"
+            variant="ghost-muted"
+            class="z-10 opacity-0 transition-[opacity,color,background-color] duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+            classList={{
+              "text-red-500 hover:bg-red-500/10": props.archiveConfirm,
+            }}
+            aria-label={props.archiveConfirm ? "再次点击归档并取消自动化消息" : "归档会话"}
+            onClick={closeTab}
+            icon={<IconV2 name="xmark-small" />}
+          />
+        </Tooltip>
       </div>
     </div>
   )
@@ -1005,15 +1066,13 @@ function ArchivedSessionsMenu(props: {
         aria-label="归档会话"
         title="归档会话"
       >
-        <MessagesSquareIcon />
+        <ArchiveIcon />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="w-[260px] p-1">
           <Show
             when={visibleSessions().length > 0}
-            fallback={
-              <div class="px-2 py-2 text-[12px] leading-5 text-v2-text-text-muted">没有归档会话</div>
-            }
+            fallback={<div class="px-2 py-2 text-[12px] leading-5 text-v2-text-text-muted">没有归档会话</div>}
           >
             <div class="px-2 py-1 text-[11px] leading-4 text-v2-text-text-muted">归档会话</div>
             <For each={visibleSessions()}>
@@ -1076,7 +1135,9 @@ function SessionEmojiPicker(props: {
   return (
     <Show
       when={props.enabled}
-      fallback={<span class="flex size-5 shrink-0 items-center justify-center text-[14px] leading-none">{currentEmoji()}</span>}
+      fallback={
+        <span class="flex size-5 shrink-0 items-center justify-center text-[14px] leading-none">{currentEmoji()}</span>
+      }
     >
       <DropdownMenu gutter={4} placement="bottom-start">
         <DropdownMenu.Trigger
@@ -1155,7 +1216,7 @@ export function SquarePenIcon() {
   )
 }
 
-function MessagesSquareIcon() {
+function ArchiveIcon() {
   return (
     <svg
       width="16"
@@ -1163,13 +1224,14 @@ function MessagesSquareIcon() {
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      stroke-width="1.6"
+      stroke-width="1.4"
       stroke-linecap="round"
       stroke-linejoin="round"
       aria-hidden="true"
     >
-      <path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
-      <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+      <rect width="20" height="5" x="2" y="3" rx="1" />
+      <path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" />
+      <path d="M10 12h4" />
     </svg>
   )
 }

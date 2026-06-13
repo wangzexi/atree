@@ -2,37 +2,55 @@ import { Effect, Schema } from "effect"
 import { Schedule } from "../session/schedule"
 import * as Tool from "./tool"
 
-const DESCRIPTION = `Manage recurring scheduled tasks attached to the current session.
+const DESCRIPTION = `Manage scheduled tasks attached to the current session.
 
-A scheduled task injects a message into this session at a cron-defined cadence. When the cron fires, the message is sent to the session as if the user typed it, and the assistant responds. If the session is currently busy when a fire is due, that tick is skipped (not queued).
+A scheduled task injects a message into this session automatically. It can be recurring (type="cron") or one-time (type="at"). When it fires, the message is sent to the session as if the user typed it, and the assistant responds. If the session is currently busy when a fire is due, that tick is skipped (not queued).
 
 Actions:
-- create - Add a new scheduled task. Requires "expression" (5-field cron) and "message". Returns the new id and the next planned run.
+- create - Add a scheduled task. For recurring tasks, pass type="cron", cron (5-field cron), and message. For one-time tasks, pass type="at", at (ISO datetime string or millisecond timestamp), and message.
 - delete - Remove a scheduled task. Requires "id" (from create or list).
 - list   - Return all scheduled tasks for this session.
 
 Cron expressions are interpreted in the server's local timezone. Use standard 5-field syntax - do NOT pass natural language ("every 10 minutes"); convert to e.g. "*/10 * * * *" yourself.
+One-time at values can be ISO datetime strings or Unix millisecond timestamps in the future.
 
 Examples:
-  schedule({ action: "create", expression: "*/10 * * * *", message: "Check the build queue" })
-  schedule({ action: "create", expression: "0 9 * * *", message: "Generate the daily summary" })
+  schedule({ action: "create", type: "cron", cron: "*/10 * * * *", message: "Check the build queue" })
+  schedule({ action: "create", type: "cron", cron: "0 9 * * *", message: "Generate the daily summary" })
+  schedule({ action: "create", type: "at", at: "2026-06-15T09:00:00+08:00", message: "Remind me to review this" })
   schedule({ action: "list" })
   schedule({ action: "delete", id: "sch_..." })
 
-Minimum interval is 60 seconds. Maximum 10 schedules per session.`
+Minimum interval is 60 seconds. Maximum 1 schedule per session. Delete the existing schedule before creating a new one.`
+
+const AtValue = Schema.Union([Schema.Number, Schema.String])
 
 export const Parameters = Schema.Struct({
   action: Schema.Literals(["create", "delete", "list"]).annotate({
+    description: "Which operation to perform. 'create' requires type+message; 'delete' requires id; 'list' takes no extra fields.",
+  }),
+  type: Schema.optional(Schema.Literals(["cron", "at"])).annotate({
+    description: "Schedule type for action='create'. Use 'cron' for recurring tasks or 'at' for one-time tasks.",
+  }),
+  cron: Schema.optional(Schema.String).annotate({
     description:
-      "Which operation to perform. 'create' requires expression+message; 'delete' requires id; 'list' takes no extra fields.",
+      "Required for action='create' when type is 'cron' or omitted. Standard 5-field cron expression. Example: '*/10 * * * *'. Minimum interval 60s.",
+  }),
+  at: Schema.optional(AtValue).annotate({
+    description:
+      "Required for action='create' when type is 'at'. ISO datetime string or Unix millisecond timestamp in the future.",
+  }),
+  kind: Schema.optional(Schedule.KindSchema).annotate({
+    description: "Deprecated compatibility field. Prefer type='cron' or type='at'.",
   }),
   expression: Schema.optional(Schema.String).annotate({
-    description:
-      "Required for action='create'. Standard 5-field cron expression. Example: '*/10 * * * *'. Minimum interval 60s.",
+    description: "Deprecated compatibility field. Prefer cron.",
+  }),
+  runAt: Schema.optional(Schema.Number).annotate({
+    description: "Deprecated compatibility field. Prefer at.",
   }),
   message: Schema.optional(Schema.String).annotate({
-    description:
-      "Required for action='create'. Message content to inject into the session when the cron fires.",
+    description: "Required for action='create'. Message content to inject into the session when the schedule fires.",
   }),
   id: Schema.optional(Schema.String).annotate({
     description: "Required for action='delete'. Schedule id from create or list.",
@@ -43,6 +61,38 @@ type Metadata = {
   action?: "create" | "delete" | "list"
   scheduleID?: string
   count?: number
+}
+
+function scheduleType(params: Schema.Schema.Type<typeof Parameters>): "cron" | "at" {
+  if (params.type) return params.type
+  if (params.kind === "once") return "at"
+  return "cron"
+}
+
+function parseAt(value: Schema.Schema.Type<typeof AtValue> | undefined) {
+  if (typeof value === "number") return value
+  if (typeof value === "string") {
+    const parsed = Date.parse(value)
+    return Number.isFinite(parsed) ? parsed : Number.NaN
+  }
+  return undefined
+}
+
+function serialize(info: Schedule.Info) {
+  const type = info.kind === "once" ? "at" : "cron"
+  return {
+    id: info.id,
+    type,
+    cron: type === "cron" ? info.expression : null,
+    at: info.runAt ? new Date(info.runAt).toISOString() : null,
+    kind: info.kind,
+    expression: info.expression,
+    runAt: info.runAt ? new Date(info.runAt).toISOString() : null,
+    message: info.message,
+    nextRun: info.nextRun ? new Date(info.nextRun).toISOString() : null,
+    lastRanAt: info.lastRanAt ? new Date(info.lastRanAt).toISOString() : null,
+    lastRunStatus: info.lastRunStatus,
+  }
 }
 
 export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Service>(
@@ -56,35 +106,36 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
         Effect.gen(function* () {
           switch (params.action) {
             case "create": {
-              if (!params.expression || !params.message) {
+              const type = scheduleType(params)
+              const kind: Schedule.Kind = type === "at" ? "once" : "recurring"
+              const expression = type === "cron" ? (params.cron ?? params.expression)?.trim() : undefined
+              const runAt = type === "at" ? parseAt(params.at ?? params.runAt) : undefined
+              if (!params.message || (type === "cron" && !expression) || (type === "at" && runAt === undefined)) {
                 return {
                   title: "Missing fields",
                   output:
-                    "action='create' requires both 'expression' (5-field cron) and 'message'. Re-call with both fields.",
+                    "action='create' requires message plus either type='cron' with cron or type='at' with at. Re-call with the required fields.",
                   metadata: { action: "create" } satisfies Metadata,
                 }
               }
-              const expression = params.expression.trim()
               const message = params.message
-              return yield* schedule.create({ sessionID: ctx.sessionID, expression, message }).pipe(
+              return yield* schedule.create({ sessionID: ctx.sessionID, kind, expression, runAt, message }).pipe(
                 Effect.map((info) => ({
-                  title: `Scheduled: ${expression}`,
-                  output: JSON.stringify(
-                    {
-                      id: info.id,
-                      expression: info.expression,
-                      message: info.message,
-                      nextRun: info.nextRun ? new Date(info.nextRun).toISOString() : null,
-                    },
-                    null,
-                    2,
-                  ),
+                  title: info.kind === "once" ? "Scheduled at" : `Scheduled: ${info.expression}`,
+                  output: JSON.stringify(serialize(info), null, 2),
                   metadata: { action: "create" as const, scheduleID: info.id } satisfies Metadata,
                 })),
                 Effect.catchTag("ScheduleInvalidExpression", (e) =>
                   Effect.succeed({
                     title: "Invalid cron expression",
                     output: `Invalid cron expression "${e.expression}": ${e.reason}. Use a standard 5-field cron expression like "*/10 * * * *" (every 10 minutes) or "0 9 * * *" (daily at 9 AM). Do not pass natural language.`,
+                    metadata: { action: "create" } satisfies Metadata,
+                  }),
+                ),
+                Effect.catchTag("ScheduleInvalidRunAt", (e) =>
+                  Effect.succeed({
+                    title: "Invalid at",
+                    output: `Invalid one-time at value "${e.runAt}": ${e.reason}. Use an ISO datetime string or Unix millisecond timestamp in the future.`,
                     metadata: { action: "create" } satisfies Metadata,
                   }),
                 ),
@@ -97,8 +148,8 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
                 ),
                 Effect.catchTag("ScheduleLimitExceeded", (e) =>
                   Effect.succeed({
-                    title: "Too many schedules",
-                    output: `This session already has ${e.limit} scheduled tasks (the maximum). Delete one with schedule({action:"delete",id:"..."}) before adding another.`,
+                    title: "Schedule already exists",
+                    output: `This session already has an automation message. Use schedule({action:"list"}) to find it, then schedule({action:"delete",id:"..."}) before creating a new one.`,
                     metadata: { action: "create" } satisfies Metadata,
                   }),
                 ),
@@ -130,14 +181,7 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
             }
             case "list": {
               const items = yield* schedule.list(ctx.sessionID)
-              const payload = items.map((info) => ({
-                id: info.id,
-                expression: info.expression,
-                message: info.message,
-                nextRun: info.nextRun ? new Date(info.nextRun).toISOString() : null,
-                lastRanAt: info.lastRanAt ? new Date(info.lastRanAt).toISOString() : null,
-                lastRunStatus: info.lastRunStatus,
-              }))
+              const payload = items.map(serialize)
               return {
                 title: items.length === 0 ? "No schedules" : `${items.length} schedule${items.length === 1 ? "" : "s"}`,
                 output: JSON.stringify(payload, null, 2),
