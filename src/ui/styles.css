@@ -389,6 +389,75 @@ textarea {
   display: none;
 }
 
+.activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: -4px auto 26px;
+  max-width: 920px;
+}
+
+.activity-item {
+  background: rgba(244, 250, 252, 0.86);
+  border: 1px solid rgba(219, 233, 240, 0.86);
+  border-radius: 8px;
+  color: #657682;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow: hidden;
+  padding: 9px 12px;
+  position: relative;
+  width: fit-content;
+  max-width: min(760px, 88%);
+}
+
+.activity-item.running::after {
+  animation: activity-glow 1.35s ease-in-out infinite;
+  background: linear-gradient(90deg, transparent, rgba(124, 190, 214, 0.28), transparent);
+  content: "";
+  inset: 0;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-100%);
+}
+
+.activity-item.done {
+  color: #78909d;
+}
+
+.activity-item.error {
+  background: rgba(255, 247, 246, 0.9);
+  border-color: rgba(246, 197, 192, 0.9);
+  color: #b42318;
+}
+
+.activity-label {
+  position: relative;
+  z-index: 1;
+}
+
+.activity-detail {
+  color: #40515f;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  margin-top: 4px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  position: relative;
+  z-index: 1;
+}
+
+@keyframes activity-glow {
+  0% {
+    transform: translateX(-100%);
+  }
+
+  55%,
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .empty {
   color: #999;
   max-width: 920px;

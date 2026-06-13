@@ -13,7 +13,15 @@ interface Selection {
   session?: AtreeSessionMeta;
 }
 
+interface ActivityItem {
+  id: string;
+  label: string;
+  detail?: string;
+  status: "running" | "done" | "error";
+}
+
 const SESSION_ICON_OPTIONS = ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐸", "🐵", "🐧", "🐦", "🦉", "🐢", "🐳", "🐙", "🦋", "🌿", "☕", "📚", "🧰", "💡", "✏️", "📌", "📦", "🔧", "🗂️", "💬"];
+const THINKING_ACTIVITY_ID = "thinking";
 
 function App() {
   const [rootPath, setRootPath] = useState("");
@@ -29,6 +37,7 @@ function App() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | undefined>();
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
+  const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
@@ -44,17 +53,40 @@ function App() {
     eventSourceRef.current?.close();
     setMessages([]);
     setStreamText("");
+    setActivityItems([]);
     if (!selection?.session) return;
 
     void loadMessages(selection.node.id, selection.session.id);
     const source = new EventSource(`/api/sessions/${selection.session.id}/events`);
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
+      if (data.type === "agent_start" || data.type === "turn_start") {
+        upsertActivity(setActivityItems, { id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running" });
+      }
       if (data.type === "message_update" && data.assistantMessageEvent?.type === "text_delta") {
         setStreamText((text) => text + data.assistantMessageEvent.delta);
       }
+      if (data.type === "message_update") {
+        const assistantEvent = data.assistantMessageEvent;
+        if (assistantEvent?.type === "thinking_start" || assistantEvent?.type === "thinking_delta") {
+          upsertActivity(setActivityItems, { id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running" });
+        }
+        if (assistantEvent?.type === "toolcall_start" || assistantEvent?.type === "toolcall_delta") {
+          upsertActivity(setActivityItems, { id: THINKING_ACTIVITY_ID, label: "正在准备工具调用", status: "running" });
+        }
+        if (assistantEvent?.type === "text_start" || assistantEvent?.type === "text_delta") {
+          setActivityItems((current) => current.filter((item) => item.id !== THINKING_ACTIVITY_ID));
+        }
+      }
+      if (data.type === "tool_execution_start" || data.type === "tool_execution_update") {
+        upsertActivity(setActivityItems, formatToolActivity(data, "running"));
+      }
+      if (data.type === "tool_execution_end") {
+        upsertActivity(setActivityItems, formatToolActivity(data, data.isError ? "error" : "done"));
+      }
       if (data.type === "message_end" || data.type === "atree_messages_changed") {
         setStreamText("");
+        setActivityItems((current) => current.filter((item) => item.id !== THINKING_ACTIVITY_ID));
         void loadMessages(selection.node.id, selection.session!.id);
         void refreshTree(false);
       }
@@ -114,6 +146,7 @@ function App() {
     if (!selection?.session || !draft.trim() || isSending) return;
     setError(undefined);
     setIsSending(true);
+    setActivityItems([{ id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running" }]);
     const text = draft;
     const optimisticMessage: DisplayMessage = {
       id: `optimistic-${crypto.randomUUID()}`,
@@ -323,6 +356,16 @@ function App() {
               <div className="message-body">{streamText}</div>
             </article>
           )}
+          {activityItems.length > 0 && (
+            <div className="activity-feed">
+              {activityItems.map((item) => (
+                <div key={item.id} className={`activity-item ${item.status}`}>
+                  <div className="activity-label">{item.label}</div>
+                  {item.detail && <div className="activity-detail">{item.detail}</div>}
+                </div>
+              ))}
+            </div>
+          )}
           {!selection?.session && <div className="empty">展开左侧目录并选择会话，或点击加号创建新会话。</div>}
         </section>
 
@@ -496,6 +539,74 @@ function replaceSessionInNodes(nodes: AtreeNode[], updated: AtreeSessionMeta): A
     sessions: node.sessions.map((session) => (session.id === updated.id ? updated : session)),
     children: replaceSessionInNodes(node.children, updated),
   }));
+}
+
+function upsertActivity(setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>, item: ActivityItem) {
+  setItems((current) => {
+    const next = current.filter((existing) => existing.id !== item.id);
+    return [...next, item].slice(-5);
+  });
+}
+
+function formatToolActivity(event: any, status: ActivityItem["status"]): ActivityItem {
+  const toolName = String(event.toolName ?? "tool");
+  const args = event.args ?? {};
+  const prefix = status === "running" ? runningToolPrefix(toolName, args) : doneToolPrefix(toolName, status);
+  return {
+    id: String(event.toolCallId ?? `${toolName}-${Date.now()}`),
+    label: prefix,
+    detail: formatToolDetail(toolName, args),
+    status,
+  };
+}
+
+function runningToolPrefix(toolName: string, args: any): string {
+  if (toolName === "bash") return "正在运行命令";
+  if (isEditTool(toolName)) return `正在编辑${extractPath(args) ? "文件" : ""}`;
+  if (toolName === "write") return `正在写入${extractPath(args) ? "文件" : ""}`;
+  if (toolName === "read") return "正在读取文件";
+  if (toolName === "grep" || toolName === "find" || toolName === "ls") return "正在检索";
+  return `正在执行工具：${toolName}`;
+}
+
+function doneToolPrefix(toolName: string, status: ActivityItem["status"]): string {
+  const done = status === "error" ? "执行失败" : "已完成";
+  if (toolName === "bash") return status === "error" ? "命令运行失败" : "命令运行完成";
+  if (isEditTool(toolName) || toolName === "write") return status === "error" ? "文件编辑失败" : "已编辑文件";
+  if (toolName === "read") return `${done}读取`;
+  if (toolName === "grep" || toolName === "find" || toolName === "ls") return `${done}检索`;
+  return `${done}工具：${toolName}`;
+}
+
+function formatToolDetail(toolName: string, args: any): string | undefined {
+  if (toolName === "bash") return readableValue(args.command ?? args.cmd);
+  const path = extractPath(args);
+  if (path) return path;
+  const query = readableValue(args.query ?? args.pattern ?? args.glob);
+  if (query) return query;
+  const summary = safeJson(args);
+  return summary === "{}" ? undefined : summary;
+}
+
+function isEditTool(toolName: string): boolean {
+  return toolName === "edit" || toolName === "apply_patch" || toolName.toLowerCase().includes("edit");
+}
+
+function extractPath(args: any): string | undefined {
+  return readableValue(args.path ?? args.filePath ?? args.file_path ?? args.filename ?? args.target);
+}
+
+function readableValue(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) return value;
+  return undefined;
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 createRoot(document.getElementById("root")!).render(<App />);
