@@ -213,6 +213,12 @@ textarea {
   padding: 4px 8px;
 }
 
+.tree-archive.confirming {
+  color: #c2413b;
+  font-weight: 600;
+  opacity: 1;
+}
+
 .tree-session-row:hover .tree-archive,
 .tree-session-row:focus-within .tree-archive {
   opacity: 1;
@@ -248,7 +254,65 @@ textarea {
 }
 
 .chat-heading {
+  align-items: center;
+  display: flex;
+  gap: 8px;
   min-width: 0;
+}
+
+.chat-icon-wrap {
+  flex: 0 0 auto;
+  position: relative;
+}
+
+.chat-icon {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  height: 28px;
+  justify-content: center;
+  min-width: 28px;
+  padding: 0 4px;
+}
+
+.chat-icon:hover {
+  background: #f4f9fb;
+}
+
+.icon-picker {
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #dce8ee;
+  border-radius: 9px;
+  box-shadow: 0 12px 32px rgba(72, 100, 116, 0.16);
+  display: grid;
+  gap: 3px;
+  grid-template-columns: repeat(6, 30px);
+  left: 0;
+  padding: 8px;
+  position: absolute;
+  top: 34px;
+  z-index: 20;
+}
+
+.icon-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 18px;
+  height: 30px;
+  justify-content: center;
+  width: 30px;
+}
+
+.icon-option:hover {
+  background: #f0f6f9;
 }
 
 .chat-title {
@@ -367,10 +431,12 @@ textarea {
 
 .composer textarea {
   border: 0;
-  min-height: 74px;
+  line-height: 1.55;
+  max-height: calc(1.55em * 6 + 24px);
+  min-height: calc(1.55em + 24px);
   outline: 0;
   padding: 12px;
-  resize: vertical;
+  resize: none;
 }
 
 .composer button {

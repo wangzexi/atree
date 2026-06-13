@@ -13,6 +13,8 @@ interface Selection {
   session?: AtreeSessionMeta;
 }
 
+const SESSION_ICON_OPTIONS = ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐸", "🐵", "🐧", "🐦", "🦉", "🐢", "🐳", "🐙", "🦋", "🌿", "☕", "📚", "🧰", "💡", "✏️", "📌", "📦", "🔧", "🗂️", "💬"];
+
 function App() {
   const [rootPath, setRootPath] = useState("");
   const [nodes, setNodes] = useState<AtreeNode[]>([]);
@@ -25,11 +27,18 @@ function App() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState("");
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
+  const [archiveConfirmId, setArchiveConfirmId] = useState<string | undefined>();
+  const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     void refreshTree();
   }, []);
+
+  useEffect(() => {
+    resizeComposer();
+  }, [draft]);
 
   useEffect(() => {
     eventSourceRef.current?.close();
@@ -114,6 +123,24 @@ function App() {
     });
   }
 
+  function updateDraft(value: string) {
+    setDraft(value);
+  }
+
+  function resizeComposer() {
+    const textarea = composerRef.current;
+    if (!textarea) return;
+    const styles = window.getComputedStyle(textarea);
+    const lineHeight = Number.parseFloat(styles.lineHeight);
+    const paddingTop = Number.parseFloat(styles.paddingTop);
+    const paddingBottom = Number.parseFloat(styles.paddingBottom);
+    const maxRows = 6;
+    const maxHeight = lineHeight * maxRows + paddingTop + paddingBottom;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.overflowY = textarea.scrollHeight > maxHeight ? "auto" : "hidden";
+  }
+
   function selectNode(node: AtreeNode) {
     setSelection({ node });
     setEditingTitle(false);
@@ -144,10 +171,29 @@ function App() {
       const data = await response.json();
       const updated = { ...(data.session as AtreeSessionMeta), archived: true };
       setNodes((current) => replaceSessionInNodes(current, updated));
+      setArchiveConfirmId(undefined);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
       setNodes((current) => replaceSessionInNodes(current, session));
     }
+  }
+
+  async function saveSessionIcon(icon: string) {
+    if (!selection?.session) return;
+    setIconPickerOpen(false);
+    const response = await fetch(`/api/nodes/${selection.node.id}/sessions/${selection.session.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ icon }),
+    });
+    if (!response.ok) {
+      setError(`Icon update failed: ${response.status}`);
+      return;
+    }
+    const data = await response.json();
+    const updated = data.session as AtreeSessionMeta;
+    setSelection((current) => (current?.session?.id === updated.id ? { node: current.node, session: updated } : current));
+    setNodes((current) => replaceSessionInNodes(current, updated));
   }
 
   function startTitleEdit() {
@@ -194,6 +240,8 @@ function App() {
                 onSelectSession={(targetNode, session) => setSelection({ node: targetNode, session })}
                 onCreateSession={(targetNode) => void createSession(targetNode)}
                 onArchiveSession={(targetNode, session) => void archiveSession(targetNode, session)}
+                archiveConfirmId={archiveConfirmId}
+                onArchiveConfirmChange={setArchiveConfirmId}
               />
             ))
           ) : (
@@ -207,6 +255,22 @@ function App() {
       <main className="chat">
         <header className="chat-header">
           <div className="chat-heading">
+            {selection?.session && (
+              <div className="chat-icon-wrap">
+                <button className="chat-icon" title="设置会话 icon" onClick={() => setIconPickerOpen((open) => !open)}>
+                  {selection.session.icon || "💬"}
+                </button>
+                {iconPickerOpen && (
+                  <div className="icon-picker">
+                    {SESSION_ICON_OPTIONS.map((icon) => (
+                      <button key={icon} className="icon-option" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveSessionIcon(icon)}>
+                        {icon}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
             {editingTitle ? (
               <input
                 className="chat-title-input"
@@ -250,8 +314,10 @@ function App() {
         {error && <div className="error">{error}</div>}
         <footer className="composer">
           <textarea
+            ref={composerRef}
+            rows={1}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) => updateDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
@@ -279,6 +345,8 @@ function TreeNode({
   onSelectSession,
   onCreateSession,
   onArchiveSession,
+  archiveConfirmId,
+  onArchiveConfirmChange,
 }: {
   node: AtreeNode;
   selectedId?: string;
@@ -288,6 +356,8 @@ function TreeNode({
   onSelectSession: (node: AtreeNode, session: AtreeSessionMeta) => void;
   onCreateSession: (node: AtreeNode) => void;
   onArchiveSession: (node: AtreeNode, session: AtreeSessionMeta) => void;
+  archiveConfirmId?: string;
+  onArchiveConfirmChange: (sessionId: string | undefined) => void;
 }) {
   const activeSessions = getActiveSessions(node);
   const loopSessions = getLoopSessions(node);
@@ -336,14 +406,18 @@ function TreeNode({
                 <span className="tree-session-row-text">{session.title}</span>
               </button>
               <button
-                className="tree-archive"
-                title="归档"
+                className={archiveConfirmId === session.id ? "tree-archive confirming" : "tree-archive"}
+                title={archiveConfirmId === session.id ? "确认归档" : "归档"}
                 onClick={(event) => {
                   event.stopPropagation();
-                  onArchiveSession(node, session);
+                  if (archiveConfirmId === session.id) {
+                    onArchiveSession(node, session);
+                  } else {
+                    onArchiveConfirmChange(session.id);
+                  }
                 }}
               >
-                归档
+                {archiveConfirmId === session.id ? "确认归档" : "归档"}
               </button>
             </div>
           ))}
@@ -362,6 +436,8 @@ function TreeNode({
               onSelectSession={onSelectSession}
               onCreateSession={onCreateSession}
               onArchiveSession={onArchiveSession}
+              archiveConfirmId={archiveConfirmId}
+              onArchiveConfirmChange={onArchiveConfirmChange}
             />
           ))}
         </div>
