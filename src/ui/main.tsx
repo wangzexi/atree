@@ -130,15 +130,24 @@ function App() {
   }
 
   async function archiveSession(node: AtreeNode, session: AtreeSessionMeta) {
-    const response = await fetch(`/api/nodes/${node.id}/sessions/${session.id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ archived: true }),
-    });
-    const data = await response.json();
-    const updated = data.session as AtreeSessionMeta;
-    setNodes((current) => replaceSessionInNodes(current, updated));
-    setSelection((current) => (current?.session?.id === updated.id ? { node: current.node } : current));
+    const optimistic: AtreeSessionMeta = { ...session, archived: true, updated_at: new Date().toISOString() };
+    setNodes((current) => replaceSessionInNodes(current, optimistic));
+    setSelection((current) => (current?.session?.id === session.id ? { node: current.node } : current));
+
+    try {
+      const response = await fetch(`/api/nodes/${node.id}/sessions/${session.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true }),
+      });
+      if (!response.ok) throw new Error(`Archive failed: ${response.status}`);
+      const data = await response.json();
+      const updated = { ...(data.session as AtreeSessionMeta), archived: true };
+      setNodes((current) => replaceSessionInNodes(current, updated));
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+      setNodes((current) => replaceSessionInNodes(current, session));
+    }
   }
 
   function startTitleEdit() {
@@ -326,7 +335,14 @@ function TreeNode({
                 <span className="tree-session-row-icon">{session.icon || "💬"}</span>
                 <span className="tree-session-row-text">{session.title}</span>
               </button>
-              <button className="tree-archive" title="归档" onClick={() => onArchiveSession(node, session)}>
+              <button
+                className="tree-archive"
+                title="归档"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onArchiveSession(node, session);
+                }}
+              >
                 归档
               </button>
             </div>
