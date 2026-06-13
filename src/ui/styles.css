@@ -224,12 +224,52 @@ textarea {
   opacity: 1;
 }
 
-.init-button {
-  border: 1px solid #dce8ee;
+.directory-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.directory-current {
+  color: #7d8c96;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  overflow: hidden;
+  padding: 6px 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-open,
+.directory-row {
+  background: transparent;
+  border: 0;
   border-radius: 8px;
-  background: #ffffff;
+  color: #34414c;
   cursor: pointer;
-  min-height: 36px;
+  min-height: 32px;
+  overflow: hidden;
+  padding: 7px 8px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.directory-open {
+  background: rgba(255, 255, 255, 0.7);
+  color: #24313c;
+}
+
+.directory-open:hover,
+.directory-row:hover {
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.directory-open:disabled {
+  color: #a7b3ba;
+  cursor: default;
 }
 
 .chat {

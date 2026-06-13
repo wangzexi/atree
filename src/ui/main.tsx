@@ -13,6 +13,18 @@ interface Selection {
   session?: AtreeSessionMeta;
 }
 
+interface DirectoryOption {
+  name: string;
+  path: string;
+}
+
+interface DirectoriesResponse {
+  root: string;
+  path: string;
+  parent?: string;
+  directories: DirectoryOption[];
+}
+
 type PiEntry = {
   type: string;
   id?: string;
@@ -54,6 +66,7 @@ function App() {
   const [rootPath, setRootPath] = useState("");
   const [nodes, setNodes] = useState<AtreeNode[]>([]);
   const [selection, setSelection] = useState<Selection | undefined>();
+  const [directoryPicker, setDirectoryPicker] = useState<DirectoriesResponse | undefined>();
   const [entries, setEntries] = useState<PiEntry[]>([]);
   const [draft, setDraft] = useState("");
   const [isSending, setIsSending] = useState(false);
@@ -74,6 +87,10 @@ function App() {
   useEffect(() => {
     void refreshTree();
   }, []);
+
+  useEffect(() => {
+    if (!nodes.length) void loadDirectoryOptions();
+  }, [nodes.length]);
 
   useEffect(() => {
     resizeComposer();
@@ -139,11 +156,21 @@ function App() {
     }
   }
 
-  async function initRoot() {
+  async function loadDirectoryOptions(path?: string) {
+    const params = path ? `?path=${encodeURIComponent(path)}` : "";
+    const response = await fetch(`/api/directories${params}`);
+    if (!response.ok) {
+      setError(await responseErrorMessage(response, "Load directories failed"));
+      return;
+    }
+    setDirectoryPicker(await response.json() as DirectoriesResponse);
+  }
+
+  async function openDirectory(path: string, title?: string) {
     await fetch("/api/nodes/init", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: rootPath || undefined, title: "我的 atree" }),
+      body: JSON.stringify({ path, title: title || directoryName(path) }),
     });
     await refreshTree();
   }
@@ -330,9 +357,12 @@ function App() {
               />
             ))
           ) : (
-            <button className="init-button" onClick={initRoot}>
-              初始化根目录
-            </button>
+            <DirectoryPicker
+              directory={directoryPicker}
+              fallbackRoot={rootPath}
+              onBrowse={(path) => void loadDirectoryOptions(path)}
+              onOpen={(path) => void openDirectory(path)}
+            />
           )}
         </div>
       </aside>
@@ -535,6 +565,40 @@ function TreeNode({
   );
 }
 
+function DirectoryPicker({
+  directory,
+  fallbackRoot,
+  onBrowse,
+  onOpen,
+}: {
+  directory?: DirectoriesResponse;
+  fallbackRoot: string;
+  onBrowse: (path: string) => void;
+  onOpen: (path: string) => void;
+}) {
+  const currentPath = directory?.path || fallbackRoot;
+  return (
+    <div className="directory-picker">
+      <div className="directory-current" title={currentPath}>
+        {currentPath || "选择目录"}
+      </div>
+      <button className="directory-open" onClick={() => onOpen(currentPath)} disabled={!currentPath}>
+        打开此目录
+      </button>
+      {directory?.parent && (
+        <button className="directory-row" onClick={() => onBrowse(directory.parent!)}>
+          ..
+        </button>
+      )}
+      {directory?.directories.map((item) => (
+        <button key={item.path} className="directory-row" title={item.path} onClick={() => onBrowse(item.path)}>
+          {item.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function firstNode(node: AtreeNode): AtreeNode {
   return node.sessions.length || !node.children.length ? node : firstNode(node.children[0]);
 }
@@ -562,6 +626,10 @@ function getLoopSessions(node: AtreeNode): AtreeSessionMeta[] {
     .filter((session) => session.schedule && !session.archived)
     .sort((a, b) => (a.next_run_at ?? "").localeCompare(b.next_run_at ?? ""));
   return scheduled;
+}
+
+function directoryName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
 }
 
 function replaceSessionInNodes(nodes: AtreeNode[], updated: AtreeSessionMeta): AtreeNode[] {

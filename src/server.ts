@@ -1,4 +1,5 @@
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { readdirSync } from "node:fs";
 import {
   decodeNodeId,
   ensureAtreeDirectory,
@@ -62,6 +63,12 @@ async function handleApi(request: Request, url: URL): Promise<Response> {
 
   if (request.method === "GET" && url.pathname === "/api/tree") {
     return json({ root, nodes: scanAtreeTree(root) });
+  }
+
+  if (request.method === "GET" && url.pathname === "/api/directories") {
+    const target = resolve(url.searchParams.get("path") ?? root);
+    ensureInsideRoot(root, target);
+    return json(readDirectoryOptions(target));
   }
 
   if (request.method === "POST" && url.pathname === "/api/nodes/init") {
@@ -218,4 +225,22 @@ function ensureInsideRoot(base: string, target: string): void {
   if (resolvedTarget !== resolvedBase && !resolvedTarget.startsWith(`${resolvedBase}/`)) {
     throw new Error(`Path is outside root: ${target}`);
   }
+}
+
+function readDirectoryOptions(path: string) {
+  const resolvedPath = resolve(path);
+  const directories = readdirSync(resolvedPath, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+    .map((entry) => {
+      const fullPath = join(resolvedPath, entry.name);
+      return { name: entry.name, path: fullPath };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return {
+    root,
+    path: resolvedPath,
+    parent: resolvedPath === root ? undefined : dirname(resolvedPath),
+    directories,
+  };
 }
