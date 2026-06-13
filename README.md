@@ -1,172 +1,129 @@
-# atree-ng
+<p align="center">
+  <a href="https://opencode.ai">
+    <picture>
+      <source srcset="packages/console/app/src/asset/logo-ornate-dark.svg" media="(prefers-color-scheme: dark)">
+      <source srcset="packages/console/app/src/asset/logo-ornate-light.svg" media="(prefers-color-scheme: light)">
+      <img src="packages/console/app/src/asset/logo-ornate-light.svg" alt="OpenCode logo">
+    </picture>
+  </a>
+</p>
+<p align="center">The open source AI coding agent.</p>
+<p align="center">
+  <a href="https://opencode.ai/discord"><img alt="Discord" src="https://img.shields.io/discord/1391832426048651334?style=flat-square&label=discord" /></a>
+  <a href="https://www.npmjs.com/package/opencode-ai"><img alt="npm" src="https://img.shields.io/npm/v/opencode-ai?style=flat-square" /></a>
+  <a href="https://github.com/anomalyco/opencode/actions/workflows/publish.yml"><img alt="Build status" src="https://img.shields.io/github/actions/workflow/status/anomalyco/opencode/publish.yml?style=flat-square&branch=dev" /></a>
+</p>
 
-An AI-native information tree.
+<p align="center">
+  <a href="README.md">English</a> |
+  <a href="README.zh.md">简体中文</a> |
+  <a href="README.zht.md">繁體中文</a> |
+  <a href="README.ko.md">한국어</a> |
+  <a href="README.de.md">Deutsch</a> |
+  <a href="README.es.md">Español</a> |
+  <a href="README.fr.md">Français</a> |
+  <a href="README.it.md">Italiano</a> |
+  <a href="README.da.md">Dansk</a> |
+  <a href="README.ja.md">日本語</a> |
+  <a href="README.pl.md">Polski</a> |
+  <a href="README.ru.md">Русский</a> |
+  <a href="README.bs.md">Bosanski</a> |
+  <a href="README.ar.md">العربية</a> |
+  <a href="README.no.md">Norsk</a> |
+  <a href="README.br.md">Português (Brasil)</a> |
+  <a href="README.th.md">ไทย</a> |
+  <a href="README.tr.md">Türkçe</a> |
+  <a href="README.uk.md">Українська</a> |
+  <a href="README.bn.md">বাংলা</a> |
+  <a href="README.gr.md">Ελληνικά</a> |
+  <a href="README.vi.md">Tiếng Việt</a>
+</p>
 
-`atree-ng` is an experiment in building a personal information platform around
-a tree-shaped context model. The tree is the stable structure; files, remote
-mounts, chats, media, agents, loops, and external platforms are attached to
-nodes in that tree.
+[![OpenCode Terminal UI](packages/web/src/assets/lander/screenshot.png)](https://opencode.ai)
 
-## Core Idea
+---
 
-The product starts from a simple interface:
-
-- Left: a tree of important directories or autonomous nodes.
-- Right: an AI conversation bound to the selected node.
-
-The full physical file tree may contain documents, images, videos, PDFs,
-archives, raw exports, remote mounts, and generated state. The user does not
-need to manage every file-level detail. The primary UI focuses on nodes that
-have operational meaning.
-
-## Concepts
-
-- **Tree**: the unified information namespace.
-- **Mount**: an external source attached to a tree path, such as a local
-  directory, remote computer, Git repository, object storage, social platform,
-  chat export, or API.
-- **Directory**: a local context scope.
-- **Autonomous directory**: a directory with its own governance boundary and
-  interface agent.
-- **Interface agent**: the agent responsible for external communication for a
-  directory.
-- **Session**: a conversation or task bound to a directory.
-- **Loop**: a session that runs periodically or reacts to events.
-
-## Default Access Rule
-
-Parent agents can read child directories transparently by default.
-
-When a child directory is promoted to an autonomous directory, external access
-should go through that directory's interface agent unless an explicit debug,
-admin, migration, or audit mode is used.
-
-```text
-normal directory
-  = transparent context
-
-autonomous directory
-  = context boundary + interface agent
-```
-
-## Information Flow
-
-The intended flow is close to a React component tree:
-
-- Downward flow is assignment, context, constraints, and material distribution.
-- Upward flow is explicit reporting, events, requests, and status summaries.
-
-Children should not mutate parent state implicitly. They report upward, and the
-parent agent decides whether and how to incorporate the report.
-
-## Product Shape
-
-The first useful version should stay small:
-
-- node tree navigation
-- directory-bound AI chat
-- persistent sessions
-- loops or scheduled sessions
-- session icons and CRON metadata in `.agents/atree.yaml`
-
-Interface sessions, file preview, rich media browsing, graph views, and
-simulation-style UI can come later. The first goal is to make directories feel
-executable.
-
-## Current MVP
-
-This repository now contains a Bun + TypeScript + React local HTTP app.
-
-Run the API and UI in development:
+### Installation
 
 ```bash
-bun install
-ATREE_ROOT=/path/to/root bun run server
-bun run dev
+# YOLO
+curl -fsSL https://opencode.ai/install | bash
+
+# Package managers
+npm i -g opencode-ai@latest        # or bun/pnpm/yarn
+scoop install opencode             # Windows
+choco install opencode             # Windows
+brew install anomalyco/tap/opencode # macOS and Linux (recommended, always up to date)
+brew install opencode              # macOS and Linux (official brew formula, updated less)
+sudo pacman -S opencode            # Arch Linux (Stable)
+paru -S opencode-bin               # Arch Linux (Latest from AUR)
+mise use -g opencode               # Any OS
+nix run nixpkgs#opencode           # or github:anomalyco/opencode for latest dev branch
 ```
 
-Open:
+> [!TIP]
+> Remove versions older than 0.1.x before installing.
 
-```text
-http://127.0.0.1:5173/
-```
+### Desktop App (BETA)
 
-The API listens on `0.0.0.0:8787` by default, so another machine can reach it
-if the host network allows that port.
+OpenCode is also available as a desktop application. Download directly from the [releases page](https://github.com/anomalyco/opencode/releases) or [opencode.ai/download](https://opencode.ai/download).
 
-Useful environment variables:
+| Platform              | Download                           |
+| --------------------- | ---------------------------------- |
+| macOS (Apple Silicon) | `opencode-desktop-mac-arm64.dmg`   |
+| macOS (Intel)         | `opencode-desktop-mac-x64.dmg`     |
+| Windows               | `opencode-desktop-windows-x64.exe` |
+| Linux                 | `.deb`, `.rpm`, or `.AppImage`     |
 
 ```bash
-ATREE_ROOT=/path/to/root
-PORT=8787
-ATREE_MODEL_PROVIDER=zexi
-ATREE_MODEL_ID=gpt-5.3-codex-spark
-ATREE_THINKING_LEVEL=minimal
+# macOS (Homebrew)
+brew install --cask opencode-desktop
+# Windows (Scoop)
+scoop bucket add extras; scoop install extras/opencode-desktop
 ```
 
-MVP storage:
+#### Installation Directory
 
-```text
-.agents/atree.yaml
-.agents/sessions/<session-id>.jsonl
-.agents/attachments/<session-id>/
-.agents/skills/
+The install script respects the following priority order for the installation path:
+
+1. `$OPENCODE_INSTALL_DIR` - Custom installation directory
+2. `$XDG_BIN_DIR` - XDG Base Directory Specification compliant path
+3. `$HOME/bin` - Standard user binary directory (if it exists or can be created)
+4. `$HOME/.opencode/bin` - Default fallback
+
+```bash
+# Examples
+OPENCODE_INSTALL_DIR=/usr/local/bin curl -fsSL https://opencode.ai/install | bash
+XDG_BIN_DIR=$HOME/.local/bin curl -fsSL https://opencode.ai/install | bash
 ```
 
-Notes:
+### Agents
 
-- The UI left side is only a directory tree of `.agents/atree.yaml` nodes.
-- Sessions are Pi Coding Agent sessions. atree-ng does not wrap Pi messages in
-  another runtime format.
-- CRON schedule is stored directly in `.agents/atree.yaml`.
-- Attachments are stored as files under `.agents/attachments/<session-id>/`.
-- In local smoke testing, `deepseek/deepseek-v4-flash` completed a real Pi SDK
-  response. `zexi/gpt-5.3-codex-spark` is wired as the default, but currently
-  returns `400 status code (no body)` through the installed Pi SDK/provider
-  configuration on this machine.
+OpenCode includes two built-in agents you can switch between with the `Tab` key.
 
-## References
+- **build** - Default, full-access agent for development work
+- **plan** - Read-only agent for analysis and code exploration
+  - Denies file edits by default
+  - Asks permission before running bash commands
+  - Ideal for exploring unfamiliar codebases or planning changes
 
-Project documents:
+Also included is a **general** subagent for complex searches and multistep tasks.
+This is used internally and can be invoked using `@general` in messages.
 
-- [`docs/design.md`](docs/design.md)
-  - Current stable product design: directories, sessions, scheduled sessions,
-    `.agents/` storage, and UI principles.
-- [`docs/mvp.md`](docs/mvp.md)
-  - MVP task brief: local HTTP GUI, directory tree, JSONL sessions,
-    attachments, scheduling, and reference implementations.
-- [`docs/future.md`](docs/future.md)
-  - Untraded-off idea pool for future features such as interface sessions,
-    mounts, SQLite runtime, Pi ecosystem compatibility, and self-configuration.
+Learn more about [agents](https://opencode.ai/docs/agents).
 
-Core source material:
+### Documentation
 
-- `/Users/zexi/workspace/wangzexi/space/知识库的下一步/README.md`
-  - Main conceptual source for the next-generation knowledge base idea:
-    file trees as persistent local contexts, README as external interface,
-    and agents as long-running maintainers inside directories.
+For more info on how to configure OpenCode, [**head over to our docs**](https://opencode.ai/docs).
 
-Supporting material:
+### Contributing
 
-- `/Users/zexi/workspace/wangzexi/space/知识库的下一步/refs/One Folder One Context.md`
-  - Early concrete shape: one demand or work item maps to one folder.
-- `/Users/zexi/workspace/wangzexi/space/知识库的下一步/refs/企业协作新形态_完整版.md`
-  - Long discussion log covering directory-scoped agents, mounted people and
-    agents, information flow, and state-tree collaboration.
-- `/Users/zexi/workspace/wangzexi/space/知识库的事实与视角解耦/README.md`
-  - Fact/perspective split: keep raw facts stable and generate views at query
-    time.
-- `/Users/zexi/workspace/wangzexi/space/循环工程/README.md`
-  - Loop engineering model: autoregressive loop, tool loop, goal loop, and
-    scheduled/event loop.
-- `/Users/zexi/workspace/wangzexi/space/循环工程/drafts/v1-goal三层.md`
-  - Detailed notes on Goal as an explicit completion loop.
-- `/Users/zexi/workspace/wangzexi/space/Agent的成长阶梯.draft/README.md`
-  - Background thinking on model and harness co-evolution.
-- `/Users/zexi/workspace/wangzexi/atree/README.md`
-  - Current A-Tree implementation: AI-friendly file-tree S3 gateway with
-    mountable backends and config-as-file.
+If you're interested in contributing to OpenCode, please read our [contributing docs](./CONTRIBUTING.md) before submitting a pull request.
 
-Mirrored or published blog copy:
+### Building on OpenCode
 
-- `/Users/zexi/workspace/wangzexi/blog/知识库的下一步：从静态文档到持续运行的局部上下文/README.md`
+If you are working on a project that's related to OpenCode and is using "opencode" as part of its name, for example "opencode-dashboard" or "opencode-mobile", please add a note to your README to clarify that it is not built by the OpenCode team and is not affiliated with us in any way.
+
+---
+
+**Join our community** [Discord](https://discord.gg/opencode) | [X.com](https://x.com/opencode)
