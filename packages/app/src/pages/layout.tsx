@@ -2422,7 +2422,7 @@ export default function Layout(props: ParentProps) {
                       <div
                         classList={{
                           "flex h-8 min-w-0 items-center gap-1 rounded-md px-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color]": true,
-                          "bg-v2-background-bg-layer-03 text-v2-text-text-base shadow-[inset_0_0_0_1px_var(--v2-border-border-strong)]": active(),
+                          "bg-v2-background-bg-layer-03 text-v2-text-text-base": active(),
                           "hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base": !active(),
                         }}
                       >
