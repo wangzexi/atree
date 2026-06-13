@@ -43,6 +43,56 @@ function atreeMetadata(session: Pick<Session, "metadata">) {
 
 export const defaultSessionEmoji = "💬"
 
+export const sessionEmojiOptions = [
+  defaultSessionEmoji,
+  "🐱",
+  "🐶",
+  "🐰",
+  "🦊",
+  "🐼",
+  "🐧",
+  "🐢",
+  "🐳",
+  "🦉",
+  "📌",
+  "🗂️",
+  "📝",
+  "📚",
+  "🧰",
+  "🔧",
+  "💡",
+  "🎨",
+  "📷",
+  "🎧",
+  "🧭",
+  "⏰",
+  "🧪",
+  "💾",
+]
+
+export function nextSessionMetadata(session: Pick<Session, "metadata">, emoji: string) {
+  const metadata =
+    session.metadata && typeof session.metadata === "object" && !Array.isArray(session.metadata) ? session.metadata : {}
+  const currentAtree =
+    metadata.atree && typeof metadata.atree === "object" && !Array.isArray(metadata.atree)
+      ? (metadata.atree as Record<string, unknown>)
+      : {}
+  return {
+    ...metadata,
+    atree: {
+      ...currentAtree,
+      emoji,
+    },
+  }
+}
+
+export function randomSessionEmoji(excluded: Iterable<string>) {
+  const used = new Set(excluded)
+  const available = sessionEmojiOptions.filter((emoji) => !used.has(emoji))
+  const source = available.length > 0 ? available : sessionEmojiOptions
+  return source[Math.floor(Math.random() * source.length)] ?? defaultSessionEmoji
+}
+
 export function sessionEmoji(session: Pick<Session, "metadata">) {
   const emoji = atreeMetadata(session)?.emoji
   return typeof emoji === "string" && emoji.trim() ? emoji : defaultSessionEmoji

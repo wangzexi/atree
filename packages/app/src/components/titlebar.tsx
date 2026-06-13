@@ -31,14 +31,15 @@ import { WindowsAppMenu } from "./windows-app-menu"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
 import { useServerSync } from "@/context/server-sync"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { defaultSessionEmoji, sessionEmoji } from "@/pages/layout/helpers"
+import { nextSessionMetadata, sessionEmoji, sessionEmojiOptions } from "@/pages/layout/helpers"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/components/titlebar-session-events"
 import { useGlobal } from "@/context/global"
 import { decode64 } from "@/utils/base64"
 import { ServerConnection, useServer } from "@/context/server"
-import { tabHref, useTabs, type Tab } from "@/context/tabs"
+import { tabHref, tabKey, useTabs, type Tab } from "@/context/tabs"
 import type { Session } from "@opencode-ai/sdk/v2/client"
+import { pathKey } from "@/utils/path-key"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -330,6 +331,16 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             }
 
             const currentTab = () => matchRoute(layout.route())
+            const currentTabKey = () => {
+              const tab = currentTab()
+              return tab ? tabKey(tab) : undefined
+            }
+            const isCurrentTab = (tab: Tab) => currentTabKey() === tabKey(tab)
+            const currentTabIndex = () => {
+              const key = currentTabKey()
+              if (!key) return -1
+              return tabsStore.findIndex((tab) => tabKey(tab) === key)
+            }
 
             createEffect(() => {
               const route = layout.route()
@@ -378,7 +389,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   keybind: "mod+w",
                   hidden: true,
                   onSelect: () => {
-                    const index = tabsStore.findIndex((tab) => current === tab)
+                    const index = currentTabIndex()
                     closeTab(current, index)
                   },
                 },
@@ -389,7 +400,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   keybind: `mod+option+ArrowLeft`,
                   hidden: true,
                   onSelect: () => {
-                    let index = tabsStore.findIndex((tab) => tab === currentTab())
+                    let index = currentTabIndex()
                     if (index === -1) return
 
                     index -= 1
@@ -406,7 +417,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   keybind: `mod+option+ArrowRight`,
                   hidden: true,
                   onSelect: () => {
-                    let index = tabsStore.findIndex((tab) => tab === currentTab())
+                    let index = currentTabIndex()
                     if (index === -1) return
 
                     index += 1
@@ -441,8 +452,29 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const currentDirectory = createMemo(() => {
               if (params.dir) return decode64(params.dir)
               const current = currentTab()
+              if (current?.type === "draft") return current.directory
               if (current?.type === "session") return decode64(current.dirBase64)
             })
+            const currentDirectoryDraft = createMemo(() => {
+              const directory = currentDirectory()
+              if (!directory) return
+              return tabsStore.find(
+                (tab) => tab.type === "draft" && tab.server === server.key && pathKey(tab.directory) === pathKey(directory),
+              )
+            })
+            const openCurrentDirectoryDraft = () => {
+              const directory = currentDirectory()
+              if (!directory) return
+              const existing = currentDirectoryDraft()
+              if (existing?.type === "draft") {
+                navigateTab(existing)
+                return
+              }
+              tabsStoreActions.newDraft({
+                server: server.key,
+                directory,
+              })
+            }
 
             function refreshTabsAreOverflowing() {
               setTabsAreOverflowing(tabScrollRef.scrollWidth > tabScrollRef.clientWidth)
@@ -485,7 +517,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                                 ref={ref}
                                 href={tabHref(tab)}
                                 title={language.t("command.session.new")}
-                                active={currentTab() === tab}
+                                active={isCurrentTab(tab)}
                                 onNavigate={() => {
                                   navigateTab(tab)
                                   ref.scrollIntoView({ behavior: "instant" })
@@ -510,13 +542,26 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                                 ref.scrollIntoView({ behavior: "instant" })
                               }}
                               onClose={() => closeTab(tab, i())}
-                              active={currentTab() === tab}
+                              active={isCurrentTab(tab)}
                               forceTruncate={tabsAreOverflowing()}
                             />
                           </>
                         )
                       }}
                     </For>
+                    <Show when={currentDirectory() && !currentDirectoryDraft()}>
+                      <>
+                        <Show when={tabsStore.length > 0}>
+                          <div class="w-[1.5px] h-3 shrink-0 rounded-full bg-[var(--v2-background-bg-layer-02)]" />
+                        </Show>
+                        <DraftTabItem
+                          href="#"
+                          title={language.t("command.session.new")}
+                          active={false}
+                          onNavigate={openCurrentDirectoryDraft}
+                        />
+                      </>
+                    </Show>
                   </div>
                 </div>
                 <div class="flex-1" />
@@ -759,49 +804,6 @@ function TitlebarUpdateIconButton(props: { state: TitlebarUpdatePillState }) {
   )
 }
 
-const sessionEmojiOptions = [
-  defaultSessionEmoji,
-  "🐱",
-  "🐶",
-  "🐰",
-  "🦊",
-  "🐼",
-  "🐧",
-  "🐢",
-  "🐳",
-  "🦉",
-  "📌",
-  "🗂️",
-  "📝",
-  "📚",
-  "🧰",
-  "🔧",
-  "💡",
-  "🎨",
-  "📷",
-  "🎧",
-  "🧭",
-  "⏰",
-  "🧪",
-  "💾",
-]
-
-function nextSessionMetadata(session: Session, emoji: string) {
-  const metadata = session.metadata && typeof session.metadata === "object" && !Array.isArray(session.metadata)
-    ? session.metadata
-    : {}
-  const currentAtree = metadata.atree && typeof metadata.atree === "object" && !Array.isArray(metadata.atree)
-    ? (metadata.atree as Record<string, unknown>)
-    : {}
-  return {
-    ...metadata,
-    atree: {
-      ...currentAtree,
-      emoji,
-    },
-  }
-}
-
 function TabNavItem(props: {
   ref?: HTMLDivElement
   href: string
@@ -930,6 +932,22 @@ function ArchivedSessionsMenu(props: {
     return (sessions() ?? []).filter((session) => !openSessionIds.has(session.id))
   })
   const count = createMemo(() => visibleSessions().length)
+  const relativeSessionTime = (session: Session) => {
+    const time = session.time.updated ?? session.time.created
+    const diffSeconds = Math.round((time - Date.now()) / 1000)
+    const absolute = Math.abs(diffSeconds)
+    const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
+    if (absolute < 60) return formatter.format(diffSeconds, "second")
+    const diffMinutes = Math.round(diffSeconds / 60)
+    if (Math.abs(diffMinutes) < 60) return formatter.format(diffMinutes, "minute")
+    const diffHours = Math.round(diffMinutes / 60)
+    if (Math.abs(diffHours) < 24) return formatter.format(diffHours, "hour")
+    const diffDays = Math.round(diffHours / 24)
+    if (Math.abs(diffDays) < 30) return formatter.format(diffDays, "day")
+    const diffMonths = Math.round(diffDays / 30)
+    if (Math.abs(diffMonths) < 12) return formatter.format(diffMonths, "month")
+    return formatter.format(Math.round(diffMonths / 12), "year")
+  }
 
   const openSession = async (session: Session) => {
     const ctx = serverCtx()
@@ -987,7 +1005,7 @@ function ArchivedSessionsMenu(props: {
         aria-label="归档会话"
         title="归档会话"
       >
-        <IconV2 name="folder-open" />
+        <MessagesSquareIcon />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="w-[260px] p-1">
@@ -1005,11 +1023,14 @@ function ArchivedSessionsMenu(props: {
                   onSelect={() => void openSession(session)}
                 >
                   <span class="shrink-0 text-[14px] leading-none">{sessionEmoji(session)}</span>
-                  <DropdownMenu.ItemLabel>
+                  <DropdownMenu.ItemLabel class="min-w-0 flex-1">
                     <span class="block min-w-0 truncate text-[13px] leading-5 text-v2-text-text-base">
                       {session.title || "未命名会话"}
                     </span>
                   </DropdownMenu.ItemLabel>
+                  <span class="shrink-0 text-right text-[11px] leading-5 text-v2-text-text-faint">
+                    {relativeSessionTime(session)}
+                  </span>
                 </DropdownMenu.Item>
               )}
             </For>
@@ -1095,7 +1116,7 @@ function DraftTabItem(props: {
     <div
       ref={props.ref}
       data-active={props.active}
-      class="group relative flex h-7 w-9 shrink-0 flex-row items-center justify-start overflow-hidden whitespace-nowrap rounded-[6px] bg-[var(--tab-bg)] px-1.5 transition-[background-color] duration-150 ease-out [--tab-bg:var(--v2-background-bg-deep)] hover:[--tab-bg:var(--v2-background-bg-layer-02)] data-[active='true']:[--tab-bg:var(--v2-overlay-simple-overlay-pressed)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
+      class="group relative flex h-7 w-9 shrink-0 flex-row items-center justify-start overflow-hidden whitespace-nowrap rounded-[6px] bg-[var(--tab-bg)] px-1.5 transition-[background-color] duration-150 ease-out [--tab-bg:var(--v2-background-bg-deep)] hover:[--tab-bg:var(--v2-background-bg-layer-02)] data-[active='true']:[--tab-bg:var(--v2-background-bg-layer-02)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
     >
       <a
         href={props.href}
@@ -1107,11 +1128,49 @@ function DraftTabItem(props: {
         aria-label={props.title}
         class="flex size-6 shrink-0 items-center justify-center text-v2-text-text-faint group-data-[active='true']:text-[var(--v2-text-text-base)]"
       >
-        <span class="flex size-4 shrink-0 rotate-90 items-center justify-center">
-          <IconV2 name="edit" />
+        <span class="flex size-4 shrink-0 items-center justify-center">
+          <SquarePenIcon />
         </span>
       </a>
     </div>
+  )
+}
+
+export function SquarePenIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+      <path d="M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z" />
+    </svg>
+  )
+}
+
+function MessagesSquareIcon() {
+  return (
+    <svg
+      width="16"
+      height="16"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z" />
+      <path d="M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1" />
+    </svg>
   )
 }
 

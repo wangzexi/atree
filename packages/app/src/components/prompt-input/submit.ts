@@ -21,6 +21,8 @@ import { buildRequestParts } from "./build-request-parts"
 import { setCursorPosition } from "./editor-dom"
 import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
+import { nextSessionMetadata, randomSessionEmoji, sessionEmoji } from "@/pages/layout/helpers"
+import { pathKey } from "@/utils/path-key"
 
 type PendingPrompt = {
   abort: AbortController
@@ -381,8 +383,29 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           return undefined
         })
       if (created) {
-        seed(sessionDirectory, created)
-        session = created
+        const [directoryStore] = serverSync.child(sessionDirectory)
+        const openSessionIDs = new Set(
+          tabs.store.flatMap((tab) => {
+            if (tab.type !== "session") return []
+            if (tab.server !== server.key) return []
+            if (pathKey(atob(tab.dirBase64)) !== pathKey(sessionDirectory)) return []
+            return [tab.sessionId]
+          }),
+        )
+        const usedOpenEmojis = directoryStore.session
+          .filter((item) => openSessionIDs.has(item.id))
+          .map((item) => sessionEmoji(item))
+        const emoji = randomSessionEmoji(usedOpenEmojis)
+        const sessionWithEmoji = await client.session
+          .update({
+            sessionID: created.id,
+            metadata: nextSessionMetadata(created, emoji),
+          })
+          .then((x) => x.data ?? created)
+          .catch(() => created)
+
+        seed(sessionDirectory, sessionWithEmoji)
+        session = sessionWithEmoji
         if (shouldAutoAccept) permission.enableAutoAccept(session.id, sessionDirectory)
         local.session.promote(sessionDirectory, session.id)
         layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
