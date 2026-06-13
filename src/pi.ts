@@ -234,7 +234,7 @@ function contentToText(content: unknown): string {
       const typed = part as { type?: string; text?: string; path?: string };
       if (typed.type === "text") return typed.text ?? "";
       if (typed.type === "thinking") return "";
-      if (typed.type === "toolCall") return "";
+      if (isToolCallPartType(typed.type)) return "";
       if (typed.path) return `[attachment: ${typed.path}]`;
       return "";
     })
@@ -245,8 +245,13 @@ function contentToText(content: unknown): string {
 function sanitizeMessageText(text: string): string {
   return text
     .replace(/(?:^|\n)\s*TOOLCALL\s*(?=\n|$)/gi, "\n")
-    .replace(/[：:]\s*TOOLCALL\s*$/gi, "")
+    .replace(/[：:]\s*(?:TOOLCALL|\[tool[-_ ]?call\])\s*$/gi, "")
+    .replace(/\s*\[tool[-_ ]?call\]\s*/gi, "")
     .trim();
+}
+
+function isToolCallPartType(type: string | undefined): boolean {
+  return type ? type.replace(/[-_ ]/g, "").toLowerCase() === "toolcall" : false;
 }
 
 function mimeFromPath(path: string): string {

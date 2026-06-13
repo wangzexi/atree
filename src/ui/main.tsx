@@ -783,7 +783,8 @@ function summarizeActivityDetail(detail: string): string {
 function sanitizeAssistantText(text: string): string {
   return text
     .replace(/(?:^|\n)\s*TOOLCALL\s*(?=\n|$)/gi, "\n")
-    .replace(/[：:]\s*TOOLCALL\s*$/gi, "")
+    .replace(/[：:]\s*(?:TOOLCALL|\[tool[-_ ]?call\])\s*$/gi, "")
+    .replace(/\s*\[tool[-_ ]?call\]\s*/gi, "")
     .trimStart();
 }
 
