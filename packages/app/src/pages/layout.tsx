@@ -61,7 +61,6 @@ import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
-import { authTokenFromCredentials } from "@/utils/server"
 
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
@@ -83,6 +82,8 @@ import {
   sessionEmoji,
   sessionHasSchedule,
   sessionNextScheduleRun,
+  sessionScheduleRequestHeaders,
+  normalizeSessionSchedule,
   sortedRootSessions,
   type SessionScheduleSummary,
 } from "./layout/helpers"
@@ -2502,20 +2503,6 @@ export default function Layout(props: ParentProps) {
           path: node.path,
           absolute: node.absolute,
         }))
-    const scheduleHeaders = () => {
-      const headers = new Headers()
-      const current = server.current
-      if (current?.http.password) {
-        headers.set(
-          "Authorization",
-          `Basic ${authTokenFromCredentials({
-            username: current.http.username,
-            password: current.http.password,
-          })}`,
-        )
-      }
-      return headers
-    }
     const fetchSessionSchedules = async (session: Session) => {
       const current = server.current
       if (!current) return
@@ -2524,7 +2511,7 @@ export default function Layout(props: ParentProps) {
       setTree("schedule", session.id, (prev) => ({ ...prev, loading: true }))
       try {
         const url = new URL(`/session/${session.id}/schedule`, current.http.url)
-        const response = await fetch(url, { headers: scheduleHeaders() })
+        const response = await fetch(url, { headers: sessionScheduleRequestHeaders(current) })
         if (!response.ok) throw new Error(`Failed to load schedules: ${response.status}`)
         const json = (await response.json()) as Array<{
           id: string
@@ -2534,11 +2521,7 @@ export default function Layout(props: ParentProps) {
         setTree("schedule", session.id, {
           loaded: true,
           loading: false,
-          schedules: json.map((item) => ({
-            nextRunAt: asScheduleTime(item.nextRun ?? item.runAt ?? undefined),
-            nextRun: item.nextRun,
-            runAt: item.runAt,
-          })),
+          schedules: json.map((item) => normalizeSessionSchedule(item)),
         })
       } catch {
         setTree("schedule", session.id, { loaded: true, loading: false, schedules: [] })

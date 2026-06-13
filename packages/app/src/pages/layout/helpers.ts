@@ -1,7 +1,8 @@
 import { getFilename } from "@opencode-ai/core/util/path"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
-import type { ServerConnection } from "@/context/server"
+import { ServerConnection } from "@/context/server"
+import { authTokenFromCredentials } from "@/utils/server"
 
 type SessionStore = {
   session?: Session[]
@@ -9,12 +10,55 @@ type SessionStore = {
 }
 
 export type SessionScheduleSummary = {
+  id?: string
+  kind?: "once" | "recurring"
+  expression?: string
   nextRun?: number | string | null
   nextRunAt?: number | string | null
   runAt?: number | string | null
+  message?: string
+  lastRanAt?: number | string | null
+  lastRunStatus?: "ran" | "skipped" | null
+}
+
+export type SessionScheduleApiItem = {
+  id: string
+  kind?: "once" | "recurring"
+  expression?: string
+  runAt?: number | string | null
+  nextRunAt?: number | string | null
+  nextRun?: number | string | null
+  lastRanAt?: number | string | null
+  message?: string
+  lastRunStatus?: "ran" | "skipped" | null
 }
 
 export type SessionScheduleIndex = Record<string, readonly SessionScheduleSummary[] | undefined>
+
+export const sessionScheduleRequestHeaders = (current?: ServerConnection.Any | null) => {
+  const headers = new Headers()
+  if (current?.http.password) {
+    headers.set(
+      "Authorization",
+      `Basic ${authTokenFromCredentials({ username: current.http.username, password: current.http.password })}`,
+    )
+  }
+  return headers
+}
+
+export function normalizeSessionSchedule(item: SessionScheduleApiItem): SessionScheduleSummary {
+  return {
+    id: item.id,
+    kind: item.kind ?? "recurring",
+    expression: item.expression ?? "",
+    runAt: item.runAt,
+    nextRun: item.nextRun,
+    nextRunAt: item.nextRun ?? item.nextRunAt,
+    message: item.message,
+    lastRanAt: item.lastRanAt,
+    lastRunStatus: item.lastRunStatus ?? null,
+  }
+}
 
 export function asScheduleTime(value: number | string | null | undefined) {
   if (typeof value === "number" && Number.isFinite(value)) return value

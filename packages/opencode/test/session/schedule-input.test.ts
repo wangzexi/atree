@@ -32,5 +32,5 @@ it("buildScheduleCreateInput resolves cron expressions", () => {
 it("parseScheduleAt supports ISO and milliseconds", () => {
   expect(parseScheduleAt(1700000000000)).toBe(1700000000000)
   expect(parseScheduleAt("2026-06-14T00:00:00+08:00")).toBeTypeOf("number")
-  expect(parseScheduleAt("not-a-time")).toBeNaN()
+  expect(parseScheduleAt("not-a-time")).toBeUndefined()
 })

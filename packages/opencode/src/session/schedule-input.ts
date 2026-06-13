@@ -31,7 +31,7 @@ export function parseScheduleAt(value: number | string | undefined): number | un
   if (typeof value === "number") return value
   if (typeof value === "string") {
     const parsed = Date.parse(value)
-    return Number.isFinite(parsed) ? parsed : Number.NaN
+    return Number.isFinite(parsed) ? parsed : undefined
   }
   return undefined
 }

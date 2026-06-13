@@ -14,12 +14,15 @@ import {
   displayName,
   effectiveWorkspaceOrder,
   errorMessage,
+  normalizeSessionSchedule,
   hasProjectPermissions,
   homeProjectNavigation,
   homeProjectDirectories,
   homeSessionServerStatus,
   latestRootSession,
+  sessionScheduleRequestHeaders,
   sortedRootSessions,
+  type SessionScheduleApiItem,
   toggleHomeProjectSelection,
 } from "./helpers"
 import { pathKey } from "@/utils/path-key"
@@ -198,6 +201,41 @@ describe("layout workspace helpers", () => {
     expect(asScheduleTime(1700000000000)).toBe(1700000000000)
     expect(asScheduleTime("2026-06-14T00:00:00+08:00")).toBeTypeOf("number")
     expect(asScheduleTime("bad time")).toBeUndefined()
+  })
+
+  test("normalizes schedule api payload into internal schedule fields", () => {
+    const normalized = normalizeSessionSchedule({
+      id: "sch",
+      kind: "once",
+      expression: "* * * * *",
+      runAt: 1_700_000_000_001,
+      nextRun: 1_700_000_000_111,
+      message: "msg",
+      lastRunStatus: "ran",
+      lastRanAt: 1_700_000_000_200,
+    } satisfies SessionScheduleApiItem)
+
+    expect(normalized).toEqual({
+      id: "sch",
+      kind: "once",
+      expression: "* * * * *",
+      runAt: 1_700_000_000_001,
+      nextRun: 1_700_000_000_111,
+      nextRunAt: 1_700_000_000_111,
+      message: "msg",
+      lastRanAt: 1_700_000_000_200,
+      lastRunStatus: "ran",
+    })
+  })
+
+  test("builds request headers without auth when no password provided", () => {
+    const headers = sessionScheduleRequestHeaders(
+      {
+        http: { url: "http://localhost:4000", username: "opencode", password: "" },
+      } as unknown as ServerConnection.Any,
+    )
+
+    expect(headers.get("Authorization")).toBeNull()
   })
 
   test("detects project permissions with a filter", () => {

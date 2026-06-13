@@ -5,10 +5,14 @@ import { DockTray } from "@opencode-ai/ui/dock-surface"
 import { Icon } from "@opencode-ai/ui/icon"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
-import { authTokenFromCredentials } from "@/utils/server"
 import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
-import { asScheduleTime } from "@/pages/layout/helpers"
+import {
+  asScheduleTime,
+  normalizeSessionSchedule,
+  sessionScheduleRequestHeaders,
+  type SessionScheduleApiItem,
+} from "@/pages/layout/helpers"
 
 type ScheduleInfo = {
   id: string
@@ -73,36 +77,23 @@ export function SessionScheduleDock(props: {
       const current = server.current
       if (!current || !props.sessionID) return [] as ScheduleInfo[]
       const url = new URL(`/session/${props.sessionID}/schedule`, current.http.url)
-      const headers = new Headers()
-      if (current.http.password) {
-        headers.set(
-          "Authorization",
-          `Basic ${authTokenFromCredentials({ username: current.http.username, password: current.http.password })}`,
-        )
-      }
-      const response = await fetch(url, { headers })
+      const response = await fetch(url, { headers: sessionScheduleRequestHeaders(current) })
       if (!response.ok) throw new Error(`Failed to load schedules: ${response.status}`)
-      const json = (await response.json()) as Array<{
-        id: string
-        kind?: "once" | "recurring"
-        expression: string
-        runAt?: number | string | null
-        message: string
-        nextRun?: number | string | null
-        lastRanAt?: number | string | null
-        lastRunStatus?: "ran" | "skipped" | null
-      }>
-        return json
-        .map((item) => ({
-          id: item.id,
-          kind: item.kind ?? "recurring",
-          expression: item.expression,
-          runAt: asScheduleTime(item.runAt ?? undefined),
-          message: item.message,
-          nextRunAt: asScheduleTime(item.nextRun ?? undefined),
-          lastRunAt: asScheduleTime(item.lastRanAt ?? undefined),
-          lastRunStatus: item.lastRunStatus ?? null,
-        }))
+      const json = (await response.json()) as SessionScheduleApiItem[]
+      return json
+        .map((item) => {
+          const base = normalizeSessionSchedule(item)
+          return {
+            id: base.id ?? "",
+            kind: base.kind ?? "recurring",
+            expression: base.expression ?? "",
+            runAt: asScheduleTime(base.runAt ?? undefined),
+            message: base.message ?? "",
+            nextRunAt: asScheduleTime((base.nextRunAt ?? base.runAt) ?? undefined),
+            lastRunAt: asScheduleTime(base.lastRanAt ?? undefined),
+            lastRunStatus: base.lastRunStatus ?? null,
+          }
+        })
         .sort((a, b) => (a.nextRunAt ?? Number.MAX_SAFE_INTEGER) - (b.nextRunAt ?? Number.MAX_SAFE_INTEGER))
     },
   }))
@@ -111,14 +102,7 @@ export function SessionScheduleDock(props: {
       const current = server.current
       if (!current || !props.sessionID) return
       const url = new URL(`/session/${props.sessionID}/schedule/${scheduleID}`, current.http.url)
-      const headers = new Headers()
-      if (current.http.password) {
-        headers.set(
-          "Authorization",
-          `Basic ${authTokenFromCredentials({ username: current.http.username, password: current.http.password })}`,
-        )
-      }
-      const response = await fetch(url, { method: "DELETE", headers })
+      const response = await fetch(url, { method: "DELETE", headers: sessionScheduleRequestHeaders(current) })
       if (!response.ok) throw new Error(`Failed to delete schedule: ${response.status}`)
     },
     onSuccess: refresh,
