@@ -40,6 +40,7 @@ function App() {
   const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
+  const displayedStreamText = usePacedText(streamText, Boolean(streamText && isSending));
 
   useEffect(() => {
     void refreshTree();
@@ -351,9 +352,9 @@ function App() {
               <div className="message-body">{message.text}</div>
             </article>
           ))}
-          {streamText && (
+          {displayedStreamText && (
             <article className="message assistant">
-              <div className="message-body">{streamText}</div>
+              <div className="message-body">{displayedStreamText}</div>
             </article>
           )}
           {activityItems.length > 0 && (
@@ -539,6 +540,78 @@ function replaceSessionInNodes(nodes: AtreeNode[], updated: AtreeSessionMeta): A
     sessions: node.sessions.map((session) => (session.id === updated.id ? updated : session)),
     children: replaceSessionInNodes(node.children, updated),
   }));
+}
+
+const TEXT_RENDER_PACE_MS = 24;
+const TEXT_RENDER_SNAP = /[\s.,!?;:)\]]/;
+
+function usePacedText(text: string, live: boolean): string {
+  const [value, setValue] = useState(text);
+  const shownRef = useRef(text);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    const clear = () => {
+      if (!timeoutRef.current) return;
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = undefined;
+    };
+
+    const sync = (nextText: string) => {
+      shownRef.current = nextText;
+      setValue(nextText);
+    };
+
+    const run = () => {
+      timeoutRef.current = undefined;
+      if (!live) {
+        sync(text);
+        return;
+      }
+      const shown = shownRef.current;
+      if (!text.startsWith(shown) || text.length <= shown.length) {
+        sync(text);
+        return;
+      }
+      const end = nextPacedTextEnd(text, shown.length);
+      sync(text.slice(0, end));
+      if (end < text.length) timeoutRef.current = setTimeout(run, TEXT_RENDER_PACE_MS);
+    };
+
+    const shown = shownRef.current;
+    if (!live) {
+      clear();
+      sync(text);
+      return clear;
+    }
+    if (!text.startsWith(shown) || text.length < shown.length) {
+      clear();
+      sync(text);
+      return clear;
+    }
+    if (text.length !== shown.length && !timeoutRef.current) {
+      timeoutRef.current = setTimeout(run, TEXT_RENDER_PACE_MS);
+    }
+    return clear;
+  }, [text, live]);
+
+  return value;
+}
+
+function pacedStep(size: number): number {
+  if (size <= 12) return 2;
+  if (size <= 48) return 4;
+  if (size <= 96) return 8;
+  return Math.min(24, Math.ceil(size / 8));
+}
+
+function nextPacedTextEnd(text: string, start: number): number {
+  const end = Math.min(text.length, start + pacedStep(text.length - start));
+  const max = Math.min(text.length, end + 8);
+  for (let index = end; index < max; index++) {
+    if (TEXT_RENDER_SNAP.test(text[index] ?? "")) return index + 1;
+  }
+  return end;
 }
 
 function upsertActivity(setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>, item: ActivityItem) {

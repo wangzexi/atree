@@ -108,22 +108,23 @@ export function readDisplayMessages(dir: string, sessionId: string): DisplayMess
   return manager
     .getEntries()
     .filter((entry) => entry.type === "message" || entry.type === "custom_message")
-    .map((entry) => {
+    .flatMap((entry) => {
       if (entry.type === "custom_message") {
-        return {
+        return [{
           id: entry.id,
           role: "system",
           text: typeof entry.content === "string" ? entry.content : contentToText(entry.content),
           timestamp: Date.parse(entry.timestamp),
-        };
+        }];
       }
       const message = entry.message;
-      return {
+      if (message.role === "toolResult") return [];
+      return [{
         id: entry.id,
         role: message.role,
         text: "content" in message ? contentToText(message.content) : contentToText(message),
         timestamp: typeof message.timestamp === "number" ? message.timestamp : Date.parse(entry.timestamp),
-      };
+      }];
     })
     .filter((message) => message.text.trim());
 }
@@ -233,8 +234,8 @@ function contentToText(content: unknown): string {
       const typed = part as { type?: string; text?: string; path?: string };
       if (typed.type === "text") return typed.text ?? "";
       if (typed.type === "thinking") return "";
+      if (typed.type === "toolCall") return "";
       if (typed.path) return `[attachment: ${typed.path}]`;
-      if (typed.type) return `[${typed.type}]`;
       return "";
     })
     .filter(Boolean)
