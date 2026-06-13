@@ -80,7 +80,6 @@ import { useQueries } from "@tanstack/solid-query"
 import { useQueryOptions } from "@/context/server-sync"
 import { pathKey } from "@/utils/path-key"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { displayName } from "@/pages/layout/helpers"
 
 interface PromptInputProps {
   class?: string
@@ -151,7 +150,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
   let fileInputRef: HTMLInputElement | undefined
   let scrollRef!: HTMLDivElement
   let slashPopoverRef!: HTMLDivElement
-  let projectSearchRef: HTMLInputElement | undefined
 
   const mirror = { input: false }
   const inset = 56
@@ -293,10 +291,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     mode: "normal",
     applyingHistory: false,
     variantOpen: false,
-  })
-  const [picker, setPicker] = createStore({
-    projectOpen: false,
-    projectSearch: "",
   })
 
   const buttonsSpring = useSpring(() => (store.mode === "normal" ? 1 : 0), { visualDuration: 0.2, bounce: 0 })
@@ -1367,17 +1361,8 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     )
   }
   const selectedProject = createMemo(() => projectForDirectory(sdk.directory))
-  const projectResults = createMemo(() => {
-    const search = picker.projectSearch.trim().toLowerCase()
-    if (!search) return projects()
-    return projects().filter((project) => displayName(project).toLowerCase().includes(search))
-  })
   const showAgentControl = createMemo(() => settings.general.showCustomAgents() && agentNames().length > 0)
   const selectProject = (worktree: string) => {
-    setPicker({
-      projectOpen: false,
-      projectSearch: "",
-    })
     if (pathKey(worktree) === pathKey(selectedProject()?.worktree ?? "")) {
       restoreFocus()
       return
@@ -1411,41 +1396,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
     })
   }
 
-  const projectPickerState = createMemo<ComposerPickerState>(() => ({
-    open: picker.projectOpen,
-    trigger: {
-      action: "prompt-project",
-      icon: "folder",
-      label: selectedProject() ? displayName(selectedProject()!) : language.t("session.new.project.new"),
-      class: "max-w-[203px]",
-      style: control(),
-      onPress: () => setPicker("projectOpen", true),
-    },
-    search: picker.projectSearch,
-    searchPlaceholder: language.t("session.new.project.search"),
-    clearLabel: language.t("common.clear"),
-    items: projectResults().map((project) => ({
-      icon: "folder",
-      label: displayName(project),
-      selected: selectedProject()?.worktree === project.worktree,
-      onSelect: () => selectProject(project.worktree),
-    })),
-    action: {
-      icon: "plus",
-      label: language.t("session.new.project.add"),
-      onSelect: () => {
-        setPicker("projectOpen", false)
-        void addProject()
-      },
-    },
-    onOpenChange: (open) => {
-      setPicker("projectOpen", open)
-      if (open) requestAnimationFrame(() => projectSearchRef?.focus())
-    },
-    onSearchInput: (value) => setPicker("projectSearch", value),
-    onSearchClear: () => setPicker("projectSearch", ""),
-    searchRef: (el) => (projectSearchRef = el),
-  }))
   const agentControlState = createMemo<ComposerAgentControlState>(() => ({
     title: language.t("command.agent.cycle"),
     keybind: command.keybind("agent.cycle"),
@@ -1652,11 +1602,6 @@ export const PromptInput: Component<PromptInputProps> = (props) => {
                 </Tooltip>
               </div>
             </DockShellForm>
-            <Show when={newSession() && selectedProject()}>
-              <div class="flex h-7 min-w-0 items-center gap-0 px-2">
-                <ComposerPicker state={projectPickerState()} />
-              </div>
-            </Show>
           </div>
         </Match>
         <Match when>
