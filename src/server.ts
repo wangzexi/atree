@@ -14,7 +14,7 @@ import {
   broadcastSessionEvent,
   getPiSession,
   initializeSessionFile,
-  readDisplayMessages,
+  readSessionEntries,
   saveAttachment,
   subscribePiEvents,
 } from "./pi";
@@ -112,11 +112,11 @@ async function handleApi(request: Request, url: URL): Promise<Response> {
         return json({ session: meta });
       }
 
-      if (request.method === "GET" && action === "messages") {
-        return json({ messages: readDisplayMessages(dir, sessionId) });
+      if (request.method === "GET" && (action === "messages" || (action === "pi" && parts[6] === "entries"))) {
+        return json({ entries: readSessionEntries(dir, sessionId) });
       }
 
-      if (request.method === "POST" && action === "messages") {
+      if (request.method === "POST" && (action === "messages" || (action === "pi" && parts[6] === "prompt"))) {
         const body = await request.json().catch(() => ({})) as { text?: string; attachments?: string[] };
         const text = body.text?.trim();
         if (!text) return json({ error: "message text is required" }, 400);

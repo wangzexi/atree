@@ -23,10 +23,3 @@ export interface AtreeNode {
   sessions: AtreeSessionMeta[];
   children: AtreeNode[];
 }
-
-export interface DisplayMessage {
-  id: string;
-  role: string;
-  text: string;
-  timestamp?: number;
-}

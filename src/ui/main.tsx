@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
-import type { AtreeNode, AtreeSessionMeta, DisplayMessage } from "../types";
+import type { AtreeNode, AtreeSessionMeta } from "../types";
 
 interface TreeResponse {
   root: string;
@@ -13,25 +13,49 @@ interface Selection {
   session?: AtreeSessionMeta;
 }
 
-interface ActivityItem {
-  id: string;
-  label: string;
-  detail?: string;
+type PiEntry = {
+  type: string;
+  id?: string;
+  timestamp?: string;
+  message?: PiMessage;
+  customType?: string;
+  content?: unknown;
+  display?: boolean;
+};
+
+type PiMessage = {
+  role: string;
+  content?: unknown;
+  timestamp?: number;
+  toolCallId?: string;
+  toolName?: string;
+  isError?: boolean;
+  command?: string;
   output?: string;
-  status: "running" | "done" | "error";
-  kind: "thinking" | "tool";
-}
+  exitCode?: number;
+  cancelled?: boolean;
+  truncated?: boolean;
+  summary?: string;
+};
+
+type ToolExecutionEvent = {
+  type: "tool_execution_start" | "tool_execution_update" | "tool_execution_end";
+  toolCallId: string;
+  toolName: string;
+  args?: unknown;
+  partialResult?: unknown;
+  result?: unknown;
+  isError?: boolean;
+};
 
 const SESSION_ICON_OPTIONS = ["🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼", "🐨", "🐯", "🦁", "🐸", "🐵", "🐧", "🐦", "🦉", "🐢", "🐳", "🐙", "🦋", "🌿", "☕", "📚", "🧰", "💡", "✏️", "📌", "📦", "🔧", "🗂️", "💬"];
-const THINKING_ACTIVITY_ID = "thinking";
 
 function App() {
   const [rootPath, setRootPath] = useState("");
   const [nodes, setNodes] = useState<AtreeNode[]>([]);
   const [selection, setSelection] = useState<Selection | undefined>();
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [entries, setEntries] = useState<PiEntry[]>([]);
   const [draft, setDraft] = useState("");
-  const [streamText, setStreamText] = useState("");
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | undefined>();
   const [editingTitle, setEditingTitle] = useState(false);
@@ -39,13 +63,13 @@ function App() {
   const [expandedNodeIds, setExpandedNodeIds] = useState<Set<string>>(new Set());
   const [archiveConfirmId, setArchiveConfirmId] = useState<string | undefined>();
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [activityItems, setActivityItems] = useState<ActivityItem[]>([]);
   const [openActivityIds, setOpenActivityIds] = useState<Set<string>>(new Set());
-  const [pendingUserMessages, setPendingUserMessages] = useState<DisplayMessage[]>([]);
+  const [pendingUserEntries, setPendingUserEntries] = useState<PiEntry[]>([]);
+  const [liveAssistantMessage, setLiveAssistantMessage] = useState<PiMessage | undefined>();
+  const [liveToolEvents, setLiveToolEvents] = useState<Record<string, ToolExecutionEvent>>({});
+  const [isThinking, setIsThinking] = useState(false);
   const eventSourceRef = useRef<EventSource | undefined>(undefined);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
-  const sanitizedStreamText = sanitizeAssistantText(streamText);
-  const displayedStreamText = usePacedText(sanitizedStreamText, Boolean(sanitizedStreamText && isSending));
 
   useEffect(() => {
     void refreshTree();
@@ -57,54 +81,35 @@ function App() {
 
   useEffect(() => {
     eventSourceRef.current?.close();
-    setMessages([]);
-    setStreamText("");
-    setActivityItems([]);
+    setEntries([]);
     setOpenActivityIds(new Set());
-    setPendingUserMessages([]);
+    setPendingUserEntries([]);
+    setLiveAssistantMessage(undefined);
+    setLiveToolEvents({});
+    setIsThinking(false);
     if (!selection?.session) return;
 
-    void loadMessages(selection.node.id, selection.session.id);
+    void loadPiEntries(selection.node.id, selection.session.id);
     const source = new EventSource(`/api/sessions/${selection.session.id}/events`);
     source.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === "agent_start" || data.type === "turn_start") {
-        upsertActivity(setActivityItems, setOpenActivityIds, { id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running", kind: "thinking" });
+        setIsThinking(true);
       }
-      if (data.type === "message_update" && data.assistantMessageEvent?.type === "text_delta") {
-        setStreamText((text) => text + data.assistantMessageEvent.delta);
-      }
-      if (data.type === "message_update") {
-        const assistantEvent = data.assistantMessageEvent;
-        if (assistantEvent?.type === "thinking_start") {
-          upsertActivity(setActivityItems, setOpenActivityIds, {
-            id: THINKING_ACTIVITY_ID,
-            label: "正在思考",
-            detail: assistantEvent.partial?.thinking,
-            status: "running",
-            kind: "thinking",
-          });
-        }
-        if (assistantEvent?.type === "thinking_delta") {
-          updateThinkingActivity(setActivityItems, setOpenActivityIds, assistantEvent);
-        }
-        if (assistantEvent?.type === "toolcall_start" || assistantEvent?.type === "toolcall_delta") {
-          upsertActivity(setActivityItems, setOpenActivityIds, { id: THINKING_ACTIVITY_ID, label: "正在准备工具调用", status: "running", kind: "thinking" });
-        }
-        if (assistantEvent?.type === "text_start" || assistantEvent?.type === "text_delta") {
-          setActivityItems((current) => current.filter((item) => item.id !== THINKING_ACTIVITY_ID));
+      if (data.type === "message_start" || data.type === "message_update" || data.type === "message_end") {
+        if (data.message?.role === "assistant") setLiveAssistantMessage(data.message);
+        if (data.assistantMessageEvent?.type === "text_start" || data.assistantMessageEvent?.type === "text_delta") {
+          setIsThinking(false);
         }
       }
       if (data.type === "tool_execution_start" || data.type === "tool_execution_update") {
-        upsertActivity(setActivityItems, setOpenActivityIds, formatToolActivity(data, "running"));
+        setLiveToolEvents((current) => ({ ...current, [data.toolCallId]: data }));
       }
       if (data.type === "tool_execution_end") {
-        upsertActivity(setActivityItems, setOpenActivityIds, formatToolActivity(data, data.isError ? "error" : "done"));
+        setLiveToolEvents((current) => ({ ...current, [data.toolCallId]: data }));
       }
       if (data.type === "message_end" || data.type === "atree_messages_changed") {
-        setStreamText("");
-        setActivityItems((current) => current.filter((item) => item.id !== THINKING_ACTIVITY_ID));
-        void loadMessages(selection.node.id, selection.session!.id);
+        void loadPiEntries(selection.node.id, selection.session!.id);
         void refreshTree(false);
       }
       if (data.type === "atree_error") {
@@ -113,6 +118,9 @@ function App() {
       }
       if (data.type === "agent_end" || data.type === "turn_end") {
         setIsSending(false);
+        setIsThinking(false);
+        setLiveAssistantMessage(undefined);
+        setLiveToolEvents({});
       }
     };
     eventSourceRef.current = source;
@@ -153,13 +161,13 @@ function App() {
     setSelection({ node, session: data.session });
   }
 
-  async function loadMessages(nodeId: string, sessionId: string) {
-    const response = await fetch(`/api/nodes/${nodeId}/sessions/${sessionId}/messages`);
+  async function loadPiEntries(nodeId: string, sessionId: string) {
+    const response = await fetch(`/api/nodes/${nodeId}/sessions/${sessionId}/pi/entries`);
     const data = await response.json();
-    const loaded = (data.messages ?? []) as DisplayMessage[];
-    setPendingUserMessages((pending) => {
-      const remaining = pending.filter((message) => !loaded.some((item) => item.role === "user" && item.text === message.text));
-      setMessages([...loaded, ...remaining]);
+    const loaded = (data.entries ?? []) as PiEntry[];
+    setPendingUserEntries((pending) => {
+      const remaining = pending.filter((entry) => !loaded.some((item) => sameUserMessage(item, entry)));
+      setEntries([...loaded, ...remaining]);
       return remaining;
     });
   }
@@ -169,19 +177,22 @@ function App() {
     if (!selection?.session || !text || isSending) return;
     setError(undefined);
     setIsSending(true);
-    setActivityItems([{ id: THINKING_ACTIVITY_ID, label: "正在思考", status: "running", kind: "thinking" }]);
-    setOpenActivityIds(new Set([THINKING_ACTIVITY_ID]));
-    const optimisticMessage: DisplayMessage = {
+    setIsThinking(true);
+    const optimisticEntry: PiEntry = {
+      type: "message",
       id: `optimistic-${crypto.randomUUID()}`,
-      role: "user",
-      text,
-      timestamp: Date.now(),
+      timestamp: new Date().toISOString(),
+      message: {
+        role: "user",
+        content: text,
+        timestamp: Date.now(),
+      },
     };
-    setPendingUserMessages((current) => [...current, optimisticMessage]);
-    setMessages((current) => [...current, optimisticMessage]);
+    setPendingUserEntries((current) => [...current, optimisticEntry]);
+    setEntries((current) => [...current, optimisticEntry]);
     setDraft("");
     try {
-      const response = await fetch(`/api/nodes/${selection.node.id}/sessions/${selection.session.id}/messages`, {
+      const response = await fetch(`/api/nodes/${selection.node.id}/sessions/${selection.session.id}/pi/prompt`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
@@ -189,10 +200,11 @@ function App() {
       if (!response.ok) throw new Error(`Send failed: ${response.status}`);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
-      setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
-      setPendingUserMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
+      setEntries((current) => current.filter((entry) => entry.id !== optimisticEntry.id));
+      setPendingUserEntries((current) => current.filter((entry) => entry.id !== optimisticEntry.id));
       setDraft(text);
       setIsSending(false);
+      setIsThinking(false);
     }
   }
 
@@ -371,51 +383,19 @@ function App() {
         </header>
 
         <section className="messages">
-          {messages.map((message) => (
-            <article key={message.id} className={`message ${message.role}`}>
-              <div className="message-body">{message.text}</div>
-            </article>
-          ))}
-          {displayedStreamText && (
-            <article className="message assistant">
-              <div className="message-body">{displayedStreamText}</div>
-            </article>
+          <PiEntriesView entries={entries} openIds={openActivityIds} onToggleOpen={(id) => setOpenActivityIds((current) => toggleSetValue(current, id))} />
+          {isThinking && !liveAssistantMessage && <ReasoningBlock id="live-thinking" label="正在思考" running openIds={openActivityIds} onToggleOpen={(id) => setOpenActivityIds((current) => toggleSetValue(current, id))} />}
+          {liveAssistantMessage && (
+            <PiMessageView
+              id="live-assistant"
+              message={liveAssistantMessage}
+              toolResults={new Map()}
+              openIds={openActivityIds}
+              onToggleOpen={(id) => setOpenActivityIds((current) => toggleSetValue(current, id))}
+              live
+            />
           )}
-          {activityItems.length > 0 && (
-            <div className="activity-feed">
-              {activityItems.map((item) => (
-                <div key={item.id} className={`activity-item ${item.status} ${item.kind}`}>
-                  <button
-                    className="activity-trigger"
-                    onClick={() => setOpenActivityIds((current) => toggleSetValue(current, item.id))}
-                    title={openActivityIds.has(item.id) ? "折叠" : "展开"}
-                  >
-                    <span className="activity-chevron">{openActivityIds.has(item.id) ? "⌄" : "›"}</span>
-                    <span className="activity-label">
-                      {item.status === "running" ? <TextShimmer text={item.label} /> : item.label}
-                    </span>
-                    {item.detail && <span className="activity-summary">{summarizeActivityDetail(item.detail)}</span>}
-                  </button>
-                  {(item.detail || item.output) && openActivityIds.has(item.id) && (
-                    <div className="activity-detail">
-                      {item.detail && (
-                        <div className="activity-section">
-                          {item.kind === "tool" && <div className="activity-section-label">输入</div>}
-                          <pre>{item.detail}</pre>
-                        </div>
-                      )}
-                      {item.output && (
-                        <div className="activity-section">
-                          <div className="activity-section-label">输出</div>
-                          <pre>{item.output}</pre>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <LiveToolEventsView events={liveToolEvents} openIds={openActivityIds} onToggleOpen={(id) => setOpenActivityIds((current) => toggleSetValue(current, id))} />
           {!selection?.session && <div className="empty">展开左侧目录并选择会话，或点击加号创建新会话。</div>}
         </section>
 
@@ -592,78 +572,6 @@ function replaceSessionInNodes(nodes: AtreeNode[], updated: AtreeSessionMeta): A
   }));
 }
 
-const TEXT_RENDER_PACE_MS = 24;
-const TEXT_RENDER_SNAP = /[\s.,!?;:)\]]/;
-
-function usePacedText(text: string, live: boolean): string {
-  const [value, setValue] = useState(text);
-  const shownRef = useRef(text);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-
-  useEffect(() => {
-    const clear = () => {
-      if (!timeoutRef.current) return;
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = undefined;
-    };
-
-    const sync = (nextText: string) => {
-      shownRef.current = nextText;
-      setValue(nextText);
-    };
-
-    const run = () => {
-      timeoutRef.current = undefined;
-      if (!live) {
-        sync(text);
-        return;
-      }
-      const shown = shownRef.current;
-      if (!text.startsWith(shown) || text.length <= shown.length) {
-        sync(text);
-        return;
-      }
-      const end = nextPacedTextEnd(text, shown.length);
-      sync(text.slice(0, end));
-      if (end < text.length) timeoutRef.current = setTimeout(run, TEXT_RENDER_PACE_MS);
-    };
-
-    const shown = shownRef.current;
-    if (!live) {
-      clear();
-      sync(text);
-      return clear;
-    }
-    if (!text.startsWith(shown) || text.length < shown.length) {
-      clear();
-      sync(text);
-      return clear;
-    }
-    if (text.length !== shown.length && !timeoutRef.current) {
-      timeoutRef.current = setTimeout(run, TEXT_RENDER_PACE_MS);
-    }
-    return clear;
-  }, [text, live]);
-
-  return value;
-}
-
-function pacedStep(size: number): number {
-  if (size <= 12) return 2;
-  if (size <= 48) return 4;
-  if (size <= 96) return 8;
-  return Math.min(24, Math.ceil(size / 8));
-}
-
-function nextPacedTextEnd(text: string, start: number): number {
-  const end = Math.min(text.length, start + pacedStep(text.length - start));
-  const max = Math.min(text.length, end + 8);
-  for (let index = end; index < max; index++) {
-    if (TEXT_RENDER_SNAP.test(text[index] ?? "")) return index + 1;
-  }
-  return end;
-}
-
 function toggleSetValue(values: Set<string>, value: string): Set<string> {
   const next = new Set(values);
   if (next.has(value)) next.delete(value);
@@ -680,72 +588,285 @@ function TextShimmer({ text }: { text: string }) {
   );
 }
 
-function upsertActivity(
-  setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>,
-  setOpenIds: React.Dispatch<React.SetStateAction<Set<string>>>,
-  item: ActivityItem,
-) {
-  setOpenIds((current) => {
-    if (current.has(item.id) || item.status !== "running" || item.kind !== "thinking") return current;
-    return new Set(current).add(item.id);
-  });
-  setItems((current) => {
-    const next = current.filter((existing) => existing.id !== item.id);
-    const existing = current.find((entry) => entry.id === item.id);
-    const merged = { ...existing, ...item, detail: item.detail ?? existing?.detail, output: item.output ?? existing?.output };
-    return [...next, merged].slice(-5);
-  });
+function PiEntriesView({
+  entries,
+  openIds,
+  onToggleOpen,
+}: {
+  entries: PiEntry[];
+  openIds: Set<string>;
+  onToggleOpen: (id: string) => void;
+}) {
+  const toolResults = new Map<string, PiMessage>();
+  for (const entry of entries) {
+    const message = entry.message;
+    if (entry.type === "message" && message?.role === "toolResult" && message.toolCallId) {
+      toolResults.set(message.toolCallId, message);
+    }
+  }
+
+  return (
+    <>
+      {entries.map((entry, index) => (
+        <PiEntryView key={entry.id ?? `${entry.type}-${index}`} entry={entry} toolResults={toolResults} openIds={openIds} onToggleOpen={onToggleOpen} />
+      ))}
+    </>
+  );
 }
 
-function updateThinkingActivity(
-  setItems: React.Dispatch<React.SetStateAction<ActivityItem[]>>,
-  setOpenIds: React.Dispatch<React.SetStateAction<Set<string>>>,
-  assistantEvent: any,
-) {
-  setOpenIds((current) => (current.has(THINKING_ACTIVITY_ID) ? current : new Set(current).add(THINKING_ACTIVITY_ID)));
-  setItems((current) => {
-    const existing = current.find((item) => item.id === THINKING_ACTIVITY_ID);
-    const next = current.filter((item) => item.id !== THINKING_ACTIVITY_ID);
-    const accumulated = readableValue(assistantEvent.partial?.thinking);
-    const delta = readableValue(assistantEvent.delta);
-    const detail = accumulated ?? `${existing?.detail ?? ""}${delta ?? ""}`;
-    return [
-      ...next,
-      {
-        id: THINKING_ACTIVITY_ID,
-        label: "正在思考",
-        detail: detail || existing?.detail,
-        status: "running" as const,
-        kind: "thinking" as const,
-      },
-    ].slice(-5);
-  });
+function PiEntryView({
+  entry,
+  toolResults,
+  openIds,
+  onToggleOpen,
+}: {
+  entry: PiEntry;
+  toolResults: Map<string, PiMessage>;
+  openIds: Set<string>;
+  onToggleOpen: (id: string) => void;
+}) {
+  if (entry.type === "message" && entry.message) {
+    if (entry.message.role === "toolResult") return null;
+    return <PiMessageView id={entry.id ?? crypto.randomUUID()} message={entry.message} toolResults={toolResults} openIds={openIds} onToggleOpen={onToggleOpen} />;
+  }
+  if (entry.type === "custom_message" && entry.display) {
+    return <TextMessage role="assistant" text={contentText(entry.content)} />;
+  }
+  if (entry.type === "compaction") {
+    return <ReasoningBlock id={entry.id ?? "compaction"} label="上下文压缩" detail={readableObjectField(entry, "summary")} openIds={openIds} onToggleOpen={onToggleOpen} />;
+  }
+  return null;
 }
 
-function formatToolActivity(event: any, status: ActivityItem["status"]): ActivityItem {
-  const toolName = String(event.toolName ?? "tool");
-  const args = event.args ?? {};
-  const prefix = status === "running" ? runningToolPrefix(toolName, args) : doneToolPrefix(toolName, status);
-  return {
-    id: String(event.toolCallId ?? `${toolName}-${Date.now()}`),
-    label: prefix,
-    detail: formatToolDetail(toolName, args),
-    output: formatToolOutput(event.partialResult ?? event.result),
-    status,
-    kind: "tool",
-  };
+function PiMessageView({
+  id,
+  message,
+  toolResults,
+  openIds,
+  onToggleOpen,
+  live = false,
+}: {
+  id: string;
+  message: PiMessage;
+  toolResults: Map<string, PiMessage>;
+  openIds: Set<string>;
+  onToggleOpen: (id: string) => void;
+  live?: boolean;
+}) {
+  if (message.role === "user") return <TextMessage role="user" text={contentText(message.content)} />;
+  if (message.role === "bashExecution") {
+    return (
+      <ToolBlock
+        id={id}
+        toolName="bash"
+        args={{ command: message.command }}
+        output={message.output}
+        status={message.exitCode ? "error" : "done"}
+        openIds={openIds}
+        onToggleOpen={onToggleOpen}
+      />
+    );
+  }
+  if (message.role === "branchSummary" || message.role === "compactionSummary") {
+    return <ReasoningBlock id={id} label="上下文摘要" detail={message.summary} openIds={openIds} onToggleOpen={onToggleOpen} />;
+  }
+  if (message.role !== "assistant") return null;
+
+  const parts = contentParts(message.content);
+  return (
+    <>
+      {parts.map((part, index) => {
+        const blockId = `${id}-${index}`;
+        if (part.type === "text") return <TextMessage key={blockId} role="assistant" text={readableObjectField(part, "text") ?? ""} />;
+        if (part.type === "thinking") {
+          return (
+            <ReasoningBlock
+              key={blockId}
+              id={blockId}
+              label={live ? "正在思考" : "思考"}
+              detail={readableObjectField(part, "thinking")}
+              running={live}
+              openIds={openIds}
+              onToggleOpen={onToggleOpen}
+            />
+          );
+        }
+        if (part.type === "toolCall") {
+          const toolCallId = readableObjectField(part, "id") || blockId;
+          const toolResult = toolResults.get(toolCallId);
+          return (
+            <ToolBlock
+              key={blockId}
+              id={toolCallId}
+              toolName={readableObjectField(part, "name") || "tool"}
+              args={objectField(part, "arguments")}
+              output={toolResult ? contentText(toolResult.content) : undefined}
+              status={toolResult?.isError ? "error" : live ? "running" : "done"}
+              openIds={openIds}
+              onToggleOpen={onToggleOpen}
+            />
+          );
+        }
+        if (part.type === "image") return <TextMessage key={blockId} role="assistant" text="[image]" />;
+        return null;
+      })}
+    </>
+  );
 }
 
-function runningToolPrefix(toolName: string, args: any): string {
+function LiveToolEventsView({
+  events,
+  openIds,
+  onToggleOpen,
+}: {
+  events: Record<string, ToolExecutionEvent>;
+  openIds: Set<string>;
+  onToggleOpen: (id: string) => void;
+}) {
+  return (
+    <>
+      {Object.values(events).map((event) => (
+        <ToolBlock
+          key={event.toolCallId}
+          id={`live-${event.toolCallId}`}
+          toolName={event.toolName}
+          args={event.args}
+          output={contentText((event.result ?? event.partialResult) as unknown)}
+          status={event.type === "tool_execution_end" ? (event.isError ? "error" : "done") : "running"}
+          openIds={openIds}
+          onToggleOpen={onToggleOpen}
+        />
+      ))}
+    </>
+  );
+}
+
+function TextMessage({ role, text }: { role: "user" | "assistant"; text: string }) {
+  if (!text.trim()) return null;
+  return (
+    <article className={`message ${role}`}>
+      <div className="message-body">{text}</div>
+    </article>
+  );
+}
+
+function ReasoningBlock({
+  id,
+  label,
+  detail,
+  running = false,
+  openIds,
+  onToggleOpen,
+}: {
+  id: string;
+  label: string;
+  detail?: string;
+  running?: boolean;
+  openIds: Set<string>;
+  onToggleOpen: (id: string) => void;
+}) {
+  const isOpen = openIds.has(id);
+  return (
+    <div className={`activity-item ${running ? "running" : "done"} thinking`}>
+      <button className="activity-trigger" onClick={() => onToggleOpen(id)} title={isOpen ? "折叠" : "展开"}>
+        <span className="activity-chevron">{isOpen ? "⌄" : "›"}</span>
+        <span className="activity-label">{running ? <TextShimmer text={label} /> : label}</span>
+        {detail && <span className="activity-summary">{summarizeLine(detail)}</span>}
+      </button>
+      {detail && isOpen && (
+        <div className="activity-detail">
+          <pre>{detail}</pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ToolBlock({
+  id,
+  toolName,
+  args,
+  output,
+  status,
+  openIds,
+  onToggleOpen,
+}: {
+  id: string;
+  toolName: string;
+  args: unknown;
+  output?: string;
+  status: "running" | "done" | "error";
+  openIds: Set<string>;
+  onToggleOpen: (id: string) => void;
+}) {
+  const isOpen = openIds.has(id);
+  const detail = toolDetail(toolName, args);
+  return (
+    <div className={`activity-item ${status} tool`}>
+      <button className="activity-trigger" onClick={() => onToggleOpen(id)} title={isOpen ? "折叠" : "展开"}>
+        <span className="activity-chevron">{isOpen ? "⌄" : "›"}</span>
+        <span className="activity-label">{status === "running" ? <TextShimmer text={runningToolLabel(toolName, args)} /> : doneToolLabel(toolName, status)}</span>
+        {detail && <span className="activity-summary">{summarizeLine(detail)}</span>}
+      </button>
+      {(detail || output) && isOpen && (
+        <div className="activity-detail">
+          {detail && (
+            <div className="activity-section">
+              <div className="activity-section-label">输入</div>
+              <pre>{detail}</pre>
+            </div>
+          )}
+          {output && (
+            <div className="activity-section">
+              <div className="activity-section-label">输出</div>
+              <pre>{output}</pre>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function sameUserMessage(a: PiEntry, b: PiEntry): boolean {
+  return a.type === "message" && b.type === "message" && a.message?.role === "user" && b.message?.role === "user" && contentText(a.message.content) === contentText(b.message.content);
+}
+
+function contentParts(content: unknown): Array<Record<string, unknown> & { type?: string }> {
+  if (!Array.isArray(content)) return [];
+  return content.filter((part): part is Record<string, unknown> & { type?: string } => Boolean(part && typeof part === "object"));
+}
+
+function contentText(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (!part || typeof part !== "object") return "";
+        const typed = part as Record<string, unknown>;
+        if (typed.type === "text") return readableObjectField(typed, "text");
+        if (typed.type === "image") return "[image]";
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (content && typeof content === "object" && Array.isArray((content as { content?: unknown }).content)) {
+    return contentText((content as { content: unknown }).content);
+  }
+  return "";
+}
+
+function runningToolLabel(toolName: string, args: unknown): string {
   if (toolName === "bash") return "正在运行命令";
-  if (isEditTool(toolName)) return `正在编辑${extractPath(args) ? "文件" : ""}`;
-  if (toolName === "write") return `正在写入${extractPath(args) ? "文件" : ""}`;
+  if (isEditTool(toolName)) return `正在编辑${toolPath(args) ? "文件" : ""}`;
+  if (toolName === "write") return `正在写入${toolPath(args) ? "文件" : ""}`;
   if (toolName === "read") return "正在读取文件";
   if (toolName === "grep" || toolName === "find" || toolName === "ls") return "正在检索";
   return `正在执行工具：${toolName}`;
 }
 
-function doneToolPrefix(toolName: string, status: ActivityItem["status"]): string {
+function doneToolLabel(toolName: string, status: "running" | "done" | "error"): string {
   const done = status === "error" ? "执行失败" : "已完成";
   if (toolName === "bash") return status === "error" ? "命令运行失败" : "命令运行完成";
   if (isEditTool(toolName) || toolName === "write") return status === "error" ? "文件编辑失败" : "已编辑文件";
@@ -754,56 +875,44 @@ function doneToolPrefix(toolName: string, status: ActivityItem["status"]): strin
   return `${done}工具：${toolName}`;
 }
 
-function formatToolDetail(toolName: string, args: any): string | undefined {
-  if (toolName === "bash") return readableValue(args.command ?? args.cmd);
-  const path = extractPath(args);
+function toolDetail(toolName: string, args: unknown): string | undefined {
+  if (toolName === "bash") return readableObjectField(args, "command") || readableObjectField(args, "cmd") || stringifyJson(args);
+  const path = toolPath(args);
   if (path) return path;
-  const query = readableValue(args.query ?? args.pattern ?? args.glob);
+  const query = readableObjectField(args, "query") || readableObjectField(args, "pattern") || readableObjectField(args, "glob");
   if (query) return query;
-  const summary = safeJson(args);
-  return summary === "{}" ? undefined : summary;
+  return stringifyJson(args);
 }
 
-function formatToolOutput(result: any): string | undefined {
-  const content = result?.content;
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .map((item) => (item?.type === "text" && typeof item.text === "string" ? item.text : ""))
-    .filter(Boolean)
-    .join("\n");
-  return text.trim() || undefined;
-}
-
-function summarizeActivityDetail(detail: string): string {
-  const first = detail.trim().split("\n").find(Boolean);
-  if (!first) return "";
-  return first.length > 80 ? `${first.slice(0, 80)}...` : first;
-}
-
-function sanitizeAssistantText(text: string): string {
-  return text
-    .replace(/(?:^|\n)\s*TOOLCALL\s*(?=\n|$)/gi, "\n")
-    .replace(/[：:]\s*(?:TOOLCALL|\[tool[-_ ]?call\])\s*$/gi, "")
-    .replace(/\s*\[tool[-_ ]?call\]\s*/gi, "")
-    .trimStart();
+function toolPath(args: unknown): string | undefined {
+  return readableObjectField(args, "path") || readableObjectField(args, "filePath") || readableObjectField(args, "file_path") || readableObjectField(args, "filename") || readableObjectField(args, "target");
 }
 
 function isEditTool(toolName: string): boolean {
   return toolName === "edit" || toolName === "apply_patch" || toolName.toLowerCase().includes("edit");
 }
 
-function extractPath(args: any): string | undefined {
-  return readableValue(args.path ?? args.filePath ?? args.file_path ?? args.filename ?? args.target);
+function objectField(value: unknown, field: string): unknown {
+  if (!value || typeof value !== "object") return undefined;
+  return (value as Record<string, unknown>)[field];
 }
 
-function readableValue(value: unknown): string | undefined {
-  if (typeof value === "string" && value.trim()) return value;
-  return undefined;
+function readableObjectField(value: unknown, field: string): string | undefined {
+  const fieldValue = objectField(value, field);
+  return typeof fieldValue === "string" && fieldValue.trim() ? fieldValue : undefined;
 }
 
-function safeJson(value: unknown): string {
+function summarizeLine(text: string): string {
+  const first = text.trim().split("\n").find(Boolean);
+  if (!first) return "";
+  return first.length > 80 ? `${first.slice(0, 80)}...` : first;
+}
+
+function stringifyJson(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
   try {
-    return JSON.stringify(value);
+    const text = JSON.stringify(value, null, 2);
+    return text === "{}" ? undefined : text;
   } catch {
     return String(value);
   }

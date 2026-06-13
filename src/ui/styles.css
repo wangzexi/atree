@@ -401,6 +401,9 @@ textarea {
   color: #657682;
   font-size: 13px;
   line-height: 1.45;
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 8px;
   max-width: min(760px, 88%);
   padding: 2px 0;
   width: 100%;

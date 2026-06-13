@@ -11,7 +11,6 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { ImageContent } from "@mariozechner/pi-ai";
 import { attachmentsDir, sessionFilePath, sessionsDir } from "./atree";
-import type { DisplayMessage } from "./types";
 
 interface SessionHandle {
   session: AgentSession;
@@ -101,32 +100,11 @@ export function initializeSessionFile(dir: string, sessionId: string, title?: st
   );
 }
 
-export function readDisplayMessages(dir: string, sessionId: string): DisplayMessage[] {
+export function readSessionEntries(dir: string, sessionId: string): unknown[] {
   const file = sessionFilePath(dir, sessionId);
   if (!existsSync(file)) return [];
   const manager = SessionManager.open(file, sessionsDir(dir), dir);
-  return manager
-    .getEntries()
-    .filter((entry) => entry.type === "message" || entry.type === "custom_message")
-    .flatMap((entry) => {
-      if (entry.type === "custom_message") {
-        return [{
-          id: entry.id,
-          role: "system",
-          text: sanitizeMessageText(typeof entry.content === "string" ? entry.content : contentToText(entry.content)),
-          timestamp: Date.parse(entry.timestamp),
-        }];
-      }
-      const message = entry.message;
-      if (message.role === "toolResult") return [];
-      return [{
-        id: entry.id,
-        role: message.role,
-        text: sanitizeMessageText("content" in message ? contentToText(message.content) : contentToText(message)),
-        timestamp: typeof message.timestamp === "number" ? message.timestamp : Date.parse(entry.timestamp),
-      }];
-    })
-    .filter((message) => message.text.trim());
+  return manager.getEntries();
 }
 
 export async function saveAttachment(dir: string, sessionId: string, file: File): Promise<string> {
@@ -223,35 +201,6 @@ function sessionHasAssistant(file: string): boolean {
         return false;
       }
     });
-}
-
-function contentToText(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((part) => {
-      if (!part || typeof part !== "object") return "";
-      const typed = part as { type?: string; text?: string; path?: string };
-      if (typed.type === "text") return typed.text ?? "";
-      if (typed.type === "thinking") return "";
-      if (isToolCallPartType(typed.type)) return "";
-      if (typed.path) return `[attachment: ${typed.path}]`;
-      return "";
-    })
-    .filter(Boolean)
-    .join("\n");
-}
-
-function sanitizeMessageText(text: string): string {
-  return text
-    .replace(/(?:^|\n)\s*TOOLCALL\s*(?=\n|$)/gi, "\n")
-    .replace(/[：:]\s*(?:TOOLCALL|\[tool[-_ ]?call\])\s*$/gi, "")
-    .replace(/\s*\[tool[-_ ]?call\]\s*/gi, "")
-    .trim();
-}
-
-function isToolCallPartType(type: string | undefined): boolean {
-  return type ? type.replace(/[-_ ]/g, "").toLowerCase() === "toolcall" : false;
 }
 
 function mimeFromPath(path: string): string {
