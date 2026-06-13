@@ -1466,20 +1466,19 @@ export default function Layout(props: ParentProps) {
     const conn = server.current
     if (!conn) return
     function resolve(result: string | string[] | null) {
-      if (Array.isArray(result)) {
-        for (const directory of result) {
-          void openProject(directory, false)
+      const directory = Array.isArray(result) ? result[0] : result
+      if (directory) {
+        for (const project of layout.projects.list()) {
+          if (pathKey(project.worktree) !== pathKey(directory)) layout.projects.close(project.worktree)
         }
-        void navigateToProject(result[0])
-      } else if (result) {
-        void openProject(result)
+        void openProject(directory)
       }
     }
 
     pickDirectory({
       server: conn,
       title: language.t("command.project.open"),
-      multiple: true,
+      multiple: false,
       onSelect: resolve,
     })
   }
@@ -2453,6 +2452,15 @@ export default function Layout(props: ParentProps) {
       </aside>
     )
   }
+
+  createEffect(() => {
+    if (!newDesign()) return
+    const [root, ...extraProjects] = layout.projects.list()
+    if (!root) return
+    for (const project of extraProjects) {
+      layout.projects.close(project.worktree)
+    }
+  })
 
   return (
     <Show

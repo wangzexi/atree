@@ -130,6 +130,9 @@ function HomeDesign() {
   const language = useLanguage()
 
   function openProject(directory: string, shouldNavigate = true) {
+    for (const project of layout.projects.list()) {
+      if (pathKey(project.worktree) !== pathKey(directory)) layout.projects.close(project.worktree)
+    }
     layout.projects.open(directory)
     if (shouldNavigate) navigate(`/${base64Encode(directory)}/session`)
   }
@@ -139,18 +142,14 @@ function HomeDesign() {
     if (!currentServer) return
 
     function resolve(result: string | string[] | null) {
-      if (Array.isArray(result)) {
-        for (const directory of result) openProject(directory, false)
-        if (result[0]) openProject(result[0])
-      } else if (result) {
-        openProject(result)
-      }
+      const directory = Array.isArray(result) ? result[0] : result
+      if (directory) openProject(directory)
     }
 
     pickDirectory({
       server: currentServer,
       title: language.t("command.project.open"),
-      multiple: true,
+      multiple: false,
       onSelect: resolve,
     })
   }
