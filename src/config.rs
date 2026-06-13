@@ -169,6 +169,10 @@ pub(crate) fn save_config_to_db(db_path: &Path, config: &ServiceConfig) -> Resul
 }
 
 pub(crate) fn normalize_config(mut config: ServiceConfig) -> Result<ServiceConfig> {
+    if config.bucket == "atree" {
+        config.bucket = "abucket".to_string();
+    }
+
     for mount in &mut config.mounts {
         if mount.mount_type == "system_config" {
             mount.root_path = None;
