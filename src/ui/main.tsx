@@ -115,12 +115,27 @@ function App() {
     setError(undefined);
     setIsSending(true);
     const text = draft;
+    const optimisticMessage: DisplayMessage = {
+      id: `optimistic-${crypto.randomUUID()}`,
+      role: "user",
+      text,
+      timestamp: Date.now(),
+    };
+    setMessages((current) => [...current, optimisticMessage]);
     setDraft("");
-    await fetch(`/api/nodes/${selection.node.id}/sessions/${selection.session.id}/messages`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
+    try {
+      const response = await fetch(`/api/nodes/${selection.node.id}/sessions/${selection.session.id}/messages`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+      if (!response.ok) throw new Error(`Send failed: ${response.status}`);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+      setMessages((current) => current.filter((message) => message.id !== optimisticMessage.id));
+      setDraft(text);
+      setIsSending(false);
+    }
   }
 
   function updateDraft(value: string) {
