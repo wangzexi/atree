@@ -2458,11 +2458,11 @@ export default function Layout(props: ParentProps) {
     <Show
       when={!newDesign()}
       fallback={
-        <div class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex flex-col select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
+        <div class="relative bg-v2-background-bg-deep flex-1 min-h-0 min-w-0 flex select-none [&_input]:select-text [&_textarea]:select-text [&_[contenteditable]]:select-text">
           {autoselecting() ?? ""}
-          <Titlebar update={titlebarUpdate} />
-          <div class="flex-1 min-h-0 min-w-0 flex">
-            <AtreeSidebar />
+          <AtreeSidebar />
+          <div class="flex-1 min-h-0 min-w-0 flex flex-col">
+            <Titlebar update={titlebarUpdate} />
             <main class="flex-1 min-h-0 min-w-0 overflow-x-hidden flex flex-col items-start contain-strict">
               <Show when={!autoselecting.loading} fallback={<div class="size-full" />}>
                 {props.children}
