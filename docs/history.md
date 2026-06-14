@@ -36,3 +36,14 @@
 - `main-legacy-before-atree-mainline`（由旧主分支 `main` 重命名并保留）
 
 当主线需求需要回滚或对照时，优先从上述分支读取历史实现。
+
+## 主分支交接说明（当前会话后执行）
+
+- 本地开发分支当前仍为 `main`，可直接作为默认主分支使用。
+- 历史主线内容已固化到上述 `legacy-*` / `main-*` 备份分支，不再在 `main` 继续叠加。
+- 相关历史设计与需求沉淀全部集中放在：
+  - `docs/design.md`
+  - `docs/mvp.md`
+  - `docs/acceptance/atree-mvp-bdd.md`
+  - `docs/future.md`
+  - `docs/history.md`
