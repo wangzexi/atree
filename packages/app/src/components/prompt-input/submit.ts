@@ -282,6 +282,35 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     }
   }
 
+  const currentOpenSessionIDs = (dir: string) => {
+    const activeDir = pathKey(dir)
+    const openSessionIDs = new Set<string>()
+    for (const tab of tabs.store) {
+      if (tab.type !== "session") continue
+      if (tab.server !== server.key) continue
+      if (pathKey(atob(tab.dirBase64)) !== activeDir) continue
+      openSessionIDs.add(tab.sessionId)
+    }
+    return openSessionIDs
+  }
+
+  const openNewSessionTab = (session: Session, sessionDirectory: string) => {
+    const tab = {
+      server: server.key,
+      dirBase64: base64Encode(sessionDirectory),
+      sessionId: session.id,
+    } as const
+
+    const draftID = search.draftId
+    if (draftID) {
+      tabs.promoteDraft(draftID, tab)
+      return
+    }
+
+    tabs.addSessionTab(tab)
+    navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
+  }
+
   const seed = (dir: string, info: Session) => {
     const [, setStore] = serverSync.child(dir)
     setStore("session", (list: Session[]) => {
@@ -384,14 +413,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
       if (created) {
         const [directoryStore] = serverSync.child(sessionDirectory)
-        const openSessionIDs = new Set(
-          (tabs.store ?? []).flatMap((tab) => {
-            if (tab.type !== "session") return []
-            if (tab.server !== server.key) return []
-            if (pathKey(atob(tab.dirBase64)) !== pathKey(sessionDirectory)) return []
-            return [tab.sessionId]
-          }),
-        )
+        const openSessionIDs = currentOpenSessionIDs(sessionDirectory)
         const usedOpenEmojis = directoryStore.session
           .filter((item) => openSessionIDs.has(item.id))
           .map((item) => sessionEmoji(item))
@@ -409,21 +431,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
         if (shouldAutoAccept) permission.enableAutoAccept(session.id, sessionDirectory)
         local.session.promote(sessionDirectory, session.id)
         layout.handoff.setTabs(base64Encode(sessionDirectory), session.id)
-        const draftID = search.draftId
-        if (draftID)
-          tabs.promoteDraft(draftID, {
-            server: server.key,
-            dirBase64: base64Encode(sessionDirectory),
-            sessionId: session.id,
-          })
-        else {
-          tabs.addSessionTab({
-            server: server.key,
-            dirBase64: base64Encode(sessionDirectory),
-            sessionId: session.id,
-          })
-          navigate(`/${base64Encode(sessionDirectory)}/session/${session.id}`)
-        }
+        openNewSessionTab(sessionWithEmoji, sessionDirectory)
       }
     }
     if (!session) {

@@ -112,6 +112,7 @@ beforeAll(async () => {
 
   mock.module("@/context/tabs", () => ({
     useTabs: () => ({
+      store: [],
       promoteDraft: () => undefined,
       addSessionTab: () => undefined,
     }),
