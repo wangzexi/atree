@@ -33,6 +33,7 @@
 - `legacy-main-before-atree-ng-mainline`（本次主干升级时将旧主分支另存）
 - `legacy-main-before-atree-ng-mainline-switch`（当前会话执行主干接管时的旧主线保底分支）
 - `legacy-main-before-atree-mainline-final`（本次会话最后一次确认后将旧主分支归档）
+- `main-before-atree-ng-promote-save`（本次晋级前保留的主分支快照，便于回滚与对照）
 - `main-previous-backup`（当前主线提升前的旧主分支备份）
 - `main-legacy-backup`（本次主分支晋级时的旧主分支快照）
 - `main-before-2026-06-14-legacy`（本次分支晋级同步到远端的历史主线镜像）
