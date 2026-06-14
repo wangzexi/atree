@@ -25,6 +25,7 @@
 
 本分支已定为 atree-ng 主线分支（`main`）。历史主分支快照已保留为：
 
+- `legacy-main-archive-root`（本会话新增：当前主线改造前的原始主干备份，后续回滚/对照使用）
 - `legacy-main-main-snapshot`
 - `legacy-main-before-atree-ng`
 - `legacy-main-origin-atree-ng`
