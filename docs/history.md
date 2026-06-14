@@ -35,6 +35,7 @@
 - `legacy-main-before-atree-mainline-final`（本次会话最后一次确认后将旧主分支归档）
 - `legacy-main-before-atree-ng-mainline-finalized`（本会话从旧 `origin/main` 再次提取的最终归档快照）
 - `main-before-atree-ng-promote-save`（本次晋级前保留的主分支快照，便于回滚与对照）
+- `main-legacy-before-atree-ng-main`（本会话新增：把本次主分支接管前的旧主分支内容单独归档到独立分支）
 - `main-previous-backup`（当前主线提升前的旧主分支备份）
 - `main-legacy-backup`（本次主分支晋级时的旧主分支快照）
 - `main-before-2026-06-14-legacy`（本次分支晋级同步到远端的历史主线镜像）
