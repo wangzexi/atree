@@ -18,6 +18,7 @@ import {
   homeProjectDirectories,
   homeSessionServerStatus,
   latestRootSession,
+  sessionHasSchedule,
   sortedRootSessions,
   toggleHomeProjectSelection,
 } from "./helpers"
@@ -30,6 +31,7 @@ import {
   type SessionScheduleApiItem,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
+
 
 const serverKey = ServerConnection.Key.make
 
@@ -220,6 +222,42 @@ describe("layout workspace helpers", () => {
     )
 
     expect(result.map((item) => item.id)).toEqual(["auto-sooner", "auto-later", "manual-new", "manual-old"])
+  })
+
+  test("sessionHasSchedule depends on runtime schedule index", () => {
+    const sessionData = session({
+      id: "manual",
+      directory: "/workspace",
+      time: { created: 1, updated: 1, archived: undefined },
+    })
+
+    expect(sessionHasSchedule(sessionData, {})).toBe(false)
+  })
+
+  test("sessionHasSchedule reads schedules when available", () => {
+    const sessionData = session({
+      id: "manual",
+      directory: "/workspace",
+      time: { created: 1, updated: 1, archived: undefined },
+    })
+
+    expect(
+      sessionHasSchedule(sessionData, {
+        manual: [
+          {
+            id: "s1",
+            kind: "once",
+            expression: "0 9 * * *",
+            runAt: null,
+            nextRun: 300_000,
+            nextRunAt: 300_000,
+            message: "ok",
+            lastRanAt: null,
+            lastRunStatus: null,
+          } as SessionScheduleSummary,
+        ],
+      }),
+    ).toBe(true)
   })
 
   test("parses scheduled run times from number or ISO string", () => {

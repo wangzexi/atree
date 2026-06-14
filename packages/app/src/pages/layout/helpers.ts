@@ -15,8 +15,7 @@ type SessionStore = {
 export type SessionScheduleIndex = Record<string, readonly SessionScheduleSummary[] | undefined>
 
 function scheduleEntry(session: Pick<Session, "id">, schedules?: SessionScheduleIndex) {
-  if (!schedules) return
-  if (!Object.prototype.hasOwnProperty.call(schedules, session.id)) return
+  if (!schedules || !Object.prototype.hasOwnProperty.call(schedules, session.id)) return
   return schedules[session.id] ?? []
 }
 
@@ -33,7 +32,7 @@ export function sessionNextScheduleRun(session: Pick<Session, "id">, schedules?:
 }
 
 function sortSessions(now: number, schedules?: SessionScheduleIndex) {
-  const oneMinuteAgo = now - 60 * 1000
+  const nowTimestamp = now
   return (a: Session, b: Session) => {
     const aScheduled = sessionHasSchedule(a, schedules)
     const bScheduled = sessionHasSchedule(b, schedules)
@@ -43,14 +42,10 @@ function sortSessions(now: number, schedules?: SessionScheduleIndex) {
       const bNext = sessionNextScheduleRun(b, schedules) ?? Number.MAX_SAFE_INTEGER
       if (aNext !== bNext) return aNext - bNext
     }
-    const aUpdated = a.time.updated ?? a.time.created
-    const bUpdated = b.time.updated ?? b.time.created
-    const aRecent = aUpdated > oneMinuteAgo
-    const bRecent = bUpdated > oneMinuteAgo
-    if (aRecent && bRecent) return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
-    if (aRecent && !bRecent) return -1
-    if (!aRecent && bRecent) return 1
-    return bUpdated - aUpdated
+    const aUpdated = a.time.updated ?? a.time.created ?? nowTimestamp
+    const bUpdated = b.time.updated ?? b.time.created ?? nowTimestamp
+    if (aUpdated !== bUpdated) return bUpdated - aUpdated
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
   }
 }
 
@@ -133,10 +128,7 @@ export function sessionEmoji(session: Pick<Session, "metadata">) {
 
 export function sessionHasSchedule(session: Pick<Session, "id" | "metadata">, schedules?: SessionScheduleIndex) {
   const items = scheduleEntry(session, schedules)
-  if (items) return items.length > 0
-  const atree = atreeMetadata(session)
-  if (!atree) return false
-  return Boolean(atree.schedule || atree.cron || atree.scheduled)
+  return !!items?.length
 }
 
 export function hasProjectPermissions<T>(
