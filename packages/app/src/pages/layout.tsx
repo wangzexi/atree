@@ -2451,10 +2451,10 @@ export default function Layout(props: ParentProps) {
     const scheduleIndex = createMemo(() =>
       Object.fromEntries(Object.entries(tree.schedule).map(([sessionID, state]) => [sessionID, state.schedules ?? []])),
     )
-    const directorySessions = (directory: string) =>
+    const directorySessions = (directory: string, now = sortNow()) =>
       sortedRootSessions(
         { session: directoryState(directory)?.sessions ?? [], path: { directory } },
-        sortNow(),
+        now,
         scheduleIndex(),
       )
     const isSessionNode = (directory: string) => directorySessions(directory).length > 0
@@ -2463,10 +2463,9 @@ export default function Layout(props: ParentProps) {
         .filter((session) => sessionHasSchedule(session, scheduleIndex()))
         .slice(0, 4)
     const hasScheduledSessions = (directory: string) => scheduledSessions(directory).length > 0
+    const firstScheduledSession = (directory: string) => scheduledSessions(directory)[0]
     const firstScheduleRun = (directory: string) =>
-      scheduledSessions(directory)
-        .map((session) => sessionNextScheduleRun(session, scheduleIndex()) ?? Number.MAX_SAFE_INTEGER)
-        .sort((a, b) => a - b)[0]
+      sessionNextScheduleRun(firstScheduledSession(directory), scheduleIndex()) ?? Number.MAX_SAFE_INTEGER
     const isVisiblePath = (directory: string): boolean => {
       if (isSessionNode(directory)) return true
       const state = directoryState(directory)
@@ -2621,12 +2620,6 @@ export default function Layout(props: ParentProps) {
       })
     }
     let openDirectoryRun = 0
-    const rootSessionsForDirectory = (directory: string) =>
-      sortedRootSessions(
-        { session: directoryState(directory)?.sessions ?? [], path: { directory } },
-        Date.now(),
-        scheduleIndex(),
-      )
     const sessionListKey = (sessions: Session[]) =>
       sessions.map((session) => `${session.directory}\n${session.id}`).join("\n\n")
     const navigateDirectorySession = (
@@ -2654,7 +2647,7 @@ export default function Layout(props: ParentProps) {
         focusSessionPrompt()
         return
       }
-      sessionTabs.replaceDirectorySessions(server.key, directory, rootSessionsForDirectory(directory))
+      sessionTabs.replaceDirectorySessions(server.key, directory, directorySessions(directory))
       sessionTabs.newDraft({
         server: server.key,
         directory,
@@ -2672,7 +2665,7 @@ export default function Layout(props: ParentProps) {
         })
       }
 
-      const cachedSessions = rootSessionsForDirectory(directory)
+      const cachedSessions = directorySessions(directory)
       const cachedKey = sessionListKey(cachedSessions)
       let switchedWithCache = false
       if (directoryState(directory)?.loaded) {
@@ -2682,7 +2675,7 @@ export default function Layout(props: ParentProps) {
 
       await loadDirectory(root, directory, { force: true, probeChildren: true })
       if (run !== openDirectoryRun) return
-      const sessions = rootSessionsForDirectory(directory)
+      const sessions = directorySessions(directory, Date.now())
       if (switchedWithCache && cachedKey === sessionListKey(sessions)) return
       switchToSessions(sessions)
     }
@@ -2695,7 +2688,7 @@ export default function Layout(props: ParentProps) {
     }
 
     const stopScheduleEvents = serverSDK.event.listen((event) => {
-      const sessionID = extractSessionScheduleEventSessionID(event.details)
+      const sessionID = extractSessionScheduleEventSessionID(event)
       if (!sessionID) return
       const session = knownSession(sessionID)
       if (!session) return
@@ -2707,7 +2700,7 @@ export default function Layout(props: ParentProps) {
       const directory = activeDirectory()
       if (!directory) return
       if (!directoryState(directory)?.loaded) return
-      const sessions = rootSessionsForDirectory(directory)
+      const sessions = directorySessions(directory, Date.now())
       const sessionIDs = sessions.map((session) => session.id).join("\n")
       const tabIDs = sessionTabs.store
         .flatMap((tab) => {
