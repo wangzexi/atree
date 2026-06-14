@@ -2688,7 +2688,7 @@ export default function Layout(props: ParentProps) {
     }
 
     const stopScheduleEvents = serverSDK.event.listen((event) => {
-      const sessionID = extractSessionScheduleEventSessionID(event)
+      const sessionID = extractSessionScheduleEventSessionID(event.details)
       if (!sessionID) return
       const session = knownSession(sessionID)
       if (!session) return

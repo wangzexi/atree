@@ -47,14 +47,10 @@ export function isSessionScheduleEvent(event: unknown): event is { type: Session
 }
 
 export function extractSessionScheduleEventSessionID(event: unknown) {
-  const eventPayload =
-    typeof event === "object" && event !== null && "details" in event
-      ? (event as { details?: unknown }).details
-      : event
-  if (!isSessionScheduleEvent(eventPayload)) return
+  if (!isSessionScheduleEvent(event)) return
 
-  const details = eventPayload
-  const properties = typeof details === "object" && details && "properties" in details ? details.properties : undefined
+  const details = event as SessionScheduleEvent
+  const properties = details.properties
   const sessionID = properties && typeof properties === "object" ? properties.sessionID : undefined
   return typeof sessionID === "string" ? sessionID : undefined
 }

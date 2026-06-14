@@ -53,7 +53,7 @@ export function SessionScheduleDock(props: {
   const queryKey = createMemo(() => ["session", "schedule", server.current?.http.url, props.sessionID])
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKey() })
   const stopScheduleEvents = serverSDK.event.listen((event) => {
-    if (extractSessionScheduleEventSessionID(event) !== props.sessionID) return
+    if (extractSessionScheduleEventSessionID(event.details) !== props.sessionID) return
     void refresh()
   })
   onCleanup(stopScheduleEvents)

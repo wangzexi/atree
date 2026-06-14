@@ -25,21 +25,17 @@ test("extracts session id from raw schedule events", () => {
   ).toBe("sess-1")
   expect(
     extractSessionScheduleEventSessionID({
-      details: {
-        type: "schedule.ran",
-        properties: { sessionID: "sess-2" },
-      },
+      type: "schedule.ran",
+      properties: { sessionID: "sess-2" },
     }),
   ).toBe("sess-2")
   expect(
     extractSessionScheduleEventSessionID({
-      details: {
-        type: "message.created",
-        properties: { sessionID: "sess-3" },
-      },
+      type: "message.created",
+      properties: { sessionID: "sess-3" },
     }),
   ).toBeUndefined()
-  expect(extractSessionScheduleEventSessionID({ details: { type: "schedule.created" } })).toBeUndefined()
+  expect(extractSessionScheduleEventSessionID({ type: "schedule.created" })).toBeUndefined()
 })
 
 describe("session schedule summary normalization", () => {
