@@ -45,6 +45,7 @@
 - `legacy-main-archive-2026-06-14`（当前会话执行前的最后一次旧主线归档点，便于回退）
 - `legacy-main-pre-atree-ng-main`（新主线接管前的主分支镜像，作为最小历史对照）
 - `legacy-main-2026-06-14-pre-atree-ng-main`（本会话开始时的主干镜像，避免主干切换时历史丢失）
+- `main-legacy-before-atree-ng-mainline-finalized`（当前主干接管时的当前主干镜像备份）
 
 当主线需求需要回滚或对照时，优先从上述分支读取历史实现。
 
