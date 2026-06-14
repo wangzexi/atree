@@ -31,3 +31,13 @@ The service hosts both the Web app and API on the same port.
 This branch starts from upstream OpenCode and removes unrelated official distribution surfaces.
 The first atree work should focus on replacing OpenCode's outer project/session navigation with
 the atree directory tree while keeping the chat runtime intact.
+
+## Documents
+
+Start from:
+
+- `docs/design.md` (core design)
+- `docs/mvp.md` (MVP task list)
+- `docs/future.md` (future ideas)
+- `docs/history.md` (document index and branch checkpoints)
+- `docs/acceptance/atree-mvp-bdd.md` (BDD acceptance list)
