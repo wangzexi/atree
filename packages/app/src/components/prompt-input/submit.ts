@@ -364,7 +364,6 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           directory: sessionDirectory,
           throwOnError: true,
         })
-        serverSync.child(sessionDirectory)
       }
 
       input.onNewSessionWorktreeReset?.()
@@ -397,14 +396,13 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           .filter((item) => openSessionIDs.has(item.id))
           .map((item) => sessionEmoji(item))
         const emoji = randomSessionEmoji(usedOpenEmojis)
-        const sessionWithEmoji = (client.session.update ? await client.session
+        const sessionWithEmoji = await client.session
           .update({
             sessionID: created.id,
             metadata: nextSessionMetadata(created, emoji),
           })
           .then((x) => x.data ?? created)
           .catch(() => created)
-        : created)
 
         seed(sessionDirectory, sessionWithEmoji)
         session = sessionWithEmoji
@@ -419,7 +417,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             sessionId: session.id,
           })
         else {
-          tabs.addSessionTab?.({
+          tabs.addSessionTab({
             server: server.key,
             dirBase64: base64Encode(sessionDirectory),
             sessionId: session.id,

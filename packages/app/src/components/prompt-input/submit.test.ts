@@ -29,21 +29,22 @@ const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 
 const clientFor = (directory: string) => {
   createdClients.push(directory)
-  return {
-    session: {
-      create: async () => {
-        createdSessions.push(directory)
-        return {
-          data: {
-            id: `session-${createdSessions.length}`,
-            title: `New session ${createdSessions.length}`,
-          },
-        }
-      },
-      shell: async () => {
-        sentShell.push(directory)
-        return { data: undefined }
-      },
+    return {
+      session: {
+        create: async () => {
+          createdSessions.push(directory)
+          return {
+            data: {
+              id: `session-${createdSessions.length}`,
+              title: `New session ${createdSessions.length}`,
+            },
+          }
+        },
+        update: async () => ({ data: undefined }),
+        shell: async () => {
+          sentShell.push(directory)
+          return { data: undefined }
+        },
       prompt: async () => ({ data: undefined }),
       promptAsync: async () => ({ data: undefined }),
       command: async () => ({ data: undefined }),
@@ -112,6 +113,7 @@ beforeAll(async () => {
   mock.module("@/context/tabs", () => ({
     useTabs: () => ({
       promoteDraft: () => undefined,
+      addSessionTab: () => undefined,
     }),
   }))
 
