@@ -120,13 +120,13 @@ export function SessionScheduleDock(props: {
                 自动化消息 · {next()} · {preview()}
               </span>
             </div>
-            <Tooltip value="取消定时消息" placement="top" openDelay={0}>
+            <Tooltip value="删除定时器" placement="top" openDelay={0}>
               <IconButton
-                icon="close"
+                icon="trash-2"
                 size="small"
                 variant="ghost"
                 disabled={removeSchedule.isPending}
-                aria-label="取消定时消息"
+                aria-label="删除定时器"
                 class="size-4 shrink-0 opacity-60 hover:opacity-100 [&_[data-slot=icon-svg]]:size-3"
                 onMouseDown={(event) => {
                   event.preventDefault()

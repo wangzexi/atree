@@ -1,4 +1,4 @@
-# atree-ng MVP 功能任务书
+# atree MVP 功能任务书
 
 ## 目标
 
@@ -73,7 +73,7 @@ http://127.0.0.1:5173/
 MVP 可以先通过配置或启动参数指定：
 
 ```bash
-atree-ng --root /Users/zexi/workspace
+atree --root /Users/zexi/workspace
 ```
 
 后续再做 UI 选择。
@@ -201,7 +201,7 @@ JSONL 中只保存相对路径引用。
 说明：
 
 - Pi Coding Agent 当前会话格式支持把图片作为 base64 `ImageContent` 嵌入 JSONL。
-- atree-ng MVP 选择把图片作为文件保存，并在 JSONL 中引用相对路径。
+- atree MVP 选择把图片作为文件保存，并在 JSONL 中引用相对路径。
 - 这样更符合 atree 的目录长期管理模型，也避免会话 JSONL 因多媒体变得过大。
 
 ### 8. 会话 icon 展示
@@ -323,7 +323,7 @@ MVP 优先选择实现简单、适合单用户本地服务的方案。
 - TypeScript SDK 入口是 `createAgentSession()`。
 - `AgentSession.subscribe()` 提供事件订阅。
 - `prompt()` 支持图片输入。
-- Pi 当前图片通常作为 base64 `ImageContent` 进入会话，atree-ng MVP 会改成附件文件引用。
+- Pi 当前图片通常作为 base64 `ImageContent` 进入会话，atree MVP 会改成附件文件引用。
 
 重点阅读：
 
@@ -343,7 +343,7 @@ MVP 优先选择实现简单、适合单用户本地服务的方案。
 可参考：
 
 - ChatPanel / AgentInterface 的消息流、工具展示和附件交互。
-- 不建议照搬 IndexedDB 存储，因为 atree-ng 的状态应落在目录 `.agents/` 下。
+- 不建议照搬 IndexedDB 存储，因为 atree 的状态应落在目录 `.agents/` 下。
 
 ### pi-mono mom
 

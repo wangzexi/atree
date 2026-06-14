@@ -1,4 +1,4 @@
-# atree-ng 未来想法池
+# atree 未来想法池
 
 本文档记录尚未 trade-off 的想法。
 
@@ -306,7 +306,7 @@ MVP 可以先做简单串行执行，不做复杂恢复。
 
 ## 16. 文档和自解释
 
-希望 atree-ng 像 Pi Coding Agent 一样有很好的自解释文档。
+希望 atree 像 Pi Coding Agent 一样有很好的自解释文档。
 
 未来需要：
 
