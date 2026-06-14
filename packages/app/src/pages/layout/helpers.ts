@@ -32,18 +32,19 @@ export function sessionNextScheduleRun(session: Pick<Session, "id">, schedules?:
 }
 
 function sortSessions(now: number, schedules?: SessionScheduleIndex) {
-  const nowTimestamp = now
+  const maxDate = Number.MAX_SAFE_INTEGER
+  const latestActivity = (session: Session) => session.time.updated ?? session.time.created ?? now
   return (a: Session, b: Session) => {
     const aScheduled = sessionHasSchedule(a, schedules)
     const bScheduled = sessionHasSchedule(b, schedules)
     if (aScheduled !== bScheduled) return aScheduled ? -1 : 1
     if (aScheduled && bScheduled) {
-      const aNext = sessionNextScheduleRun(a, schedules) ?? Number.MAX_SAFE_INTEGER
-      const bNext = sessionNextScheduleRun(b, schedules) ?? Number.MAX_SAFE_INTEGER
+      const aNext = sessionNextScheduleRun(a, schedules) ?? maxDate
+      const bNext = sessionNextScheduleRun(b, schedules) ?? maxDate
       if (aNext !== bNext) return aNext - bNext
     }
-    const aUpdated = a.time.updated ?? a.time.created ?? nowTimestamp
-    const bUpdated = b.time.updated ?? b.time.created ?? nowTimestamp
+    const aUpdated = latestActivity(a)
+    const bUpdated = latestActivity(b)
     if (aUpdated !== bUpdated) return bUpdated - aUpdated
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
   }
