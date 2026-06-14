@@ -27,5 +27,6 @@
 - `legacy-main-origin-atree-ng`
 - `legacy-main-atree-ng`
 - `legacy-main-before-opencode-spike`
+- `main-previous-backup`（当前主线提升前的旧主分支备份）
 
 当主线需求需要回滚或对照时，优先从上述分支读取历史实现。
