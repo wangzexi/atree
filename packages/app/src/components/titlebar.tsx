@@ -273,12 +273,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const [archiveConfirmKey, setArchiveConfirmKey] = createSignal<string>()
             let archiveConfirmTimer: ReturnType<typeof setTimeout> | undefined
             const refreshArchivedSessions = () => setArchiveVersion((value) => value + 1)
-            const listSchedules = async (conn: ServerConnection.Any, sessionID: string) => {
-              return listSessionSchedules(conn, sessionID)
-            }
-            const deleteSchedules = async (conn: ServerConnection.Any, sessionID: string, schedules: Array<{ id: string }>) => {
-              await deleteSessionSchedules(conn, sessionID, schedules)
-            }
             const requireArchiveConfirm = (key: string) => {
               setArchiveConfirmKey(key)
               if (archiveConfirmTimer) clearTimeout(archiveConfirmTimer)
@@ -315,13 +309,13 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               const serverCtx = global.createServerCtx(conn)
               const key = tabKey(tab)
               void (async () => {
-                const schedules = await listSchedules(conn, tab.sessionId).catch(() => [] as Array<{ id: string }>)
+                const schedules = await listSessionSchedules(conn, tab.sessionId).catch(() => [] as Array<{ id: string }>)
                 if (schedules.length > 0 && archiveConfirmKey() !== key) {
                   requireArchiveConfirm(key)
                   return
                 }
                 setArchiveConfirmKey(undefined)
-                await deleteSchedules(conn, tab.sessionId, schedules)
+                await deleteSessionSchedules(conn, tab.sessionId, schedules)
                 await serverCtx.sdk.client.session.update({
                   directory,
                   sessionID: tab.sessionId,
