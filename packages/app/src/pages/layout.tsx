@@ -86,7 +86,7 @@ import {
 import {
   archiveSessionWithSchedules,
   asScheduleTime,
-  isSessionScheduleEvent,
+  extractSessionScheduleEventSessionID,
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
@@ -2695,10 +2695,8 @@ export default function Layout(props: ParentProps) {
     }
 
     const stopScheduleEvents = serverSDK.event.listen((event) => {
-      const details = event.details as { type?: string; properties?: Record<string, unknown> }
-      if (!isSessionScheduleEvent(details)) return
-      const sessionID = details.properties?.sessionID
-      if (typeof sessionID !== "string") return
+      const sessionID = extractSessionScheduleEventSessionID(event.details)
+      if (!sessionID) return
       const session = knownSession(sessionID)
       if (!session) return
       void fetchSessionSchedules(session)

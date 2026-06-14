@@ -46,6 +46,19 @@ export function isSessionScheduleEvent(event: unknown): event is { type: Session
   return SESSION_SCHEDULE_EVENTS.includes(typed.type as SessionScheduleEventType)
 }
 
+export function extractSessionScheduleEventSessionID(event: unknown) {
+  const eventPayload =
+    typeof event === "object" && event !== null && "details" in event
+      ? (event as { details?: unknown }).details
+      : event
+  if (!isSessionScheduleEvent(eventPayload)) return
+
+  const details = eventPayload
+  const properties = typeof details === "object" && details && "properties" in details ? details.properties : undefined
+  const sessionID = properties && typeof properties === "object" ? properties.sessionID : undefined
+  return typeof sessionID === "string" ? sessionID : undefined
+}
+
 export function sessionScheduleRequestHeaders(current?: ServerConnection.Any | null) {
   const headers = new Headers()
   if (current?.http.password) {

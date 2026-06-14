@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  extractSessionScheduleEventSessionID,
   isSessionScheduleEvent,
   normalizeSessionSchedule,
   sortSessionSchedulesByNextRun,
@@ -13,6 +14,32 @@ test("recognizes only schedule SSE events", () => {
   expect(isSessionScheduleEvent({ type: "message.created", properties: {} })).toBe(false)
   expect(isSessionScheduleEvent(null)).toBe(false)
   expect(isSessionScheduleEvent(undefined)).toBe(false)
+})
+
+test("extracts session id from raw schedule events", () => {
+  expect(
+    extractSessionScheduleEventSessionID({
+      type: "schedule.created",
+      properties: { sessionID: "sess-1" },
+    }),
+  ).toBe("sess-1")
+  expect(
+    extractSessionScheduleEventSessionID({
+      details: {
+        type: "schedule.ran",
+        properties: { sessionID: "sess-2" },
+      },
+    }),
+  ).toBe("sess-2")
+  expect(
+    extractSessionScheduleEventSessionID({
+      details: {
+        type: "message.created",
+        properties: { sessionID: "sess-3" },
+      },
+    }),
+  ).toBeUndefined()
+  expect(extractSessionScheduleEventSessionID({ details: { type: "schedule.created" } })).toBeUndefined()
 })
 
 describe("session schedule summary normalization", () => {

@@ -8,7 +8,7 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
 import {
-  isSessionScheduleEvent,
+  extractSessionScheduleEventSessionID,
   type SessionScheduleSummary,
   sortSessionSchedulesByNextRun,
   deleteSessionSchedules,
@@ -53,9 +53,7 @@ export function SessionScheduleDock(props: {
   const queryKey = createMemo(() => ["session", "schedule", server.current?.http.url, props.sessionID])
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKey() })
   const stopScheduleEvents = serverSDK.event.listen((event) => {
-    const details = event.details as { type?: string; properties?: Record<string, unknown> }
-    if (!isSessionScheduleEvent(details)) return
-    if (details.properties?.sessionID !== props.sessionID) return
+    if (extractSessionScheduleEventSessionID(event.details) !== props.sessionID) return
     void refresh()
   })
   onCleanup(stopScheduleEvents)
