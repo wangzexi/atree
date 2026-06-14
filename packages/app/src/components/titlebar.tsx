@@ -41,7 +41,11 @@ import { ServerConnection, useServer } from "@/context/server"
 import { tabHref, tabKey, useTabs, type Tab } from "@/context/tabs"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
-import { deleteSessionSchedules, listSessionSchedules } from "@/utils/session-schedule"
+import {
+  deleteSessionSchedules,
+  listSessionSchedules,
+  type SessionScheduleSummary,
+} from "@/utils/session-schedule"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -309,7 +313,9 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               const serverCtx = global.createServerCtx(conn)
               const key = tabKey(tab)
               void (async () => {
-                const schedules = await listSessionSchedules(conn, tab.sessionId).catch(() => [] as Array<{ id: string }>)
+                const schedules = await listSessionSchedules(conn, tab.sessionId).catch(
+                  () => [] as SessionScheduleSummary[],
+                )
                 if (schedules.length > 0 && archiveConfirmKey() !== key) {
                   requireArchiveConfirm(key)
                   return

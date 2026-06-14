@@ -85,6 +85,7 @@ import {
 } from "./layout/helpers"
 import {
   asScheduleTime,
+  isSessionScheduleEvent,
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
@@ -2688,8 +2689,7 @@ export default function Layout(props: ParentProps) {
 
     const stopScheduleEvents = serverSDK.event.listen((event) => {
       const details = event.details as { type?: string; properties?: Record<string, unknown> }
-      if (details.type !== "schedule.created" && details.type !== "schedule.deleted" && details.type !== "schedule.ran")
-        return
+      if (!isSessionScheduleEvent(details)) return
       const sessionID = details.properties?.sessionID
       if (typeof sessionID !== "string") return
       const session = knownSession(sessionID)

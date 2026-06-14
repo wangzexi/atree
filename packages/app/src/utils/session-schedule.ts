@@ -26,6 +26,20 @@ export type SessionScheduleSummary = {
   lastRunStatus: "ran" | "skipped" | null
 }
 
+export const SESSION_SCHEDULE_EVENTS = ["schedule.created", "schedule.deleted", "schedule.ran"] as const
+export type SessionScheduleEventType = (typeof SESSION_SCHEDULE_EVENTS)[number]
+
+export type SessionScheduleEvent = {
+  type?: string
+  properties?: Record<string, unknown>
+}
+
+export function isSessionScheduleEvent(event: unknown): event is { type: SessionScheduleEventType; properties?: Record<string, unknown> } {
+  if (!event || typeof event !== "object") return false
+  const typed = event as SessionScheduleEvent
+  return SESSION_SCHEDULE_EVENTS.includes(typed.type as SessionScheduleEventType)
+}
+
 export function sessionScheduleRequestHeaders(current?: ServerConnection.Any | null) {
   const headers = new Headers()
   if (current?.http.password) {
@@ -46,18 +60,28 @@ export function asScheduleTime(value: number | string | null | undefined) {
 }
 
 export function normalizeSessionSchedule(item: SessionScheduleApiItem): SessionScheduleSummary {
+  const runAt = asScheduleTime(item.runAt)
+  const nextRun = asScheduleTime(item.nextRun)
+  const nextRunAt = asScheduleTime(item.nextRun ?? item.runAt)
   return {
     id: item.id,
     kind: item.kind ?? "recurring",
     expression: item.expression,
-    runAt: item.runAt,
-    nextRun: item.nextRun,
-    nextRunAt: item.nextRun ?? item.runAt,
+    runAt: runAt ?? null,
+    nextRun: nextRun ?? null,
+    nextRunAt: nextRunAt ?? null,
     message: item.message,
-    lastRanAt: item.lastRanAt,
+    lastRanAt: asScheduleTime(item.lastRanAt) ?? null,
     lastRunStatus: item.lastRunStatus ?? null,
   }
 }
+
+export const sortSessionSchedulesByNextRun = (schedules: readonly SessionScheduleSummary[]) =>
+  [...schedules].sort((a, b) => {
+    const aNext = a.nextRunAt ?? Number.MAX_SAFE_INTEGER
+    const bNext = b.nextRunAt ?? Number.MAX_SAFE_INTEGER
+    return aNext - bNext
+  })
 
 export async function listSessionSchedules(current: ServerConnection.Any | null | undefined, sessionID: string) {
   if (!current) return [] as SessionScheduleSummary[]
@@ -66,13 +90,7 @@ export async function listSessionSchedules(current: ServerConnection.Any | null 
   if (!response.ok) throw new Error(`Failed to list schedules: ${response.status}`)
 
   const json = (await response.json()) as Array<SessionScheduleApiItem>
-  return json.map((item) => ({
-    ...normalizeSessionSchedule(item),
-    runAt: asScheduleTime(item.runAt) ?? null,
-    nextRun: asScheduleTime(item.nextRun) ?? null,
-    nextRunAt: asScheduleTime(item.nextRun ?? item.runAt) ?? null,
-    lastRanAt: asScheduleTime(item.lastRanAt) ?? null,
-  }))
+  return json.map((item) => normalizeSessionSchedule(item))
 }
 
 export async function deleteSessionSchedule(
@@ -86,7 +104,10 @@ export async function deleteSessionSchedule(
   if (!response.ok) throw new Error(`Failed to delete schedule: ${response.status}`)
 }
 
-export async function deleteSessionSchedules(current: ServerConnection.Any | null | undefined, sessionID: string, schedules: Array<{ id: string }>) {
+export async function deleteSessionSchedules(
+  current: ServerConnection.Any | null | undefined,
+  sessionID: string,
+  schedules: ReadonlyArray<Pick<SessionScheduleSummary, "id">>,
+) {
   await Promise.all(schedules.map((schedule) => deleteSessionSchedule(current, sessionID, schedule.id)))
 }
-

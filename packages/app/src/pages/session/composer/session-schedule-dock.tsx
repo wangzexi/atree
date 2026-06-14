@@ -8,7 +8,9 @@ import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
 import {
+  isSessionScheduleEvent,
   type SessionScheduleSummary,
+  sortSessionSchedulesByNextRun,
   deleteSessionSchedules,
   listSessionSchedules,
 } from "@/utils/session-schedule"
@@ -52,7 +54,7 @@ export function SessionScheduleDock(props: {
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKey() })
   const stopScheduleEvents = serverSDK.event.listen((event) => {
     const details = event.details as { type?: string; properties?: Record<string, unknown> }
-    if (details.type !== "schedule.created" && details.type !== "schedule.deleted" && details.type !== "schedule.ran") return
+    if (!isSessionScheduleEvent(details)) return
     if (details.properties?.sessionID !== props.sessionID) return
     void refresh()
   })
@@ -65,11 +67,7 @@ export function SessionScheduleDock(props: {
       const current = server.current
       if (!current || !props.sessionID) return [] as SessionScheduleSummary[]
       const schedules = await listSessionSchedules(current, props.sessionID)
-      return [...schedules].sort((a, b) => {
-        const aNext = a.nextRunAt ?? Number.MAX_SAFE_INTEGER
-        const bNext = b.nextRunAt ?? Number.MAX_SAFE_INTEGER
-        return aNext - bNext
-      })
+      return sortSessionSchedulesByNextRun(schedules)
     },
   }))
   const removeSchedule = useMutation(() => ({

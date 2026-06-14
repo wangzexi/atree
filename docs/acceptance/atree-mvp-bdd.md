@@ -166,3 +166,40 @@
 - 不要求图标细节在视觉层面完全不变
 - 不要求悬浮动画一致
 - 允许对不稳定交互进行手工调整，只要行为状态与状态转移正确
+
+## 6. 简化与稳定性验收（MVP 迭代后）
+
+### Scenario: 自动化事件监听不重复处理非自动化事件
+- Given event bus 在收到会话 SSE 回调
+- When 事件类型不是 `schedule.created`、`schedule.deleted`、`schedule.ran`
+- Then 不应该触发 schedule 相关列表刷新
+
+### Scenario: 自动化列表排序规则单点稳定
+- Given 某会话存在多条自动化任务
+- When 读取其自动化清单并展示
+- Then 按 `nextRunAt` 升序展示（无 `nextRunAt` 的项排在后面）
+
+### Scenario: 自动化清单归一化不丢字段
+- Given 后端返回的 schedule payload 含 `runAt`、`nextRun` 和 `nextRun` 字段字符串/数值混合
+- When 前端标准化为会话内存模型
+- Then `runAt`/`nextRun`/`nextRunAt` 始终是数字或 `null`
+- And `kind` 统一为 `once|recurring`
+
+### Scenario: 归档前置确认后不会误关闭
+- Given 会话有活跃自动化
+- When 第一次点击关闭
+- Then 会话仍保持在 tab 列表中
+- And 要求明确二次确认才移除
+- And 自动化在关闭前不会被误删
+
+### Scenario: 左侧会话树与标签组隔离（回归）
+- Given 在节点 A 下打开会话并手动触发 schedule/消息更新
+- When 切到节点 B 再切回节点 A
+- Then 节点 A 的会话标签会按历史会话组恢复，节点 B 不混入 A 的会话标签
+
+### Scenario: 单会话节点图标优先策略
+- Given 某目录下存在会话且无自动化会话
+- When 该目录被渲染
+- Then 目录行只显示当前会话图标，不展示“更多”占位项
+- Given 同目录有 3 个以上会话
+- Then 目录行显示第一个会话图标，其余会话收缩在右侧次级区域
