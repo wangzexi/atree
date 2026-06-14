@@ -382,10 +382,11 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           })
           return undefined
         })
+
       if (created) {
         const [directoryStore] = serverSync.child(sessionDirectory)
         const openSessionIDs = new Set(
-          tabs.store.flatMap((tab) => {
+          (tabs.store ?? []).flatMap((tab) => {
             if (tab.type !== "session") return []
             if (tab.server !== server.key) return []
             if (pathKey(atob(tab.dirBase64)) !== pathKey(sessionDirectory)) return []
@@ -396,13 +397,14 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           .filter((item) => openSessionIDs.has(item.id))
           .map((item) => sessionEmoji(item))
         const emoji = randomSessionEmoji(usedOpenEmojis)
-        const sessionWithEmoji = await client.session
+        const sessionWithEmoji = (client.session.update ? await client.session
           .update({
             sessionID: created.id,
             metadata: nextSessionMetadata(created, emoji),
           })
           .then((x) => x.data ?? created)
           .catch(() => created)
+        : created)
 
         seed(sessionDirectory, sessionWithEmoji)
         session = sessionWithEmoji
@@ -417,7 +419,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
             sessionId: session.id,
           })
         else {
-          tabs.addSessionTab({
+          tabs.addSessionTab?.({
             server: server.key,
             dirBase64: base64Encode(sessionDirectory),
             sessionId: session.id,
