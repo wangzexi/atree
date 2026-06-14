@@ -34,6 +34,7 @@
 - `main-legacy-backup`（本次主分支晋级时的旧主分支快照）
 - `main-before-2026-06-14-legacy`（本次分支晋级同步到远端的历史主线镜像）
 - `main-legacy-before-atree-mainline`（由旧主分支 `main` 重命名并保留）
+- `main-before-atree-docs-backup`（当前文档交接前的 `main` 快照，便于回溯）
 
 当主线需求需要回滚或对照时，优先从上述分支读取历史实现。
 
