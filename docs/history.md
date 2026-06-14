@@ -35,6 +35,7 @@
 - `main-previous-backup`（当前主线提升前的旧主分支备份）
 - `main-legacy-backup`（本次主分支晋级时的旧主分支快照）
 - `main-before-2026-06-14-legacy`（本次分支晋级同步到远端的历史主线镜像）
+- `main-before-atree-ng-promote`（当前主干接管前的主线镜像，保留 `origin/main` 的旧主线内容）
 - `main-legacy-before-atree-mainline`（由旧主分支 `main` 重命名并保留）
 - `main-before-atree-docs-backup`（当前文档交接前的 `main` 快照，便于回溯）
 - `legacy-main-before-atree-ng-current`（当前主分支一次快照点，防止回归对比）
