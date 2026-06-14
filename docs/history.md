@@ -43,6 +43,7 @@
 - `legacy-main-before-atree-ng-current`（当前主分支一次快照点，防止回归对比）
 - `main-legacy-before-atree-ng-final`（本次对话执行前的主线快照，作为主干接管前备份）
 - `legacy-main-archive-2026-06-14`（当前会话执行前的最后一次旧主线归档点，便于回退）
+- `legacy-main-pre-atree-ng-main`（新主线接管前的主分支镜像，作为最小历史对照）
 
 当主线需求需要回滚或对照时，优先从上述分支读取历史实现。
 
