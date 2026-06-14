@@ -41,15 +41,6 @@ export const Parameters = Schema.Struct({
     description:
       "Required for action='create' when type is 'at'. ISO datetime string or Unix millisecond timestamp in the future.",
   }),
-  kind: Schema.optional(Schedule.KindSchema).annotate({
-    description: "Deprecated compatibility field. Prefer type='cron' or type='at'.",
-  }),
-  expression: Schema.optional(Schema.String).annotate({
-    description: "Deprecated compatibility field. Prefer cron.",
-  }),
-  runAt: Schema.optional(Schema.Number).annotate({
-    description: "Deprecated compatibility field. Prefer at.",
-  }),
   message: Schema.optional(Schema.String).annotate({
     description: "Required for action='create'. Message content to inject into the session when the schedule fires.",
   }),

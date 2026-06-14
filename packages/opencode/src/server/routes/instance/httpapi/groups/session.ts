@@ -76,9 +76,6 @@ export const SchedulePayload = Schema.Struct({
   type: Schema.optional(Schema.Literals(["cron", "at"])),
   cron: Schema.optional(Schema.String),
   at: Schema.optional(Schema.Union([Schema.Number, Schema.String])),
-  kind: Schema.optional(Schedule.KindSchema),
-  expression: Schema.optional(Schema.String),
-  runAt: Schema.optional(Schema.Number),
   message: Schema.String,
 })
 export const PermissionResponsePayload = Schema.Struct({

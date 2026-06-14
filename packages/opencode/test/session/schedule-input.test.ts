@@ -1,28 +1,25 @@
 import { expect, it } from "bun:test"
-import {
-  buildScheduleCreateInput,
-  parseScheduleAt,
-  resolveScheduleType,
-} from "../../src/session/schedule-input"
+import { buildScheduleCreateInput, parseScheduleAt, resolveScheduleType } from "../../src/session/schedule-input"
 
-it("resolveScheduleType prefers explicit type", () => {
-  expect(resolveScheduleType({ type: "at", runAt: Date.now() })).toBe("at")
-  expect(resolveScheduleType({ kind: "once", runAt: Date.now() })).toBe("at")
+it("defaults schedule type to cron", () => {
   expect(resolveScheduleType({})).toBe("cron")
 })
 
-it("buildScheduleCreateInput resolves at inputs with legacy fields", () => {
-  const input = buildScheduleCreateInput({ kind: "once", runAt: 1_700_000_000_000, at: "ignored" })
+it("keeps explicit at type", () => {
+  expect(resolveScheduleType({ type: "at" })).toBe("at")
+})
+
+it("resolves one-time schedule from at input", () => {
+  const input = buildScheduleCreateInput({ type: "at", at: 1_700_000_000_000 })
   expect(input.kind).toBe("once")
   expect(input.runAt).toBe(1_700_000_000_000)
   expect(input.expression).toBeUndefined()
 })
 
-it("buildScheduleCreateInput resolves cron expressions", () => {
+it("resolves recurring schedule from cron", () => {
   const input = buildScheduleCreateInput({
     type: "cron",
     cron: "*/5 * * * *",
-    expression: "0 0 * * *",
   })
   expect(input.kind).toBe("recurring")
   expect(input.expression).toBe("*/5 * * * *")

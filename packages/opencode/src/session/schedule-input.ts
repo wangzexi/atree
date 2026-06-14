@@ -1,19 +1,11 @@
 import { Schedule } from "./schedule"
 
-export const SCHEDULE_KIND_LABELS = {
-  cron: "cron",
-  at: "at",
-} as const
-
-export type ScheduleType = (typeof SCHEDULE_KIND_LABELS)[keyof typeof SCHEDULE_KIND_LABELS]
+export type ScheduleType = "cron" | "at"
 
 export type RawScheduleInput = {
   type?: ScheduleType
-  kind?: Schedule.Kind
   cron?: string
-  expression?: string
   at?: number | string
-  runAt?: number
 }
 
 export type ResolvedScheduleCreateInput = {
@@ -23,8 +15,7 @@ export type ResolvedScheduleCreateInput = {
 }
 
 export function resolveScheduleType(input: RawScheduleInput): ScheduleType {
-  if (input.type) return input.type
-  return input.kind === "once" ? SCHEDULE_KIND_LABELS.at : SCHEDULE_KIND_LABELS.cron
+  return input.type === "at" ? "at" : "cron"
 }
 
 export function parseScheduleAt(value: number | string | undefined): number | undefined {
@@ -39,17 +30,9 @@ export function parseScheduleAt(value: number | string | undefined): number | un
 export function buildScheduleCreateInput(input: RawScheduleInput): ResolvedScheduleCreateInput {
   const type = resolveScheduleType(input)
   const kind: Schedule.Kind = type === "at" ? "once" : "recurring"
-  const runAt =
-    type === "at"
-      ? (() => {
-          const atRunAt = parseScheduleAt(input.at)
-          if (typeof atRunAt === "number" && Number.isFinite(atRunAt)) return atRunAt
-          return parseScheduleAt(input.runAt)
-        })()
-      : undefined
   return {
     kind,
-    expression: type === "cron" ? input.cron ?? input.expression : undefined,
-    runAt,
+    expression: type === "cron" ? input.cron : undefined,
+    runAt: type === "at" ? parseScheduleAt(input.at) : undefined,
   }
 }
