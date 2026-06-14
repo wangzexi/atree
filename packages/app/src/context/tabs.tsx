@@ -103,18 +103,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
           }),
         )
       },
-      replaceWithSessions: (targetServer: ServerConnection.Key, sessions: Session[]) => {
-        setStore(
-          reconcile(
-            sessions.map((session) => ({
-              type: "session" as const,
-              server: targetServer,
-              dirBase64: base64Encode(session.directory),
-              sessionId: session.id,
-            })),
-          ),
-        )
-      },
       replaceDirectorySessions: (targetServer: ServerConnection.Key, directory: string, sessions: Session[]) => {
         setStore(
           reconcile([
