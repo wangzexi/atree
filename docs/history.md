@@ -30,6 +30,7 @@
 - `legacy-main-origin-atree-ng`
 - `legacy-main-atree-ng`
 - `legacy-main-before-opencode-spike`
+- `legacy-main-before-atree-ng-mainline`（本次主干升级时将旧主分支另存）
 - `main-previous-backup`（当前主线提升前的旧主分支备份）
 - `main-legacy-backup`（本次主分支晋级时的旧主分支快照）
 - `main-before-2026-06-14-legacy`（本次分支晋级同步到远端的历史主线镜像）
