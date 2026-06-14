@@ -84,6 +84,7 @@ import {
   sortedRootSessions,
 } from "./layout/helpers"
 import {
+  archiveSessionWithSchedules,
   asScheduleTime,
   isSessionScheduleEvent,
   listSessionSchedules,
@@ -1011,10 +1012,16 @@ export default function Layout(props: ParentProps) {
     const index = sessions.findIndex((s) => s.id === session.id)
     const nextSession = sessions[index + 1] ?? sessions[index - 1]
 
-    await serverSDK.client.session.update({
+    await archiveSessionWithSchedules({
+      current: server.current,
       directory: session.directory,
       sessionID: session.id,
-      time: { archived: Date.now() },
+      updateSession: (payload) =>
+        serverSDK.client.session.update({
+          directory: payload.directory,
+          sessionID: payload.sessionID,
+          time: payload.time,
+        }),
     })
     setStore(
       produce((draft) => {

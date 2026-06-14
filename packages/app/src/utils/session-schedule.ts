@@ -26,6 +26,12 @@ export type SessionScheduleSummary = {
   lastRunStatus: "ran" | "skipped" | null
 }
 
+export type SessionUpdate = (input: {
+  directory: string
+  sessionID: string
+  time: { archived: number }
+}) => Promise<unknown>
+
 export const SESSION_SCHEDULE_EVENTS = ["schedule.created", "schedule.deleted", "schedule.ran"] as const
 export type SessionScheduleEventType = (typeof SESSION_SCHEDULE_EVENTS)[number]
 
@@ -110,4 +116,40 @@ export async function deleteSessionSchedules(
   schedules: ReadonlyArray<Pick<SessionScheduleSummary, "id">>,
 ) {
   await Promise.all(schedules.map((schedule) => deleteSessionSchedule(current, sessionID, schedule.id)))
+}
+
+export async function clearSessionSchedules(
+  current: ServerConnection.Any | null | undefined,
+  sessionID: string,
+  schedules?: ReadonlyArray<Pick<SessionScheduleSummary, "id">>,
+) {
+  const list = schedules ?? (await listSessionSchedules(current, sessionID))
+  if (list.length === 0) return []
+  await deleteSessionSchedules(current, sessionID, list)
+  return list
+}
+
+export async function archiveSessionWithSchedules(input: {
+  current: ServerConnection.Any | null | undefined
+  directory: string
+  sessionID: string
+  archivedAt?: number
+  schedules?: ReadonlyArray<Pick<SessionScheduleSummary, "id">>
+  updateSession: SessionUpdate
+}) {
+  if (!input.current) {
+    await input.updateSession({
+      directory: input.directory,
+      sessionID: input.sessionID,
+      time: { archived: input.archivedAt ?? Date.now() },
+    })
+    return
+  }
+
+  await clearSessionSchedules(input.current, input.sessionID, input.schedules)
+  await input.updateSession({
+    directory: input.directory,
+    sessionID: input.sessionID,
+    time: { archived: input.archivedAt ?? Date.now() },
+  })
 }

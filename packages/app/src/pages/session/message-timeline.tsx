@@ -59,6 +59,7 @@ import { SessionContextUsage } from "@/components/session-context-usage"
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { createResizeObserver } from "@solid-primitives/resize-observer"
 import { useLanguage } from "@/context/language"
+import { useServer } from "@/context/server"
 import { useSessionKey } from "@/pages/session/session-layout"
 import { useServerSDK } from "@/context/server-sdk"
 import { usePlatform } from "@/context/platform"
@@ -68,6 +69,7 @@ import { useSync } from "@/context/sync"
 import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
+import { archiveSessionWithSchedules } from "@/utils/session-schedule"
 import { makeTimer } from "@solid-primitives/timer"
 import { MessageComment, SummaryDiff, Timeline, TimelineRow, TimelineRowMap } from "./message-timeline.data"
 
@@ -287,6 +289,7 @@ export function MessageTimeline(props: {
 
   const navigate = useNavigate()
   const serverSDK = useServerSDK()
+  const server = useServer()
   const sdk = useSDK()
   const sync = useSync()
   const settings = useSettings()
@@ -853,8 +856,17 @@ export function MessageTimeline(props: {
     const index = sessions.findIndex((s) => s.id === sessionID)
     const nextSession = index === -1 ? undefined : (sessions[index + 1] ?? sessions[index - 1])
 
-    await sdk.client.session
-      .update({ sessionID, time: { archived: Date.now() } })
+    await archiveSessionWithSchedules({
+      current: server.current,
+      directory: session.directory,
+      sessionID,
+      updateSession: (payload) =>
+        sdk.client.session.update({
+          sessionID: payload.sessionID,
+          directory: payload.directory,
+          time: payload.time,
+        }),
+    })
       .then(() => {
         sync.set(
           produce((draft) => {

@@ -42,7 +42,7 @@ import { tabHref, tabKey, useTabs, type Tab } from "@/context/tabs"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
 import {
-  deleteSessionSchedules,
+  archiveSessionWithSchedules,
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
@@ -321,11 +321,12 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   return
                 }
                 setArchiveConfirmKey(undefined)
-                await deleteSessionSchedules(conn, tab.sessionId, schedules)
-                await serverCtx.sdk.client.session.update({
+                await archiveSessionWithSchedules({
+                  current: conn,
                   directory,
                   sessionID: tab.sessionId,
-                  time: { archived: Date.now() },
+                  schedules,
+                  updateSession: (payload) => serverCtx.sdk.client.session.update(payload),
                 })
                 refreshArchivedSessions()
                 tabsStoreActions.removeTab(index)
