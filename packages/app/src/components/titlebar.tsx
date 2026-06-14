@@ -41,7 +41,7 @@ import { ServerConnection, useServer } from "@/context/server"
 import { tabHref, tabKey, useTabs, type Tab } from "@/context/tabs"
 import type { Session } from "@opencode-ai/sdk/v2/client"
 import { pathKey } from "@/utils/path-key"
-import { authTokenFromCredentials } from "@/utils/server"
+import { deleteSessionSchedules, listSessionSchedules } from "@/utils/session-schedule"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -273,34 +273,11 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const [archiveConfirmKey, setArchiveConfirmKey] = createSignal<string>()
             let archiveConfirmTimer: ReturnType<typeof setTimeout> | undefined
             const refreshArchivedSessions = () => setArchiveVersion((value) => value + 1)
-            const scheduleHeaders = (conn: ServerConnection.Any) => {
-              const headers = new Headers()
-              if (conn.http.password) {
-                headers.set(
-                  "Authorization",
-                  `Basic ${authTokenFromCredentials({ username: conn.http.username, password: conn.http.password })}`,
-                )
-              }
-              return headers
-            }
             const listSchedules = async (conn: ServerConnection.Any, sessionID: string) => {
-              const url = new URL(`/session/${sessionID}/schedule`, conn.http.url)
-              const response = await fetch(url, { headers: scheduleHeaders(conn) })
-              if (!response.ok) throw new Error(`Failed to list schedules: ${response.status}`)
-              return (await response.json()) as Array<{ id: string }>
+              return listSessionSchedules(conn, sessionID)
             }
-            const deleteSchedules = async (
-              conn: ServerConnection.Any,
-              sessionID: string,
-              schedules: Array<{ id: string }>,
-            ) => {
-              await Promise.all(
-                schedules.map(async (schedule) => {
-                  const url = new URL(`/session/${sessionID}/schedule/${schedule.id}`, conn.http.url)
-                  const response = await fetch(url, { method: "DELETE", headers: scheduleHeaders(conn) })
-                  if (!response.ok) throw new Error(`Failed to delete schedule: ${response.status}`)
-                }),
-              )
+            const deleteSchedules = async (conn: ServerConnection.Any, sessionID: string, schedules: Array<{ id: string }>) => {
+              await deleteSessionSchedules(conn, sessionID, schedules)
             }
             const requireArchiveConfirm = (key: string) => {
               setArchiveConfirmKey(key)

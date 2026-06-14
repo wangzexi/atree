@@ -8,25 +8,28 @@ import {
 } from "./deep-links"
 import { type Session } from "@opencode-ai/sdk/v2/client"
 import {
-  asScheduleTime,
   childSessionOnPath,
   closeHomeProject,
   displayName,
   effectiveWorkspaceOrder,
   errorMessage,
-  normalizeSessionSchedule,
   hasProjectPermissions,
   homeProjectNavigation,
   homeProjectDirectories,
   homeSessionServerStatus,
   latestRootSession,
-  sessionScheduleRequestHeaders,
   sortedRootSessions,
-  type SessionScheduleApiItem,
   toggleHomeProjectSelection,
 } from "./helpers"
 import { pathKey } from "@/utils/path-key"
 import { ServerConnection } from "@/context/server"
+import {
+  asScheduleTime,
+  normalizeSessionSchedule,
+  sessionScheduleRequestHeaders,
+  type SessionScheduleApiItem,
+  type SessionScheduleSummary,
+} from "@/utils/session-schedule"
 
 const serverKey = ServerConnection.Key.make
 
@@ -187,8 +190,32 @@ describe("layout workspace helpers", () => {
       },
       120_000,
       {
-        "auto-later": [{ nextRunAt: 300_000 }],
-        "auto-sooner": [{ nextRunAt: 200_000 }],
+        "auto-later": [
+          {
+            id: "auto-later",
+            kind: "once",
+            expression: "* * * * *",
+            runAt: null,
+            nextRun: 300_000,
+            nextRunAt: 300_000,
+            message: "msg",
+            lastRanAt: null,
+            lastRunStatus: null,
+          } as SessionScheduleSummary,
+        ],
+        "auto-sooner": [
+          {
+            id: "auto-sooner",
+            kind: "once",
+            expression: "* * * * *",
+            runAt: null,
+            nextRun: 200_000,
+            nextRunAt: 200_000,
+            message: "msg",
+            lastRanAt: null,
+            lastRunStatus: null,
+          } as SessionScheduleSummary,
+        ],
       },
     )
 
@@ -207,6 +234,8 @@ describe("layout workspace helpers", () => {
     const normalized = normalizeSessionSchedule({
       id: "sch",
       kind: "once",
+      sessionID: "sess",
+      createdAt: 1_700_000_000_000,
       expression: "* * * * *",
       runAt: 1_700_000_000_001,
       nextRun: 1_700_000_000_111,

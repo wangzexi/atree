@@ -78,15 +78,16 @@ import {
   effectiveWorkspaceOrder,
   errorMessage,
   latestRootSession,
-  asScheduleTime,
   sessionEmoji,
   sessionHasSchedule,
   sessionNextScheduleRun,
-  sessionScheduleRequestHeaders,
-  normalizeSessionSchedule,
   sortedRootSessions,
-  type SessionScheduleSummary,
 } from "./layout/helpers"
+import {
+  asScheduleTime,
+  listSessionSchedules,
+  type SessionScheduleSummary,
+} from "@/utils/session-schedule"
 import {
   collectNewSessionDeepLinks,
   collectOpenProjectDeepLinks,
@@ -2504,24 +2505,15 @@ export default function Layout(props: ParentProps) {
           absolute: node.absolute,
         }))
     const fetchSessionSchedules = async (session: Session) => {
-      const current = server.current
-      if (!current) return
       const state = tree.schedule[session.id]
       if (state?.loading) return
       setTree("schedule", session.id, (prev) => ({ ...prev, loading: true }))
       try {
-        const url = new URL(`/session/${session.id}/schedule`, current.http.url)
-        const response = await fetch(url, { headers: sessionScheduleRequestHeaders(current) })
-        if (!response.ok) throw new Error(`Failed to load schedules: ${response.status}`)
-        const json = (await response.json()) as Array<{
-          id: string
-          nextRun?: number | string | null
-          runAt?: number | string | null
-        }>
+        const json = await listSessionSchedules(server.current, session.id)
         setTree("schedule", session.id, {
           loaded: true,
           loading: false,
-          schedules: json.map((item) => normalizeSessionSchedule(item)),
+          schedules: json,
         })
       } catch {
         setTree("schedule", session.id, { loaded: true, loading: false, schedules: [] })
