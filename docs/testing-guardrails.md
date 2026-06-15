@@ -54,6 +54,7 @@ bun run test:guardrails
 - 2026-06-16：`bun run test:guardrails` 通过；storage contract 37 pass，Pi faux execution contract 46 pass，real/default Pi missing-config boundary contract 各 24 pass / 15 skip，restart persistence smoke、multi-directory persistence smoke、interrupted execution smoke、frontend build、frontend browser smoke 均通过。新增 Pi 默认 provider/model 契约、cron `nextRun` 基线契约、手写 Pi tool history 恢复契约、native atree read API 契约、前端目录树/归档菜单/session detail 消费 native session adapter，以及网页发送消息到目录 JSONL 的浏览器 smoke 已进入默认护栏。
 - 2026-06-16：前端消息历史读取改为消费 `/atree/session/:id/entries` 的 Pi 原生 entries adapter；`bun run test:guardrails` 的浏览器 smoke 会明确断言会话页请求过 native detail endpoint 和 native entries endpoint。
 - 2026-06-16：前端自动化消息读取和删除改为消费 `/atree/session/:id/schedule`，并显式传入当前目录；`bun run test:guardrails` 通过，storage contract 38 pass，Pi faux execution contract 47 pass，real/default Pi missing-config boundary contract 各 25 pass / 15 skip，frontend browser smoke 会断言真实页面请求过 native schedule endpoint。
+- 2026-06-16：前端普通 prompt 写入改为消费 `/atree/session/:id/prompt_async`，服务端新旧 prompt endpoint 共用同一段 Pi 写入逻辑；`bun run test:guardrails` 通过，storage contract 39 pass，Pi faux execution contract 48 pass，real/default Pi missing-config boundary contract 各 25 pass / 16 skip，frontend browser smoke 会断言真实页面请求过 native prompt endpoint。
 
 底层单项运行方式：
 
@@ -97,6 +98,7 @@ ATREE_CONTRACT_DIRECTORY=/path/to/workspace bun run test:contract
 - `/atree/session`
 - `/atree/session/:id`
 - `/atree/session/:id/entries`
+- `/atree/session/:id/prompt_async`
 - `/atree/session/:id/schedule`
 
 基础契约测试刻意不调用真实模型，因此不依赖 API Key。需要触发模型路径的护栏会使用 Pi faux provider 或空 Pi 配置错误边界。
@@ -109,6 +111,7 @@ ATREE_CONTRACT_DIRECTORY=/path/to/workspace bun run test:contract
 - session 创建、列表、更新、消息读取、删除
 - `/provider` 返回固定的 Pi 默认 provider/model，`/agent` 返回绑定该模型的 primary agent
 - `/atree/session`、`/atree/session/:id/entries` 和 `/atree/session/:id/schedule` 是 native 视图，只返回目录内 `meta.yaml`、Pi `session.jsonl` entries 和 session schedule facts，不返回 OpenCode-compatible 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts`
+- `/atree/session/:id/prompt_async` 可以把普通 prompt 写入同一个 Pi `session.jsonl`，并通过 native entries 直接读回 Pi 原始 message entry
 - `prompt_async` 后用户消息立即可从 API 读到
 - schedule 创建和删除
 - native schedule 创建、读取、重复设置 409 和删除

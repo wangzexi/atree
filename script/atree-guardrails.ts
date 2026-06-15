@@ -445,6 +445,12 @@ try {
   if (!sawNativeSchedule) {
     throw new Error("frontend browser smoke did not load schedules from the native atree schedule endpoint")
   }
+  const sawNativePrompt = backendRequests.some(
+    (url) => new URL(url).pathname === "/atree/session/" + sessionID + "/prompt_async",
+  )
+  if (!sawNativePrompt) {
+    throw new Error("frontend browser smoke did not send prompts through the native atree prompt endpoint")
+  }
 
   const sessionJsonl = await readSessionJsonl(
     directory,

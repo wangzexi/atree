@@ -596,6 +596,34 @@ runContract("atree backend OpenCode-compatible contract", () => {
     }
   })
 
+  runPromptSuccessTest("persists native atree prompt_async into Pi session entries", async () => {
+    const created = await createSession()
+    const sessionID = String(created.id)
+    const text = "native atree prompt_async user message"
+
+    try {
+      await json<unknown>(`/atree/session/${sessionID}/prompt_async`, {
+        method: "POST",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          parts: [{ type: "text", text }],
+        }),
+      })
+
+      const entries = await json<Json[]>(`/atree/session/${sessionID}/entries`, { query: sessionQuery() })
+      const userEntry = entries.find((entry) => {
+        if (entry.type !== "message" || !isRecord(entry.message)) return false
+        if (entry.message.role !== "user" || !Array.isArray(entry.message.content)) return false
+        return entry.message.content.some((part) => isRecord(part) && part.type === "text" && part.text === text)
+      })
+      expect(userEntry).toBeTruthy()
+      expect("info" in userEntry!).toBe(false)
+      expect("parts" in userEntry!).toBe(false)
+    } finally {
+      await deleteSession(sessionID)
+    }
+  })
+
   test("creates and deletes one scheduled message per session", async () => {
     const created = await createSession()
     const sessionID = String(created.id)

@@ -5,7 +5,7 @@ import { Binary } from "@opencode-ai/core/util/binary"
 import { useNavigate, useParams, useSearchParams } from "@solidjs/router"
 import { batch, type Accessor } from "solid-js"
 import type { FileSelection } from "@/context/file"
-import { useServer } from "@/context/server"
+import { type ServerConnection, useServer } from "@/context/server"
 import { useTabs } from "@/context/tabs"
 import { useServerSync } from "@/context/server-sync"
 import { useLanguage } from "@/context/language"
@@ -23,6 +23,7 @@ import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { nextSessionMetadata, randomSessionEmoji, sessionEmoji } from "@/pages/layout/helpers"
 import { pathKey } from "@/utils/path-key"
+import { promptAtreeSession } from "@/utils/atree-prompt"
 
 type PendingPrompt = {
   abort: AbortController
@@ -43,6 +44,7 @@ export type FollowupDraft = {
 
 type FollowupSendInput = {
   client: ReturnType<typeof useSDK>["client"]
+  current?: ServerConnection.Any | null
   serverSync: ReturnType<typeof useServerSync>
   sync: ReturnType<typeof useSync>
   draft: FollowupDraft
@@ -157,7 +159,9 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    await input.client.session.promptAsync({
+    const sentNative = await promptAtreeSession({
+      current: input.current,
+      directory: input.draft.sessionDirectory,
       sessionID: input.draft.sessionID,
       agent: input.draft.agent,
       model: input.draft.model,
@@ -165,6 +169,16 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       parts: requestParts,
       variant: input.draft.variant,
     })
+    if (!sentNative) {
+      await input.client.session.promptAsync({
+        sessionID: input.draft.sessionID,
+        agent: input.draft.agent,
+        model: input.draft.model,
+        messageID,
+        parts: requestParts,
+        variant: input.draft.variant,
+      })
+    }
     return true
   } catch (err) {
     batch(() => {
@@ -611,6 +625,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     void sendFollowupDraft({
       client,
+      current: server.current,
       sync,
       serverSync,
       draft,

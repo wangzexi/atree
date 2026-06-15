@@ -1,6 +1,6 @@
 import { homedir } from "node:os"
 import { EventHub } from "./events"
-import { AtreeStore, type DueSchedule, type SessionInfo } from "./store"
+import { AtreeStore, type DueSchedule } from "./store"
 
 type Json = Record<string, unknown>
 
@@ -193,6 +193,46 @@ async function deleteSession(directory: string, sessionID: string) {
   return true
 }
 
+async function runPromptAsync(directory: string, sessionID: string, body: Json) {
+  if (store.canRunPiPrompt()) {
+    publish(directory, "session.status", { sessionID, status: { type: "busy" } })
+    try {
+      const messages = await store.runPiPrompt(directory, sessionID, {
+        parts: body.parts,
+        source: isRecord(body.source) ? body.source : undefined,
+        publish: (type, properties) => publish(directory, type, properties),
+      })
+      for (const message of messages) {
+        publish(directory, "message.updated", { info: message.info })
+        for (const part of message.parts) publish(directory, "message.part.updated", { part })
+      }
+    } catch (error) {
+      publish(directory, "session.error", {
+        sessionID,
+        error: {
+          message: error instanceof Error ? error.message : String(error),
+        },
+      })
+      throw error
+    } finally {
+      publish(directory, "session.status", { sessionID, status: { type: "idle" } })
+    }
+    return empty({ status: 204 })
+  }
+
+  const message = await store.appendUserPrompt(directory, sessionID, {
+    messageID: typeof body.messageID === "string" ? body.messageID : undefined,
+    agent: typeof body.agent === "string" ? body.agent : undefined,
+    model: isRecord(body.model) ? body.model : undefined,
+    parts: body.parts,
+    source: isRecord(body.source) ? body.source : undefined,
+  })
+  publish(directory, "message.updated", { info: message.info })
+  for (const part of message.parts) publish(directory, "message.part.updated", { part })
+  publish(directory, "session.status", { sessionID, status: { type: "idle" } })
+  return empty({ status: 204 })
+}
+
 async function runDueSchedule(directory: string, due: DueSchedule) {
   const key = `${directory}:${due.sessionID}:${due.schedule.id}`
   if (runningScheduleKeys.has(key)) return
@@ -354,6 +394,9 @@ export async function handle(request: Request): Promise<Response> {
         if (atreeRoute.length === 3 && atreeRoute[2] === "entries" && request.method === "GET") {
           return json(await store.listNativeEntries(directory, sessionID))
         }
+        if (atreeRoute.length === 3 && atreeRoute[2] === "prompt_async" && request.method === "POST") {
+          return runPromptAsync(directory, sessionID, await requestJson(request))
+        }
         if (atreeRoute[2] === "schedule") {
           if (atreeRoute.length === 3) {
             if (request.method === "GET") return json(await store.listSchedules(directory, sessionID))
@@ -439,41 +482,7 @@ export async function handle(request: Request): Promise<Response> {
       if (sessionRoute[1] === "todo" && request.method === "GET") return json([])
 
       if (sessionRoute[1] === "prompt_async" && request.method === "POST") {
-        const body = await requestJson(request)
-        if (store.canRunPiPrompt()) {
-          publish(directory, "session.status", { sessionID, status: { type: "busy" } })
-          try {
-            const messages = await store.runPiPrompt(directory, sessionID, {
-              parts: body.parts,
-              publish: (type, properties) => publish(directory, type, properties),
-            })
-            for (const message of messages) {
-              publish(directory, "message.updated", { info: message.info })
-              for (const part of message.parts) publish(directory, "message.part.updated", { part })
-            }
-          } catch (error) {
-            publish(directory, "session.error", {
-              sessionID,
-              error: {
-                message: error instanceof Error ? error.message : String(error),
-              },
-            })
-            throw error
-          } finally {
-            publish(directory, "session.status", { sessionID, status: { type: "idle" } })
-          }
-          return empty({ status: 204 })
-        }
-        const message = await store.appendUserPrompt(directory, sessionID, {
-          messageID: typeof body.messageID === "string" ? body.messageID : undefined,
-          agent: typeof body.agent === "string" ? body.agent : undefined,
-          model: isRecord(body.model) ? body.model : undefined,
-          parts: body.parts,
-        })
-        publish(directory, "message.updated", { info: message.info })
-        for (const part of message.parts) publish(directory, "message.part.updated", { part })
-        publish(directory, "session.status", { sessionID, status: { type: "idle" } })
-        return empty({ status: 204 })
+        return runPromptAsync(directory, sessionID, await requestJson(request))
       }
 
       if (sessionRoute[1] === "schedule") {
