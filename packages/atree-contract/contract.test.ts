@@ -2853,6 +2853,7 @@ if (isRealPiSuccessContract)
       const created = await createSession()
       const sessionID = String(created.id)
       const text = "Reply briefly with the phrase: atree real pi contract ok"
+      let userMessageID = ""
 
       try {
         await withEventStream(async (stream) => {
@@ -2878,6 +2879,35 @@ if (isRealPiSuccessContract)
           })
           expect(busy.payload?.type).toBe("session.status")
 
+          const user = await stream.next((event) => {
+            if (event.directory !== directory || event.payload?.type !== "message.updated") return false
+            const properties = event.payload.properties
+            return (
+              isRecord(properties) &&
+              isRecord(properties.info) &&
+              properties.info.sessionID === sessionID &&
+              properties.info.role === "user"
+            )
+          }, 15_000)
+          const userProperties = user.payload?.properties
+          expect(user.payload?.type).toBe("message.updated")
+          if (isRecord(userProperties) && isRecord(userProperties.info) && typeof userProperties.info.id === "string") {
+            userMessageID = userProperties.info.id
+          }
+          expect(userMessageID.length).toBeGreaterThan(0)
+
+          const delta = await stream.next((event) => {
+            if (event.directory !== directory || event.payload?.type !== "message.part.delta") return false
+            const properties = event.payload.properties
+            return (
+              isRecord(properties) &&
+              properties.sessionID === sessionID &&
+              typeof properties.delta === "string" &&
+              properties.delta.length > 0
+            )
+          }, 60_000)
+          expect(delta.payload?.type).toBe("message.part.delta")
+
           await request
 
           const idle = await stream.next((event) => {
@@ -2902,6 +2932,7 @@ if (isRealPiSuccessContract)
           )
         })
         expect(assistant).toBeTruthy()
+        expect(isRecord(assistant?.info) && assistant.info.parentID === userMessageID).toBe(true)
 
         const sessionJsonl = await readFile(
           join(directory!, ".agents", "atree", "sessions", sessionID, "session.jsonl"),

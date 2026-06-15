@@ -144,6 +144,7 @@ bun run test:contract:pi-real-success
 - 2026-06-16：使用用户本机 Pi 配置启动 `ATREE_PI_EXECUTION=real bun run dev:pi-backend`，随后执行 `bun run test:contract:pi-real-success`。结果：8 pass / 28 skip / 0 fail；真实 Pi `prompt_async` 成功进入 busy、完成回复、回到 idle，并把 user / assistant 写入当前目录 `.agents/atree/sessions/<id>/session.jsonl`。
 - 2026-06-16：扩展 `test:contract:pi-real-success`，加入真实 Pi 配置下的 extension lifecycle 验证。结果：9 pass / 28 skip / 0 fail；真实 `.pi/extensions/*.ts` 在真实模型执行路径下触发 `session_start`、`resources_discover` 和 `before_agent_start`，并记录到当前目录 `.agents/atree-contract/extension-events.jsonl`。
 - 2026-06-16：扩展 `test:contract:pi-real-success`，加入真实 Pi 配置下的一次性 `at` 自动化消息验证。结果：10 pass / 28 skip / 0 fail；到期 schedule 通过真实 `AgentSession.prompt()` 执行，清除 pending schedule，并把带 `source.type = "schedule"` 的自动化 user message 和 assistant 回复写入当前目录 `session.jsonl`。
+- 2026-06-16：扩展 `test:contract:pi-real-success`，加入真实 Pi 流式 SSE 验证。结果：11 pass / 30 skip / 0 fail；真实 `prompt_async` 会流出 user `message.updated` 和 assistant `message.part.delta`，并验证 assistant `parentID` 指向本轮 user message，避免真实链路下 ChatView 隐藏回复。
 
 当前默认护栏已经用浏览器跑通 faux Pi 链路：页面打开真实 session，发送消息，展示 faux assistant 回复，并确认消息写入目录 `session.jsonl`。还缺的是会消耗真实模型资源的浏览器端验收：
 
