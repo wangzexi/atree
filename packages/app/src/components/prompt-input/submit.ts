@@ -160,17 +160,18 @@ export async function sendFollowupDraft(input: FollowupSendInput) {
       return false
     }
 
-    const sentNative = await promptAtreeSession({
-      current: input.current,
-      directory: input.draft.sessionDirectory,
-      sessionID: input.draft.sessionID,
-      agent: input.draft.agent,
-      model: input.draft.model,
-      messageID,
-      parts: requestParts,
-      variant: input.draft.variant,
-    })
-    if (!sentNative) {
+    if (input.current) {
+      await promptAtreeSession({
+        current: input.current,
+        directory: input.draft.sessionDirectory,
+        sessionID: input.draft.sessionID,
+        agent: input.draft.agent,
+        model: input.draft.model,
+        messageID,
+        parts: requestParts,
+        variant: input.draft.variant,
+      })
+    } else {
       await input.client.session.promptAsync({
         sessionID: input.draft.sessionID,
         agent: input.draft.agent,

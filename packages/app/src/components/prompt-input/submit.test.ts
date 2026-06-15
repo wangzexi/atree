@@ -2,6 +2,7 @@ import { beforeAll, beforeEach, describe, expect, mock, test } from "bun:test"
 import type { Prompt } from "@/context/prompt"
 
 let createPromptSubmit: typeof import("./submit").createPromptSubmit
+let sendFollowupDraft: typeof import("./submit").sendFollowupDraft
 
 const createdClients: string[] = []
 const createdSessions: string[] = []
@@ -19,6 +20,7 @@ const optimisticSeeded: boolean[] = []
 const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
+const sentPromptAsync: string[] = []
 const syncedDirectories: string[] = []
 const nativeRequests: Array<{ method: string; pathname: string; search: string; body?: unknown }> = []
 const originalFetch = globalThis.fetch
@@ -54,7 +56,10 @@ const clientFor = (directory: string) => {
           return { data: undefined }
         },
       prompt: async () => ({ data: undefined }),
-      promptAsync: async () => ({ data: undefined }),
+      promptAsync: async () => {
+        sentPromptAsync.push(directory)
+        return { data: undefined }
+      },
       command: async () => ({ data: undefined }),
       abort: async () => ({ data: undefined }),
     },
@@ -228,6 +233,7 @@ beforeAll(async () => {
 
   const mod = await import("./submit")
   createPromptSubmit = mod.createPromptSubmit
+  sendFollowupDraft = mod.sendFollowupDraft
 })
 
 beforeEach(() => {
@@ -239,6 +245,7 @@ beforeEach(() => {
   promoted.length = 0
   params = {}
   sentShell.length = 0
+  sentPromptAsync.length = 0
   syncedDirectories.length = 0
   nativeRequests.length = 0
   selected = "/repo/worktree-a"
@@ -474,5 +481,59 @@ describe("prompt submit worktree selection", () => {
     ])
     expect(nativeRequests.every((request) => request.search === "?directory=%2Frepo%2Fworktree-a")).toBe(true)
     expect(storedSessions["/repo/worktree-a"]?.map((session) => session.id)).toEqual(["ses_native"])
+  })
+
+  test("does not fall back to OpenCode promptAsync when native atree prompt fails", async () => {
+    const removed: string[] = []
+    globalThis.fetch = Object.assign(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const requestUrl = new URL(String(input))
+      nativeRequests.push({
+        method: init?.method ?? "GET",
+        pathname: requestUrl.pathname,
+        search: requestUrl.search,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
+      return Response.json({ message: "native failed" }, { status: 500 })
+    }, { preconnect: originalFetch.preconnect }) as typeof fetch
+
+    let thrown: unknown
+    try {
+      await sendFollowupDraft({
+        current: { type: "http", http: { url: "http://atree.local" } } as never,
+        client: clientFor("/repo/worktree-a") as never,
+        serverSync: {
+          child: () => [{}, () => undefined],
+        } as never,
+        sync: {
+          data: { command: [] },
+          session: {
+            optimistic: {
+              add: () => undefined,
+              remove: (input: { messageID: string }) => {
+                removed.push(input.messageID)
+              },
+            },
+          },
+        } as never,
+        draft: {
+          sessionID: "ses_existing",
+          sessionDirectory: "/repo/worktree-a",
+          prompt: promptValue,
+          context: [],
+          agent: "agent",
+          model: { providerID: "provider", modelID: "model" },
+        },
+        messageID: "msg_existing",
+      })
+    } catch (error) {
+      thrown = error
+    }
+
+    expect(thrown).toBeInstanceOf(Error)
+    expect(sentPromptAsync).toEqual([])
+    expect(nativeRequests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "POST /atree/session/ses_existing/prompt_async",
+    ])
+    expect(removed).toEqual(["msg_existing"])
   })
 })
