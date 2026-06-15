@@ -1,0 +1,15 @@
+{
+  "name": "@atree/runtime",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun src/index.ts --hostname 0.0.0.0 --port 4196",
+    "start": "bun src/index.ts"
+  },
+  "dependencies": {
+    "@mariozechner/pi-ai": "0.73.1",
+    "@mariozechner/pi-coding-agent": "0.73.1",
+    "croner": "9.0.0",
+    "yaml": "2.9.0"
+  }
+}
