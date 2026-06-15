@@ -405,6 +405,14 @@ export async function handle(request: Request): Promise<Response> {
         if (atreeRoute.length === 3 && atreeRoute[2] === "entries" && request.method === "GET") {
           return json(await store.listNativeEntries(directory, sessionID))
         }
+        if (atreeRoute.length === 3 && atreeRoute[2] === "diff" && request.method === "GET") {
+          await store.getNativeSession(directory, sessionID)
+          return json([])
+        }
+        if (atreeRoute.length === 3 && atreeRoute[2] === "todo" && request.method === "GET") {
+          await store.getNativeSession(directory, sessionID)
+          return json([])
+        }
         if (atreeRoute.length === 3 && atreeRoute[2] === "prompt_async" && request.method === "POST") {
           return runPromptAsync(directory, sessionID, await requestJson(request))
         }

@@ -596,6 +596,21 @@ runContract("atree backend OpenCode-compatible contract", () => {
     }
   })
 
+  test("serves native atree diff and todo state", async () => {
+    const created = await createSession()
+    const sessionID = String(created.id)
+
+    try {
+      const diff = await json<unknown[]>(`/atree/session/${sessionID}/diff`, { query: sessionQuery() })
+      const todo = await json<unknown[]>(`/atree/session/${sessionID}/todo`, { query: sessionQuery() })
+
+      expect(diff).toEqual([])
+      expect(todo).toEqual([])
+    } finally {
+      await deleteSession(sessionID)
+    }
+  })
+
   test("creates, updates, archives, and deletes native atree sessions", async () => {
     const created = await json<Json>("/atree/session", {
       method: "POST",

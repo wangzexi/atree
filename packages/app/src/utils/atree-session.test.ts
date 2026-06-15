@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import type { ServerConnection } from "@/context/server"
 import { listAtreeSessions, updateAtreeSession } from "./atree-session"
+import { listAtreeSessionDiff, listAtreeSessionTodos } from "./atree-session-state"
 
 const originalFetch = globalThis.fetch
 
@@ -97,5 +98,27 @@ describe("atree session adapter", () => {
     expect(JSON.parse(String(requests[0].init?.body))).toEqual({ time: { archived } })
     expect(session?.id).toBe("ses_2")
     expect(session?.time.archived).toBe(archived)
+  })
+
+  test("reads diff and todo state from native atree endpoints", async () => {
+    const requests: URL[] = []
+    globalThis.fetch = Object.assign(async (input: RequestInfo | URL) => {
+      const url = new URL(input.toString())
+      requests.push(url)
+      if (url.pathname.endsWith("/diff")) return Response.json([{ file: "note.md", additions: 1, deletions: 0 }])
+      if (url.pathname.endsWith("/todo"))
+        return Response.json([{ content: "Review migration", status: "pending", priority: "medium" }])
+      return Response.json([])
+    }, originalFetch)
+
+    const diff = await listAtreeSessionDiff(current, "/repo/root", "ses_3")
+    const todo = await listAtreeSessionTodos(current, "/repo/root", "ses_3")
+
+    expect(requests.map((url) => `${url.pathname}?${url.searchParams}`)).toEqual([
+      "/atree/session/ses_3/diff?directory=%2Frepo%2Froot",
+      "/atree/session/ses_3/todo?directory=%2Frepo%2Froot",
+    ])
+    expect(diff).toEqual([{ file: "note.md", additions: 1, deletions: 0 }])
+    expect(todo).toEqual([{ content: "Review migration", status: "pending", priority: "medium" }])
   })
 })

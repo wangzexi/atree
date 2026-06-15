@@ -15,6 +15,7 @@ import { createServerSdkContext, useServerSDK } from "./server-sdk"
 import { type createServerSyncContextInner } from "./server-sync"
 import { listAtreeMessages } from "@/utils/atree-message"
 import { getAtreeSession, listAtreeSessions, updateAtreeSession } from "@/utils/atree-session"
+import { listAtreeSessionDiff, listAtreeSessionTodos } from "@/utils/atree-session-state"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
@@ -514,9 +515,9 @@ export const createDirSyncContext = (
 
         const key = keyFor(directory, sessionID)
         return runInflight(inflightDiff, key, () =>
-          retry(() => client.session.diff({ sessionID })).then((diff) => {
+          retry(() => listAtreeSessionDiff(serverSDK.connection, directory, sessionID)).then((diff) => {
             if (!tracked(directory, sessionID)) return
-            setStore("session_diff", sessionID, reconcile(list(diff.data), { key: "file" }))
+            setStore("session_diff", sessionID, reconcile(list(diff), { key: "file" }))
           }),
         )
       },
@@ -538,11 +539,10 @@ export const createDirSyncContext = (
 
         const key = keyFor(directory, sessionID)
         return runInflight(inflightTodo, key, () =>
-          retry(() => client.session.todo({ sessionID })).then((todo) => {
+          retry(() => listAtreeSessionTodos(serverSDK.connection, directory, sessionID)).then((todo) => {
             if (!tracked(directory, sessionID)) return
-            const list = todo.data ?? []
-            setStore("todo", sessionID, reconcile(list, { key: "id" }))
-            serverSync.todo.set(sessionID, list)
+            setStore("todo", sessionID, reconcile(todo, { key: "id" }))
+            serverSync.todo.set(sessionID, todo)
           }),
         )
       },
