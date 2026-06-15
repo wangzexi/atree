@@ -119,6 +119,12 @@ function currentUrl(current: ServerConnection.Any | null | undefined, path: stri
   return new URL(path, current.http.url)
 }
 
+function responseError(method: string, path: string, status: number, text: string) {
+  return Object.assign(new Error(`${method} ${path} failed: ${status} ${text}`), {
+    cause: { status },
+  })
+}
+
 export async function listAtreeSessions(
   current: ServerConnection.Any | null | undefined,
   directory: string,
@@ -131,7 +137,7 @@ export async function listAtreeSessions(
   if (options.limit !== undefined) url.searchParams.set("limit", String(options.limit))
 
   const response = await fetch(url, { headers: sessionScheduleRequestHeaders(current) })
-  if (!response.ok) throw new Error(`Failed to list atree sessions: ${response.status}`)
+  if (!response.ok) throw responseError("GET", "/atree/session", response.status, await response.text())
   const json = (await response.json()) as NativeSessionInfo[]
   return json.map(toSession)
 }
@@ -146,7 +152,7 @@ export async function getAtreeSession(
   url.searchParams.set("directory", directory)
 
   const response = await fetch(url, { headers: sessionScheduleRequestHeaders(current) })
-  if (!response.ok) throw new Error(`Failed to get atree session: ${response.status}`)
+  if (!response.ok) throw responseError("GET", `/atree/session/${sessionID}`, response.status, await response.text())
   const json = (await response.json()) as NativeSessionInfo
   return toSession(json)
 }

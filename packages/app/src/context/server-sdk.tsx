@@ -243,6 +243,7 @@ export function createServerSdkContext(server: ServerConnection.Any, scope: Serv
   })
 
   return {
+    connection: server,
     scope,
     url: server.http.url,
     client: sdk,
@@ -298,6 +299,7 @@ function createDirSdkContext(directory: string, serverSDK: ServerSDK) {
   onCleanup(unsub)
 
   return {
+    connection: serverSDK.connection,
     scope: serverSDK.scope,
     directory,
     client,

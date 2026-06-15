@@ -419,6 +419,9 @@ try {
 
   await page.getByText(message).first().waitFor({ timeout: 15000 })
   await page.getByText(\`atree faux response: \${message}\`).first().waitFor({ timeout: 15000 })
+  if (!backendRequests.some((url) => url.includes(\`/atree/session/\${sessionID}\`))) {
+    throw new Error("frontend browser smoke did not load session metadata from the native atree detail endpoint")
+  }
 
   const sessionJsonl = await readSessionJsonl(
     directory,

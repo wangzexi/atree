@@ -13,6 +13,7 @@ import { SESSION_CACHE_LIMIT, dropSessionCaches, pickSessionCacheEvictions } fro
 import { diffs as list, message as clean } from "@/utils/diffs"
 import { createServerSdkContext, useServerSDK } from "./server-sdk"
 import { type createServerSyncContextInner } from "./server-sync"
+import { getAtreeSession } from "@/utils/atree-session"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
@@ -472,10 +473,9 @@ export const createDirSyncContext = (
           const sessionReq =
             hasSession && !opts?.force
               ? Promise.resolve()
-              : retry(() => client.session.get({ sessionID }))
-                  .then((session) => {
+              : retry(() => getAtreeSession(serverSDK.connection, directory, sessionID))
+                  .then((data) => {
                     if (!tracked(directory, sessionID)) return
-                    const data = session.data
                     if (!data) return
                     setStore(
                       "session",
