@@ -347,6 +347,7 @@ export function createServerSyncContextInner(_serverSDK?: ServerSDK) {
       await bootstrapDirectory({
         directory,
         scope: serverSDK.scope,
+        current: serverSDK.connection,
         mcp: children.mcp(key),
         global: {
           config: globalStore.config,

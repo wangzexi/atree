@@ -21,6 +21,8 @@ import { QueryClient, queryOptions } from "@tanstack/solid-query"
 import { loadMcpQuery } from "../server-sync"
 import { NormalizedProviderListResponse } from "@opencode-ai/ui/context"
 import { ScopedKey, type ServerScope } from "@/utils/server-scope"
+import { ServerConnection } from "@/context/server"
+import { getAtreeSession } from "@/utils/atree-session"
 
 type GlobalStore = {
   ready: boolean
@@ -161,6 +163,8 @@ function mergeSession(setStore: SetStoreFunction<State>, session: Session) {
 }
 
 function warmSessions(input: {
+  current?: ServerConnection.Any | null
+  directory: string
   ids: string[]
   store: Store<State>
   setStore: SetStoreFunction<State>
@@ -171,8 +175,11 @@ function warmSessions(input: {
   if (ids.length === 0) return Promise.resolve()
   return Promise.all(
     ids.map((sessionID) =>
-      retry(() => input.sdk.session.get({ sessionID })).then((x) => {
-        const session = x.data
+      retry(() =>
+        input.current
+          ? getAtreeSession(input.current, input.directory, sessionID)
+          : input.sdk.session.get({ sessionID }).then((x) => x.data),
+      ).then((session) => {
         if (!session?.id) return
         mergeSession(input.setStore, session)
       }),
@@ -201,6 +208,7 @@ export const loadPathQuery = (scope: ServerScope, directory: string | null, sdk:
 export async function bootstrapDirectory(input: {
   directory: string
   scope: ServerScope
+  current?: ServerConnection.Any | null
   mcp: boolean
   sdk: OpencodeClient
   store: Store<State>
@@ -263,7 +271,14 @@ export async function bootstrapDirectory(input: {
             const grouped = groupBySession(
               (x.data ?? []).filter((perm): perm is PermissionRequest => !!perm?.id && !!perm.sessionID),
             )
-            return warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk }).then(() =>
+            return warmSessions({
+              current: input.current,
+              directory: input.directory,
+              ids,
+              store: input.store,
+              setStore: input.setStore,
+              sdk: input.sdk,
+            }).then(() =>
               batch(() => {
                 for (const sessionID of Object.keys(input.store.permission)) {
                   if (grouped[sessionID]) continue
@@ -288,7 +303,14 @@ export async function bootstrapDirectory(input: {
           input.sdk.question.list().then((x) => {
             const ids = (x.data ?? []).map((question) => question?.sessionID).filter((id): id is string => !!id)
             const grouped = groupBySession((x.data ?? []).filter((q): q is QuestionRequest => !!q?.id && !!q.sessionID))
-            return warmSessions({ ids, store: input.store, setStore: input.setStore, sdk: input.sdk }).then(() =>
+            return warmSessions({
+              current: input.current,
+              directory: input.directory,
+              ids,
+              store: input.store,
+              setStore: input.setStore,
+              sdk: input.sdk,
+            }).then(() =>
               batch(() => {
                 for (const sessionID of Object.keys(input.store.question)) {
                   if (grouped[sessionID]) continue
