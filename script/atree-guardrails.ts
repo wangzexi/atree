@@ -419,8 +419,15 @@ try {
 
   await page.getByText(message).first().waitFor({ timeout: 15000 })
   await page.getByText(\`atree faux response: \${message}\`).first().waitFor({ timeout: 15000 })
-  if (!backendRequests.some((url) => url.includes(\`/atree/session/\${sessionID}\`))) {
+  const sawNativeDetail = backendRequests.some((url) => new URL(url).pathname === "/atree/session/" + sessionID)
+  if (!sawNativeDetail) {
     throw new Error("frontend browser smoke did not load session metadata from the native atree detail endpoint")
+  }
+  const sawNativeEntries = backendRequests.some(
+    (url) => new URL(url).pathname === "/atree/session/" + sessionID + "/entries",
+  )
+  if (!sawNativeEntries) {
+    throw new Error("frontend browser smoke did not load message history from the native atree entries endpoint")
   }
 
   const sessionJsonl = await readSessionJsonl(

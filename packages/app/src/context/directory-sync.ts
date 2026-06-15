@@ -13,6 +13,7 @@ import { SESSION_CACHE_LIMIT, dropSessionCaches, pickSessionCacheEvictions } fro
 import { diffs as list, message as clean } from "@/utils/diffs"
 import { createServerSdkContext, useServerSDK } from "./server-sdk"
 import { type createServerSyncContextInner } from "./server-sync"
+import { listAtreeMessages } from "@/utils/atree-message"
 import { getAtreeSession } from "@/utils/atree-session"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
@@ -298,19 +299,19 @@ export const createDirSyncContext = (
     evict(directory, setStore, stale)
   }
 
-  const fetchMessages = async (input: { client: typeof client; sessionID: string; limit: number; before?: string }) => {
+  const fetchMessages = async (input: { directory: string; sessionID: string; limit: number; before?: string }) => {
     const messages = await retry(() =>
-      input.client.session.messages({ sessionID: input.sessionID, limit: input.limit, before: input.before }),
+      listAtreeMessages({
+        current: serverSDK.connection,
+        directory: input.directory,
+        sessionID: input.sessionID,
+      }),
     )
-    const items = (messages.data ?? []).filter((x) => !!x?.info?.id)
-    const session = items.map((x) => clean(x.info)).sort((a, b) => cmp(a.id, b.id))
-    const part = items.map((message) => ({ id: message.info.id, part: sortParts(message.parts) }))
-    const cursor = messages.response.headers.get("x-next-cursor") ?? undefined
     return {
-      session,
-      part,
-      cursor,
-      complete: !cursor,
+      session: messages.session.map(clean).sort((a, b) => cmp(a.id, b.id)),
+      part: messages.part.map((message) => ({ id: message.id, part: sortParts(message.part) })),
+      cursor: messages.cursor,
+      complete: messages.complete,
     }
   }
 
@@ -318,7 +319,6 @@ export const createDirSyncContext = (
 
   const loadMessages = async (input: {
     directory: string
-    client: typeof client
     setStore: Setter
     sessionID: string
     limit: number
@@ -499,7 +499,6 @@ export const createDirSyncContext = (
               ? Promise.resolve()
               : loadMessages({
                   directory,
-                  client,
                   setStore,
                   sessionID,
                   limit,
@@ -572,7 +571,6 @@ export const createDirSyncContext = (
 
           await loadMessages({
             directory,
-            client,
             setStore,
             sessionID,
             limit: step,
