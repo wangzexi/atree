@@ -46,6 +46,7 @@ import {
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
+import { listAtreeSessions } from "@/utils/atree-session"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -947,14 +948,13 @@ function ArchivedSessionsMenu(props: {
   const serverSync = useServerSync()
   const serverCtx = createMemo(() => {
     const conn = global.servers.list().find((item) => ServerConnection.key(item) === props.serverKey)
-    if (conn) return global.createServerCtx(conn)
+    if (conn) return { conn, ...global.createServerCtx(conn) }
   })
   const [sessions, { refetch, mutate }] = createResource(
     () => [serverCtx(), props.directory, props.version] as const,
     async ([serverCtx, directory]) => {
       if (!serverCtx) return [] as Session[]
-      const result = await serverCtx.sdk.client.session.list({ directory, roots: true })
-      return (result.data ?? [])
+      return (await listAtreeSessions(serverCtx.conn, directory, { includeArchived: true }))
         .filter((session) => !session.parentID && !!session.time?.archived)
         .sort((a, b) => (b.time.archived ?? 0) - (a.time.archived ?? 0))
     },

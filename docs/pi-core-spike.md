@@ -94,7 +94,7 @@ bun run dev:pi-split:none
 - `/atree/session/:id`
 - `/atree/session/:id/entries`
 
-其中 `/session...` 仍是当前前端依赖的 OpenCode-compatible facade；`/atree...` 是新加入的 atree native 只读接口，直接暴露 `.agents/atree` 中的 session `meta.yaml` 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。后续前端读路径可以优先迁到这些 native endpoint，再逐步缩掉 facade。
+其中 `/session...` 仍是当前前端消息、写入和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 只读接口，直接暴露 `.agents/atree` 中的 session `meta.yaml` 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取和归档菜单已经开始通过前端 adapter 消费 `/atree/session`，adapter 只把 native session meta 映射成现有 UI 暂时需要的最小 `Session` 形状。后续可以继续把 session detail 和消息读取迁到 native endpoint，再逐步缩掉 facade。
 
 已落盘到目录事实源：
 
@@ -220,3 +220,4 @@ bun run test:contract:pi-exec
 - 复制业务目录或移动单个会话目录后，runtime 会在打开会话时把 `session.jsonl` 第一行 Pi session header 的 `cwd` 修复为当前业务目录。
 - `bun run test:guardrails` 会模拟 faux Pi 执行过程中 runtime 被关闭；重启后只依赖同一个业务目录里的 `.agents/atree/` 恢复 session 和已落盘历史，并验证后续 `prompt_async` 仍可继续执行。
 - Web 前端通过 `dev:pi-split:faux` 启动时请求 4196 的 atree runtime，而不是 4096 的 OpenCode backend；`bun run test:guardrails` 会自动跑 Vite dev bundle smoke，并用 Playwright 打开真实浏览器页面验证 `aTree` 首屏渲染、backend 连接、网页发送消息、faux assistant 回复展示和 `.agents/atree/sessions/<id>/session.jsonl` 落盘。
+- 目录树和归档菜单的 session 元信息读取已经走 `/atree/session`，默认护栏中的前端 build 和浏览器 smoke 覆盖了该 adapter 可以在真实页面中加载、发送消息并保持目录 JSONL 落盘。

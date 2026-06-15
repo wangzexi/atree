@@ -90,6 +90,7 @@ import {
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
+import { listAtreeSessions } from "@/utils/atree-session"
 import {
   collectNewSessionDeepLinks,
   collectOpenProjectDeepLinks,
@@ -2541,9 +2542,7 @@ export default function Layout(props: ParentProps) {
           try {
             const [files, sessions] = await Promise.all([
               client.file.list({ directory: root, path: relativePath(root, child.absolute) }),
-              serverSDK
-                .createClient({ directory: child.absolute, throwOnError: true })
-                .session.list({ directory: child.absolute, roots: true }),
+              listAtreeSessions(server.current, child.absolute),
             ])
             const childChildren = toDirectoryNodes(files.data)
             setTree("directory", childKey, (prev) => ({
@@ -2551,9 +2550,9 @@ export default function Layout(props: ParentProps) {
               loaded: true,
               loading: false,
               children: childChildren,
-              sessions: sessions.data ?? [],
+              sessions,
             }))
-            preloadSessionSchedules(sessions.data ?? [])
+            preloadSessionSchedules(sessions)
             for (const grandchild of childChildren) ensureDirectory(grandchild.absolute)
           } catch {
             // Keep tree browsing usable even if a child directory cannot expose sessions or files.
@@ -2580,12 +2579,11 @@ export default function Layout(props: ParentProps) {
 
       setTree("directory", key, (prev) => ({ ...prev, loading: true }))
       const client = serverSDK.createClient({ directory: root, throwOnError: true })
-      const sessionClient = serverSDK.createClient({ directory, throwOnError: true })
 
       try {
         const [files, sessions] = await Promise.all([
           client.file.list({ directory: root, path: relativePath(root, directory) }),
-          sessionClient.session.list({ directory, roots: true }),
+          listAtreeSessions(server.current, directory),
         ])
         const children = toDirectoryNodes(files.data)
         setTree("directory", key, (prev) => ({
@@ -2593,9 +2591,9 @@ export default function Layout(props: ParentProps) {
           loaded: true,
           loading: false,
           children,
-          sessions: sessions.data ?? [],
+          sessions,
         }))
-        preloadSessionSchedules(sessions.data ?? [])
+        preloadSessionSchedules(sessions)
         for (const child of children) ensureDirectory(child.absolute)
         await probeChildDirectories(root, children)
         setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
