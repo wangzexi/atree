@@ -37,6 +37,7 @@ import { retry } from "@opencode-ai/core/util/retry"
 import type { ServerScope } from "@/utils/server-scope"
 import { persisted } from "@/utils/persist"
 import { toggleMcp } from "./global-sync/mcp"
+import { listAtreeSessions } from "@/utils/atree-session"
 
 type GlobalStore = {
   ready: boolean
@@ -281,7 +282,9 @@ export function createServerSyncContextInner(_serverSDK?: ServerSDK) {
           loadRootSessionsWithFallback({
             directory,
             limit,
-            list: (query) => serverSDK.client.session.list(query),
+            list: async (query) => ({
+              data: await listAtreeSessions(serverSDK.connection, query.directory, { limit: query.limit }),
+            }),
           })
             .then((x) => {
               const nonArchived = (x.data ?? [])
