@@ -24,6 +24,7 @@ import { ScopedKey } from "@/utils/server-scope"
 import { nextSessionMetadata, randomSessionEmoji, sessionEmoji } from "@/pages/layout/helpers"
 import { pathKey } from "@/utils/path-key"
 import { promptAtreeSession } from "@/utils/atree-prompt"
+import { createAtreeSession, updateAtreeSession } from "@/utils/atree-session"
 
 type PendingPrompt = {
   abort: AbortController
@@ -414,10 +415,10 @@ export function createPromptSubmit(input: PromptSubmitInput) {
 
     let session = input.info()
     if (!session && isNewSession) {
-      const created = await client.session
-        .create()
-        .then((x) => x.data ?? undefined)
-        .catch((err) => {
+      const created = await (server.current
+        ? createAtreeSession(server.current, sessionDirectory)
+        : client.session.create().then((x) => x.data ?? undefined)
+      ).catch((err) => {
           showToast({
             title: language.t("prompt.toast.sessionCreateFailed.title"),
             description: errorMessage(err),
@@ -432,13 +433,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
           .filter((item) => openSessionIDs.has(item.id))
           .map((item) => sessionEmoji(item))
         const emoji = randomSessionEmoji(usedOpenEmojis)
-        const sessionWithEmoji = await client.session
-          .update({
-            sessionID: created.id,
-            metadata: nextSessionMetadata(created, emoji),
-          })
-          .then((x) => x.data ?? created)
-          .catch(() => created)
+        const metadata = nextSessionMetadata(created, emoji)
+        const sessionWithEmoji =
+          (await (server.current
+            ? updateAtreeSession(server.current, sessionDirectory, created.id, { metadata })
+            : client.session
+                .update({
+                  sessionID: created.id,
+                  metadata,
+                })
+                .then((x) => x.data ?? undefined)
+          ).catch(() => undefined)) ?? created
 
         seed(sessionDirectory, sessionWithEmoji)
         session = sessionWithEmoji

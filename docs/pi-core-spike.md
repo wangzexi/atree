@@ -96,7 +96,7 @@ bun run dev:pi-split:none
 - `/atree/session/:id/prompt_async`
 - `/atree/session/:id/schedule`
 
-其中 `/session...` 仍是当前前端 session 创建、标题/emoji 更新、归档、SSE 和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 接口，直接暴露 `.agents/atree` 中的 session `meta.yaml`、schedule 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取、归档菜单、打开会话时的 session detail、消息历史读取、普通 prompt 写入和自动化消息读/删已经通过前端 adapter 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/prompt_async` / `/atree/session/:id/schedule`。adapter 只把 native session meta、schedule 和 Pi message entries 映射成现有 UI 暂时需要的最小 `Session` / `SessionScheduleSummary` / `Message` / `Part` 形状；prompt 写入不重新包装消息协议，只把当前 request parts 发给 native endpoint。后续可以继续把 session 创建/更新/归档和 SSE 也迁到 native/Pi 接口，再逐步缩掉 facade。
+其中 `/session...` 仍是当前前端标题/emoji 更新、归档、SSE 和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 接口，直接暴露 `.agents/atree` 中的 session `meta.yaml`、schedule 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取、归档菜单、打开会话时的 session detail、新建普通会话、消息历史读取、普通 prompt 写入和自动化消息读/删已经通过前端 adapter 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/prompt_async` / `/atree/session/:id/schedule`。adapter 只把 native session meta、schedule 和 Pi message entries 映射成现有 UI 暂时需要的最小 `Session` / `SessionScheduleSummary` / `Message` / `Part` 形状；prompt 写入不重新包装消息协议，只把当前 request parts 发给 native endpoint。后续可以继续把标题/emoji 更新、归档和 SSE 也迁到 native/Pi 接口，再逐步缩掉 facade。
 
 已落盘到目录事实源：
 
@@ -200,6 +200,7 @@ bun run test:contract:pi-exec
 
 - OpenCode-compatible HTTP/SSE 契约通过。
 - atree native 只读 HTTP 契约通过：`/atree/session` 和 `/atree/session/:id/entries` 能直接从 `.agents/atree` 返回原生 meta / Pi entries，且不混入 OpenCode message shape。
+- atree native session mutation 契约通过：`POST /atree/session`、`PATCH /atree/session/:id` 和 `DELETE /atree/session/:id` 都只读写当前目录 `.agents/atree`。
 - atree native prompt 写入契约通过：`/atree/session/:id/prompt_async` 会把消息写进同一个 Pi `session.jsonl`，并能通过 native entries 读回原始 Pi entry。
 - atree 目录存储结构契约通过。
 - Pi `AgentSession.prompt()` faux 执行契约通过。

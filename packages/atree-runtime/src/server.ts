@@ -378,18 +378,29 @@ export async function handle(request: Request): Promise<Response> {
     const atreeRoute = atreeRoutes(pathname)
     if (atreeRoute) {
       if (atreeRoute[0] === "session") {
-        if (atreeRoute.length === 1 && request.method === "GET") {
-          const limit = Number(url.searchParams.get("limit") ?? 0) || undefined
-          const includeArchived = url.searchParams.get("includeArchived") === "true"
-          return json(await store.listNativeSessions(directory, { includeArchived, limit }))
+        if (atreeRoute.length === 1) {
+          if (request.method === "GET") {
+            const limit = Number(url.searchParams.get("limit") ?? 0) || undefined
+            const includeArchived = url.searchParams.get("includeArchived") === "true"
+            return json(await store.listNativeSessions(directory, { includeArchived, limit }))
+          }
+          if (request.method === "POST") {
+            const created = await createSession(directory, await requestJson(request))
+            return json(await store.getNativeSession(directory, created.id))
+          }
         }
 
         const sessionID = atreeRoute[1]
         if (!sessionID) return notFound()
         directory = await directoryForSession(request, url, directory, sessionID)
 
-        if (atreeRoute.length === 2 && request.method === "GET") {
-          return json(await store.getNativeSession(directory, sessionID))
+        if (atreeRoute.length === 2) {
+          if (request.method === "GET") return json(await store.getNativeSession(directory, sessionID))
+          if (request.method === "PATCH") {
+            await updateSession(directory, sessionID, await requestJson(request))
+            return json(await store.getNativeSession(directory, sessionID))
+          }
+          if (request.method === "DELETE") return json(await deleteSession(directory, sessionID))
         }
         if (atreeRoute.length === 3 && atreeRoute[2] === "entries" && request.method === "GET") {
           return json(await store.listNativeEntries(directory, sessionID))

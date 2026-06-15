@@ -596,6 +596,71 @@ runContract("atree backend OpenCode-compatible contract", () => {
     }
   })
 
+  test("creates, updates, archives, and deletes native atree sessions", async () => {
+    const created = await json<Json>("/atree/session", {
+      method: "POST",
+      query: sessionQuery(),
+      body: JSON.stringify({
+        title: "Native atree mutation",
+        metadata: {
+          atree: {
+            emoji: "🧭",
+          },
+        },
+      }),
+    })
+    const sessionID = String(created.id)
+    expect(sessionID).toStartWith("ses_")
+    expect(created.directory).toBe(directory)
+    expect("slug" in created).toBe(false)
+    expect(isRecord(created.meta)).toBe(true)
+    expect(created.meta.title).toBe("Native atree mutation")
+    expect(created.meta.icon).toBe("🧭")
+
+    try {
+      const updated = await json<Json>(`/atree/session/${sessionID}`, {
+        method: "PATCH",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          title: "Native atree mutation updated",
+          metadata: {
+            atree: {
+              emoji: "🧪",
+            },
+          },
+        }),
+      })
+      expect(updated.id).toBe(sessionID)
+      expect(isRecord(updated.meta)).toBe(true)
+      expect(updated.meta.title).toBe("Native atree mutation updated")
+      expect(updated.meta.icon).toBe("🧪")
+
+      const archived = await json<Json>(`/atree/session/${sessionID}`, {
+        method: "PATCH",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          time: {
+            archived: Date.now(),
+          },
+        }),
+      })
+      expect(isRecord(archived.meta)).toBe(true)
+      expect(typeof archived.meta.archived_at).toBe("string")
+
+      const deleted = await json<boolean>(`/atree/session/${sessionID}`, {
+        method: "DELETE",
+        query: sessionQuery(),
+      })
+      expect(deleted).toBe(true)
+      const afterDelete = await fetch(url(`/atree/session/${sessionID}`, sessionQuery()), {
+        headers: headers({ accept: "application/json" }),
+      })
+      expect(afterDelete.status).toBe(404)
+    } finally {
+      await deleteSession(sessionID)
+    }
+  })
+
   runPromptSuccessTest("persists native atree prompt_async into Pi session entries", async () => {
     const created = await createSession()
     const sessionID = String(created.id)

@@ -20,10 +20,18 @@ const storedSessions: Record<string, Array<{ id: string; title?: string }>> = {}
 const promoted: Array<{ directory: string; sessionID: string }> = []
 const sentShell: string[] = []
 const syncedDirectories: string[] = []
+const nativeRequests: Array<{ method: string; pathname: string; search: string; body?: unknown }> = []
+const originalFetch = globalThis.fetch
 
 let params: { id?: string } = {}
 let selected = "/repo/worktree-a"
 let variant: string | undefined
+let serverCurrent:
+  | {
+      type: "http"
+      http: { url: string }
+    }
+  | undefined
 
 const promptValue: Prompt = [{ type: "text", content: "ls", start: 0, end: 2 }]
 
@@ -77,8 +85,13 @@ beforeAll(async () => {
     showToast: () => 0,
   }))
 
+  mock.module("@/utils/toast", () => ({
+    showToast: () => 0,
+  }))
+
   mock.module("@opencode-ai/core/util/encode", () => ({
     base64Encode: (value: string) => value,
+    base64Decode: (value: string) => value,
   }))
 
   mock.module("@/context/local", () => ({
@@ -107,7 +120,7 @@ beforeAll(async () => {
   }))
 
   mock.module("@/context/server", () => ({
-    useServer: () => ({ key: "server-key" }),
+    useServer: () => ({ key: "server-key", current: serverCurrent }),
   }))
 
   mock.module("@/context/tabs", () => ({
@@ -227,10 +240,51 @@ beforeEach(() => {
   params = {}
   sentShell.length = 0
   syncedDirectories.length = 0
+  nativeRequests.length = 0
   selected = "/repo/worktree-a"
   variant = undefined
+  serverCurrent = undefined
+  globalThis.fetch = originalFetch
   for (const key of Object.keys(storedSessions)) delete storedSessions[key]
 })
+
+function nativeSessionInfo(input: {
+  id: string
+  directory: string
+  title: string
+  emoji?: string
+  archivedAt?: string | null
+}) {
+  const now = new Date().toISOString()
+  return {
+    id: input.id,
+    directory: input.directory,
+    paths: {
+      root: `${input.directory}/.agents/atree/sessions/${input.id}`,
+      meta: `${input.directory}/.agents/atree/sessions/${input.id}/meta.yaml`,
+      sessionJsonl: `${input.directory}/.agents/atree/sessions/${input.id}/session.jsonl`,
+      assets: `${input.directory}/.agents/atree/sessions/${input.id}/assets`,
+    },
+    meta: {
+      version: 1,
+      id: input.id,
+      title: input.title,
+      icon: input.emoji,
+      metadata: input.emoji ? { atree: { emoji: input.emoji } } : undefined,
+      created_at: now,
+      updated_at: now,
+      archived_at: input.archivedAt ?? null,
+    },
+  }
+}
+
+async function waitForNativeRequest(pathname: string) {
+  for (let i = 0; i < 20; i++) {
+    if (nativeRequests.some((request) => request.pathname === pathname)) return
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  }
+  throw new Error(`timed out waiting for native request ${pathname}`)
+}
 
 describe("prompt submit worktree selection", () => {
   test("reads the latest worktree accessor value per submit", async () => {
@@ -357,5 +411,68 @@ describe("prompt submit worktree selection", () => {
 
     expect(storedSessions["/repo/worktree-a"]).toEqual([{ id: "session-1", title: "New session 1" }])
     expect(optimisticSeeded).toEqual([true])
+  })
+
+  test("creates new chat sessions and sends prompts through native atree endpoints when a server is connected", async () => {
+    serverCurrent = { type: "http", http: { url: "http://atree.local" } }
+    globalThis.fetch = Object.assign(async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const requestUrl = new URL(String(input))
+      const method = init?.method ?? "GET"
+      nativeRequests.push({
+        method,
+        pathname: requestUrl.pathname,
+        search: requestUrl.search,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
+      if (requestUrl.pathname === "/atree/session" && method === "POST") {
+        return Response.json(nativeSessionInfo({ id: "ses_native", directory: "/repo/worktree-a", title: "Native" }))
+      }
+      if (requestUrl.pathname === "/atree/session/ses_native" && method === "PATCH") {
+        const body = init?.body ? (JSON.parse(String(init.body)) as { metadata?: { atree?: { emoji?: string } } }) : {}
+        return Response.json(
+          nativeSessionInfo({
+            id: "ses_native",
+            directory: "/repo/worktree-a",
+            title: "Native",
+            emoji: body.metadata?.atree?.emoji,
+          }),
+        )
+      }
+      if (requestUrl.pathname === "/atree/session/ses_native/prompt_async" && method === "POST") {
+        return new Response(null, { status: 204 })
+      }
+      return Response.json({ message: "unexpected native request" }, { status: 500 })
+    }, { preconnect: originalFetch.preconnect }) as typeof fetch
+
+    const submit = createPromptSubmit({
+      info: () => undefined,
+      imageAttachments: () => [],
+      commentCount: () => 0,
+      autoAccept: () => false,
+      mode: () => "normal",
+      working: () => false,
+      editor: () => undefined,
+      queueScroll: () => undefined,
+      promptLength: (value) => value.reduce((sum, part) => sum + ("content" in part ? part.content.length : 0), 0),
+      addToHistory: () => undefined,
+      resetHistoryNavigation: () => undefined,
+      setMode: () => undefined,
+      setPopover: () => undefined,
+      newSessionWorktree: () => selected,
+      onNewSessionWorktreeReset: () => undefined,
+      onSubmit: () => undefined,
+    })
+
+    await submit.handleSubmit({ preventDefault: () => undefined } as unknown as Event)
+    await waitForNativeRequest("/atree/session/ses_native/prompt_async")
+
+    expect(createdSessions).toEqual([])
+    expect(nativeRequests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+      "POST /atree/session",
+      "PATCH /atree/session/ses_native",
+      "POST /atree/session/ses_native/prompt_async",
+    ])
+    expect(nativeRequests.every((request) => request.search === "?directory=%2Frepo%2Fworktree-a")).toBe(true)
+    expect(storedSessions["/repo/worktree-a"]?.map((session) => session.id)).toEqual(["ses_native"])
   })
 })

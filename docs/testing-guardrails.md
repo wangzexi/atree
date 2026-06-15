@@ -55,6 +55,7 @@ bun run test:guardrails
 - 2026-06-16：前端消息历史读取改为消费 `/atree/session/:id/entries` 的 Pi 原生 entries adapter；`bun run test:guardrails` 的浏览器 smoke 会明确断言会话页请求过 native detail endpoint 和 native entries endpoint。
 - 2026-06-16：前端自动化消息读取和删除改为消费 `/atree/session/:id/schedule`，并显式传入当前目录；`bun run test:guardrails` 通过，storage contract 38 pass，Pi faux execution contract 47 pass，real/default Pi missing-config boundary contract 各 25 pass / 15 skip，frontend browser smoke 会断言真实页面请求过 native schedule endpoint。
 - 2026-06-16：前端普通 prompt 写入改为消费 `/atree/session/:id/prompt_async`，服务端新旧 prompt endpoint 共用同一段 Pi 写入逻辑；`bun run test:guardrails` 通过，storage contract 39 pass，Pi faux execution contract 48 pass，real/default Pi missing-config boundary contract 各 25 pass / 16 skip，frontend browser smoke 会断言真实页面请求过 native prompt endpoint。
+- 2026-06-16：`POST/PATCH/DELETE /atree/session...` 接入目录事实源；`prompt-input` 单测会模拟已连接 server，断言新建会话、写 emoji 和发送首条消息都请求 native atree endpoint。`bun run test:guardrails` 通过，storage contract 40 pass，Pi faux execution contract 49 pass，real/default Pi missing-config boundary contract 各 26 pass / 16 skip。
 
 底层单项运行方式：
 
@@ -111,6 +112,7 @@ ATREE_CONTRACT_DIRECTORY=/path/to/workspace bun run test:contract
 - session 创建、列表、更新、消息读取、删除
 - `/provider` 返回固定的 Pi 默认 provider/model，`/agent` 返回绑定该模型的 primary agent
 - `/atree/session`、`/atree/session/:id/entries` 和 `/atree/session/:id/schedule` 是 native 视图，只返回目录内 `meta.yaml`、Pi `session.jsonl` entries 和 session schedule facts，不返回 OpenCode-compatible 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts`
+- `POST /atree/session`、`PATCH /atree/session/:id` 和 `DELETE /atree/session/:id` 可以创建、更新、归档和删除目录内 self-contained session
 - `/atree/session/:id/prompt_async` 可以把普通 prompt 写入同一个 Pi `session.jsonl`，并通过 native entries 直接读回 Pi 原始 message entry
 - `prompt_async` 后用户消息立即可从 API 读到
 - schedule 创建和删除
