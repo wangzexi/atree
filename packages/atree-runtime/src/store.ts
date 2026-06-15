@@ -329,6 +329,16 @@ function piExecutionMode(): PiExecutionMode {
   return "real"
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function fauxPromptDelayMs() {
+  const value = Number(process.env.ATREE_PI_FAUX_PROMPT_DELAY_MS ?? "")
+  if (!Number.isFinite(value) || value <= 0) return 0
+  return Math.min(value, 60_000)
+}
+
 function getFauxRegistration() {
   if (!fauxRegistration) {
     fauxRegistration = registerFauxProvider({
@@ -1626,6 +1636,10 @@ export class AtreeStore {
         : undefined
       try {
         await session.bindExtensions({})
+        if (mode === "faux") {
+          const delay = fauxPromptDelayMs()
+          if (delay > 0) await sleep(delay)
+        }
         await session.prompt(text, {
           expandPromptTemplates: false,
           source: "rpc",

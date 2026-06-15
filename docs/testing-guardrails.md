@@ -44,12 +44,13 @@ bun run test:guardrails
 - 运行对应 contract 测试
 - 关闭测试后端
 - 启动、写入、关闭、重启 atree runtime，确认目录事实源能跨进程恢复
+- 启动一个延迟的 faux Pi 执行，在 `prompt_async` 尚未完成时关闭 runtime，再重启确认会话不会被卡死
 - 最后执行前端 build
 - 启动临时 Vite dev server，确认前端开发入口会连到 atree runtime
 
 最近一次执行记录：
 
-- 2026-06-16：`bun run test:guardrails` 通过；storage contract 36 pass，Pi faux execution contract 45 pass，real/default Pi missing-config boundary contract 各 23 pass / 15 skip，restart persistence smoke、frontend build、frontend browser smoke 均通过。新增 Pi 默认 provider/model 契约、cron `nextRun` 基线契约、手写 Pi tool history 恢复契约，以及网页发送消息到目录 JSONL 的浏览器 smoke 已进入默认护栏。
+- 2026-06-16：`bun run test:guardrails` 通过；storage contract 36 pass，Pi faux execution contract 45 pass，real/default Pi missing-config boundary contract 各 23 pass / 15 skip，restart persistence smoke、interrupted execution smoke、frontend build、frontend browser smoke 均通过。新增 Pi 默认 provider/model 契约、cron `nextRun` 基线契约、手写 Pi tool history 恢复契约，以及网页发送消息到目录 JSONL 的浏览器 smoke 已进入默认护栏。
 
 底层单项运行方式：
 
@@ -183,6 +184,20 @@ ATREE_STORAGE_CONTRACT=1
 - 只通过同一个业务目录读取数据
 
 它验证 session、emoji、自动化消息、消息文本、`assets/` 文件内容和相对 file part 都能恢复，并且这些业务 payload 不会泄漏到全局缓存或配置目录。它还会验证重启后重新打开同一个业务目录时，runtime 能从 `.agents/atree` 里发现并执行已经过期的一次性自动化消息，而不是依赖重启前的内存定时器。这个测试的目的不是覆盖所有 API 细节，而是防止未来把会话事实源误改回内存状态或全局数据库。
+
+## 执行中断恢复护栏
+
+完整 runner 还会执行一个进程中断 smoke：
+
+- 启动 faux Pi runtime，并通过 `ATREE_PI_FAUX_PROMPT_DELAY_MS` 让 `prompt_async` 在 busy 状态停留一段时间
+- 在临时业务目录里创建 session，并先写入一条普通用户消息作为已落盘历史
+- 触发一个延迟中的 `prompt_async`
+- 在请求尚未完成时关闭 runtime，模拟执行过程中进程退出
+- 重新启动 runtime
+- 只通过同一个业务目录读取 session 和历史消息
+- 再发送一条新的 `prompt_async`，确认会话没有因为上一次中断残留内存锁或不可读的历史而卡死
+
+这个测试不要求被中断的那次模型回复完整保留下来。它验证的边界是：已经落盘的目录会话数据必须可恢复，runtime 重启后必须能继续执行后续消息。
 
 ## Pi 执行契约
 
@@ -326,6 +341,7 @@ bun run dev:pi-split:faux
 | 第二版要求                                                                     | 当前证据                                                                                                                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 会话、自动化和执行历史不以全局数据库为唯一事实源                               | `atree restart persistence smoke` 会先扫描隔离出来的全局目录，确认里面没有普通消息、自动化消息或资产 payload，再删除全局目录并重启，只从业务目录 `.agents/atree/` 恢复 session、emoji、自动化消息、消息文本和资产                                                                               |
+| 执行中断后会话不能依赖内存状态恢复                                             | `atree interrupted execution smoke` 会在 faux Pi `prompt_async` 仍在运行时关闭 runtime，重启后只从业务目录恢复 session 和已落盘消息，并继续发送下一条消息，证明中断不会留下跨进程内存锁或不可读历史                                                                                              |
 | `.agents/` 根目录是通用 Agent 生态目录，atree 私有状态只在 `.agents/atree/`    | 存储契约验证 `.agents/` 根目录只保留 `skills/` 和 `atree/`，并验证 `.agents/atree/meta.yaml` 不维护 session 清单、schedule、emoji、归档状态或更新时间；新鲜业务目录执行 session、schedule 和 prompt 后，runtime 不会自动创建 `.opencode` 或 `.pi`                                               |
 | `~/.agents/skills`、当前目录和祖先目录 `.agents/skills` 都进入 skill discovery | OpenCode-compatible contract 分别写入 home、当前目录和祖先目录的 `SKILL.md`，并验证 `/skill` 能返回 `name`、`description`、`location` 和正文                                                                                                                                                    |
 | 每个会话是 `.agents/atree/sessions/<id>/` 下的自包含目录                       | 存储契约验证每个 session 目录含 `meta.yaml`、`session.jsonl`、`assets/`，并验证删除 session 会删除整个自包含目录                                                                                                                                                                                |

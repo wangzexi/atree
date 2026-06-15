@@ -762,6 +762,140 @@ async function runRestartPersistenceSmoke() {
   }
 }
 
+async function runInterruptedExecutionSmoke() {
+  console.log("\n## atree interrupted execution smoke")
+  const port = portBase + 7
+  const baseUrl = `http://127.0.0.1:${port}`
+  const directory = await mkdtemp(join(tmpdir(), "atree-interrupted-execution-"))
+  const globalRoot = await mkdtemp(join(tmpdir(), "atree-interrupted-global-cache-"))
+  const baseEnv = {
+    HOME: join(globalRoot, "home"),
+    OPENCODE_TEST_HOME: join(globalRoot, "opencode-home"),
+    OPENCODE_CONFIG_DIR: join(globalRoot, "opencode-config"),
+    PI_CODING_AGENT_DIR: join(globalRoot, "pi-agent"),
+    XDG_CACHE_HOME: join(globalRoot, "xdg-cache"),
+    XDG_CONFIG_HOME: join(globalRoot, "xdg-config"),
+    XDG_DATA_HOME: join(globalRoot, "xdg-data"),
+    XDG_STATE_HOME: join(globalRoot, "xdg-state"),
+    ATREE_PI_EXECUTION: "faux",
+  }
+  let backend: Awaited<ReturnType<typeof startBackend>> | undefined
+
+  try {
+    backend = await startBackend({
+      name: "atree interrupted execution backend",
+      port,
+      backendEnv: {
+        ...baseEnv,
+        ATREE_PI_FAUX_PROMPT_DELAY_MS: "10000",
+      },
+    })
+
+    const created = await fetchJson<Json>(baseUrl, "/session", {
+      method: "POST",
+      query: { directory },
+    })
+    const sessionID = String(created.id)
+    const durableText = "interrupted execution durable message"
+
+    await fetchJson<Json>(baseUrl, `/session/${sessionID}`, {
+      method: "PATCH",
+      query: { directory },
+      body: {
+        title: "Interrupted execution session",
+      },
+    })
+    await fetchJson<Json>(baseUrl, `/session/${sessionID}/message`, {
+      method: "POST",
+      query: { directory },
+      body: {
+        parts: [{ type: "text", text: durableText }],
+      },
+    })
+
+    let promptSettled = false
+    const promptResponse = fetch(buildUrl(baseUrl, `/session/${sessionID}/prompt_async`, { directory }), {
+      method: "POST",
+      headers: {
+        accept: "application/json",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        parts: [{ type: "text", text: "interrupted execution prompt" }],
+      }),
+    })
+      .catch(() => undefined)
+      .finally(() => {
+        promptSettled = true
+      })
+
+    await sleep(750)
+    if (promptSettled) {
+      throw new Error("interrupted execution smoke expected prompt_async to still be running before shutdown")
+    }
+
+    await stopProcess(backend.child)
+    backend = undefined
+    await promptResponse
+
+    backend = await startBackend({
+      name: "atree interrupted execution backend after restart",
+      port,
+      backendEnv: baseEnv,
+    })
+
+    const sessions = await fetchJson<Json[]>(baseUrl, "/session", {
+      query: { directory, roots: true, includeArchived: true, limit: 100 },
+    })
+    const restored = sessions.find((session) => session.id === sessionID)
+    if (!restored) throw new Error("interrupted execution smoke did not restore the interrupted session")
+    if (restored.title !== "Interrupted execution session") {
+      throw new Error("interrupted execution smoke lost session metadata after restart")
+    }
+
+    const messages = await fetchJson<Json[]>(baseUrl, `/session/${sessionID}/message`, {
+      query: { directory },
+    })
+    const hasDurableMessage = messages.some((message) => {
+      if (!isRecord(message.info) || message.info.role !== "user") return false
+      if (!Array.isArray(message.parts)) return false
+      return message.parts.some((part) => isRecord(part) && part.type === "text" && part.text === durableText)
+    })
+    if (!hasDurableMessage) throw new Error("interrupted execution smoke lost durable user history")
+
+    const followupText = "interrupted execution recovery followup"
+    await fetchJson<unknown>(baseUrl, `/session/${sessionID}/prompt_async`, {
+      method: "POST",
+      query: { directory },
+      body: {
+        parts: [{ type: "text", text: followupText }],
+      },
+    })
+    const recoveredMessages = await fetchJson<Json[]>(baseUrl, `/session/${sessionID}/message`, {
+      query: { directory },
+    })
+    const hasFollowupAssistant = recoveredMessages.some((message) => {
+      if (!isRecord(message.info) || message.info.role !== "assistant") return false
+      if (!Array.isArray(message.parts)) return false
+      return message.parts.some(
+        (part) => isRecord(part) && part.type === "text" && part.text === `atree faux response: ${followupText}`,
+      )
+    })
+    if (!hasFollowupAssistant) throw new Error("interrupted execution smoke could not continue the session after restart")
+
+    console.log(`interrupted execution recovered session ${sessionID} from ${directory}`)
+  } catch (error) {
+    const logs = backend?.getLogs()
+    if (logs?.trim())
+      console.error(`\n--- interrupted execution backend log ---\n${trimLog(logs)}\n--- end backend log ---`)
+    throw error
+  } finally {
+    if (backend) await stopProcess(backend.child)
+    await rm(directory, { recursive: true, force: true })
+    await rm(globalRoot, { recursive: true, force: true })
+  }
+}
+
 async function runSuite(suite: Suite) {
   console.log(`\n## ${suite.name}`)
   const suiteHome = await mkdtemp(join(tmpdir(), "atree-contract-home-"))
@@ -847,6 +981,7 @@ try {
   await assertRuntimeCoreBoundary()
   for (const suite of suites) await runSuite(suite)
   await runRestartPersistenceSmoke()
+  await runInterruptedExecutionSmoke()
   await runCommand("frontend build", ["--cwd", "packages/app", "build"], {
     VITE_ATREE_SERVER_PORT: "4196",
   })

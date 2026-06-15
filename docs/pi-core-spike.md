@@ -211,4 +211,5 @@ bun run test:contract:pi-exec
 - atree runtime 重启后，即使隔离出来的全局缓存/config 目录被删除，也可以只依赖同一个业务目录里的 `.agents/atree/` 恢复 session、emoji、自动化消息、消息文本和资产引用。
 - 单个 `.agents/atree/sessions/<id>/` 目录移动到另一个业务目录后，可以作为自包含会话单元恢复。
 - 复制业务目录或移动单个会话目录后，runtime 会在打开会话时把 `session.jsonl` 第一行 Pi session header 的 `cwd` 修复为当前业务目录。
+- `bun run test:guardrails` 会模拟 faux Pi 执行过程中 runtime 被关闭；重启后只依赖同一个业务目录里的 `.agents/atree/` 恢复 session 和已落盘历史，并验证后续 `prompt_async` 仍可继续执行。
 - Web 前端通过 `dev:pi-split:faux` 启动时请求 4196 的 atree runtime，而不是 4096 的 OpenCode backend；`bun run test:guardrails` 会自动跑 Vite dev bundle smoke，并用 Playwright 打开真实浏览器页面验证 `aTree` 首屏渲染、backend 连接、网页发送消息、faux assistant 回复展示和 `.agents/atree/sessions/<id>/session.jsonl` 落盘。
