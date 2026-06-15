@@ -14,7 +14,7 @@ import { diffs as list, message as clean } from "@/utils/diffs"
 import { createServerSdkContext, useServerSDK } from "./server-sdk"
 import { type createServerSyncContextInner } from "./server-sync"
 import { listAtreeMessages } from "@/utils/atree-message"
-import { getAtreeSession } from "@/utils/atree-session"
+import { getAtreeSession, listAtreeSessions, updateAtreeSession } from "@/utils/atree-session"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
 
@@ -587,8 +587,8 @@ export const createDirSyncContext = (
       fetch: async (count = 10) => {
         const [store, setStore] = serverSync.child(directory)
         setStore("limit", (x) => x + count)
-        await client.session.list().then((x) => {
-          const sessions = (x.data ?? [])
+        await listAtreeSessions(serverSDK.connection, directory).then((list) => {
+          const sessions = list
             .filter((s) => !!s?.id)
             .sort((a, b) => cmp(a.id, b.id))
             .slice(0, store.limit)
@@ -598,7 +598,7 @@ export const createDirSyncContext = (
       more: createMemo(() => current()[0].session.length >= current()[0].limit),
       archive: async (sessionID: string) => {
         const [, setStore] = serverSync.child(directory)
-        await client.session.update({ sessionID, time: { archived: Date.now() } })
+        await updateAtreeSession(serverSDK.connection, directory, sessionID, { time: { archived: Date.now() } })
         setStore(
           produce((draft) => {
             const match = Binary.search(draft.session, sessionID, (s) => s.id)

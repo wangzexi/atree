@@ -96,7 +96,7 @@ bun run dev:pi-split:none
 - `/atree/session/:id/prompt_async`
 - `/atree/session/:id/schedule`
 
-其中 `/session...` 仍是当前前端底层 sync/fallback、SSE 和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 接口，直接暴露 `.agents/atree` 中的 session `meta.yaml`、schedule 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取、归档菜单、打开会话时的 session detail、新建普通会话、标题编辑、emoji 更新、归档/恢复归档、消息历史读取、普通 prompt 写入和自动化消息读/删已经通过前端 adapter 或 native endpoint 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/prompt_async` / `/atree/session/:id/schedule`。adapter 只把 native session meta、schedule 和 Pi message entries 映射成现有 UI 暂时需要的最小 `Session` / `SessionScheduleSummary` / `Message` / `Part` 形状；prompt 写入不重新包装消息协议，只把当前 request parts 发给 native endpoint。后续可以继续把底层 sync 和 SSE 迁到 native/Pi 接口，再逐步缩掉 facade。
+其中 `/session...` 仍是当前前端底层 sync/fallback、SSE 和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 接口，直接暴露 `.agents/atree` 中的 session `meta.yaml`、schedule 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取、目录对象 fetch/archive、归档菜单、打开会话时的 session detail、新建普通会话、标题编辑、emoji 更新、归档/恢复归档、消息历史读取、普通 prompt 写入和自动化消息读/删已经通过前端 adapter 或 native endpoint 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/prompt_async` / `/atree/session/:id/schedule`。adapter 只把 native session meta、schedule 和 Pi message entries 映射成现有 UI 暂时需要的最小 `Session` / `SessionScheduleSummary` / `Message` / `Part` 形状；prompt 写入不重新包装消息协议，只把当前 request parts 发给 native endpoint。后续可以继续把底层 sync 和 SSE 迁到 native/Pi 接口，再逐步缩掉 facade。
 
 已落盘到目录事实源：
 
