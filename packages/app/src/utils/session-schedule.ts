@@ -151,6 +151,30 @@ export async function clearSessionSchedules(
   return list
 }
 
+async function archiveAtreeSession(
+  current: ServerConnection.Any,
+  directory: string,
+  sessionID: string,
+  archivedAt: number,
+) {
+  const url = new URL(`/atree/session/${sessionID}`, current.http.url)
+  url.searchParams.set("directory", directory)
+  const headers = sessionScheduleRequestHeaders(current)
+  headers.set("content-type", "application/json")
+  headers.set("accept", "application/json")
+
+  const response = await fetch(url, {
+    method: "PATCH",
+    headers,
+    body: JSON.stringify({
+      time: {
+        archived: archivedAt,
+      },
+    }),
+  })
+  if (!response.ok) throw new Error(`Failed to archive session: ${response.status}`)
+}
+
 export async function archiveSessionWithSchedules(input: {
   current: ServerConnection.Any | null | undefined
   directory: string
@@ -159,19 +183,16 @@ export async function archiveSessionWithSchedules(input: {
   schedules?: ReadonlyArray<Pick<SessionScheduleSummary, "id">>
   updateSession: SessionUpdate
 }) {
+  const archivedAt = input.archivedAt ?? Date.now()
   if (!input.current) {
     await input.updateSession({
       directory: input.directory,
       sessionID: input.sessionID,
-      time: { archived: input.archivedAt ?? Date.now() },
+      time: { archived: archivedAt },
     })
     return
   }
 
   await clearSessionSchedules(input.current, input.directory, input.sessionID, input.schedules)
-  await input.updateSession({
-    directory: input.directory,
-    sessionID: input.sessionID,
-    time: { archived: input.archivedAt ?? Date.now() },
-  })
+  await archiveAtreeSession(input.current, input.directory, input.sessionID, archivedAt)
 }

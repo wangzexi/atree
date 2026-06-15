@@ -46,7 +46,7 @@ import {
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
-import { listAtreeSessions } from "@/utils/atree-session"
+import { listAtreeSessions, updateAtreeSession } from "@/utils/atree-session"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -991,10 +991,8 @@ function ArchivedSessionsMenu(props: {
   const openSession = async (session: Session) => {
     const ctx = serverCtx()
     if (!ctx) return
-    await ctx.sdk.client.session.update({
-      directory: props.directory,
-      sessionID: session.id,
-      time: { archived: null } as unknown as { archived?: number },
+    await updateAtreeSession(ctx.conn, props.directory, session.id, {
+      time: { archived: null },
     })
     const restored = {
       ...session,
@@ -1093,17 +1091,15 @@ function SessionEmojiPicker(props: {
   })
 
   const updateEmoji = async (emoji: string) => {
-    const client = props.serverCtx?.sdk.client
-    if (!client) return
+    const conn = props.serverCtx?.sdk.connection
+    if (!conn) return
     const previous = currentEmoji()
     setOptimisticEmoji(emoji)
     try {
-      const updated = await client.session.update({
-        directory: props.directory,
-        sessionID: props.session.id,
+      const updated = await updateAtreeSession(conn, props.directory, props.session.id, {
         metadata: nextSessionMetadata(props.session, emoji),
       })
-      if (updated.data) setOptimisticEmoji(sessionEmoji(updated.data))
+      if (updated) setOptimisticEmoji(sessionEmoji(updated))
     } catch (error) {
       setOptimisticEmoji(previous)
       throw error

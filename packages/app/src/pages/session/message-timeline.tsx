@@ -70,6 +70,7 @@ import { notifySessionTabsRemoved } from "@/components/titlebar-session-events"
 import { messageAgentColor } from "@/utils/agent"
 import { sessionTitle } from "@/utils/session-title"
 import { archiveSessionWithSchedules } from "@/utils/session-schedule"
+import { updateAtreeSession } from "@/utils/atree-session"
 import { makeTimer } from "@solid-primitives/timer"
 import { MessageComment, SummaryDiff, Timeline, TimelineRow, TimelineRowMap } from "./message-timeline.data"
 
@@ -747,8 +748,10 @@ export function MessageTimeline(props: {
   }))
 
   const titleMutation = useMutation(() => ({
-    mutationFn: (input: { id: string; title: string }) =>
-      sdk.client.session.update({ sessionID: input.id, title: input.title }),
+    mutationFn: async (input: { id: string; title: string }) => {
+      if (server.current) await updateAtreeSession(server.current, sdk.directory, input.id, { title: input.title })
+      else await sdk.client.session.update({ sessionID: input.id, title: input.title })
+    },
     onSuccess: (_, input) => {
       sync.set(
         produce((draft) => {
