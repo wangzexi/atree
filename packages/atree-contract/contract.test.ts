@@ -530,6 +530,72 @@ runContract("atree backend OpenCode-compatible contract", () => {
     }
   })
 
+  test("serves native atree session facts without OpenCode message shape", async () => {
+    const created = await createSession()
+    const sessionID = String(created.id)
+    const title = "Native atree facts"
+    const text = "native atree facts user message"
+
+    try {
+      await json<Json>(`/session/${sessionID}`, {
+        method: "PATCH",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          title,
+          metadata: {
+            atree: {
+              emoji: "🌲",
+            },
+          },
+        }),
+      })
+      await json<Json>(`/session/${sessionID}/message`, {
+        method: "POST",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          parts: [{ type: "text", text }],
+        }),
+      })
+
+      const nativeList = await json<Json[]>("/atree/session", { query: sessionQuery({ limit: 50 }) })
+      const nativeSession = nativeList.find((session) => session.id === sessionID)
+      expect(nativeSession).toBeTruthy()
+      expect("slug" in nativeSession!).toBe(false)
+      expect("projectID" in nativeSession!).toBe(false)
+      expect("time" in nativeSession!).toBe(false)
+      expect("tokens" in nativeSession!).toBe(false)
+      expect(nativeSession?.directory).toBe(directory)
+      expect(isRecord(nativeSession?.meta)).toBe(true)
+      expect(nativeSession!.meta.title).toBe(title)
+      expect(nativeSession!.meta.icon).toBe("🌲")
+      expect(isRecord(nativeSession?.paths)).toBe(true)
+      expect(String(nativeSession!.paths.sessionJsonl)).toEndWith(
+        `.agents/atree/sessions/${sessionID}/session.jsonl`,
+      )
+      expect(String(nativeSession!.paths.assets)).toEndWith(`.agents/atree/sessions/${sessionID}/assets`)
+
+      const nativeRead = await json<Json>(`/atree/session/${sessionID}`, { query: sessionQuery() })
+      expect(nativeRead.id).toBe(sessionID)
+      expect(isRecord(nativeRead.meta)).toBe(true)
+      expect(nativeRead.meta.title).toBe(title)
+
+      const entries = await json<Json[]>(`/atree/session/${sessionID}/entries`, { query: sessionQuery() })
+      expect(entries.length).toBeGreaterThanOrEqual(2)
+      expect(entries[0]?.type).toBe("session")
+      expect(entries[0]?.id).toBe(sessionID)
+      const userEntry = entries.find((entry) => {
+        if (entry.type !== "message" || !isRecord(entry.message)) return false
+        if (entry.message.role !== "user" || !Array.isArray(entry.message.content)) return false
+        return entry.message.content.some((part) => isRecord(part) && part.type === "text" && part.text === text)
+      })
+      expect(userEntry).toBeTruthy()
+      expect("info" in userEntry!).toBe(false)
+      expect("parts" in userEntry!).toBe(false)
+    } finally {
+      await deleteSession(sessionID)
+    }
+  })
+
   test("creates and deletes one scheduled message per session", async () => {
     const created = await createSession()
     const sessionID = String(created.id)

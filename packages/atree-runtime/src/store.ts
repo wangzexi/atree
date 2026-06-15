@@ -91,6 +91,18 @@ export type SessionInfo = {
   }
 }
 
+export type NativeSessionInfo = {
+  id: string
+  directory: string
+  paths: {
+    root: string
+    meta: string
+    sessionJsonl: string
+    assets: string
+  }
+  meta: SessionMeta
+}
+
 type MessagePart = {
   id: string
   type: "text" | "file" | "agent" | "reasoning" | "tool"
@@ -538,6 +550,20 @@ function toSessionInfo(directory: string, meta: SessionMeta): SessionInfo {
     },
     cost: 0,
     tokens: defaultTokens(),
+  }
+}
+
+function toNativeSessionInfo(directory: string, meta: SessionMeta): NativeSessionInfo {
+  return {
+    id: meta.id,
+    directory,
+    paths: {
+      root: sessionDir(directory, meta.id),
+      meta: metaPath(directory, meta.id),
+      sessionJsonl: sessionPath(directory, meta.id),
+      assets: assetsDir(directory, meta.id),
+    },
+    meta,
   }
 }
 
@@ -1360,6 +1386,34 @@ export class AtreeStore {
     return typeof input?.limit === "number" ? infos.slice(0, input.limit) : infos
   }
 
+  async listNativeSessions(directory: string, input?: { includeArchived?: boolean; limit?: number }) {
+    await this.ensureDirectory(directory)
+    let ids: string[] = []
+    try {
+      ids = await readdir(sessionsDir(directory))
+    } catch {
+      return []
+    }
+    const sessions = (
+      await Promise.all(
+        ids.map(async (sessionID) => {
+          const meta = await this.readMeta(directory, sessionID)
+          return meta ? toNativeSessionInfo(directory, meta) : undefined
+        }),
+      )
+    ).filter((item): item is NativeSessionInfo => !!item)
+    const filtered = input?.includeArchived ? sessions : sessions.filter((item) => !item.meta.archived_at)
+    filtered.sort((a, b) => {
+      const aNextRun = a.meta.schedule ? toScheduleInfo(a.meta.id, a.meta.schedule).nextRun : null
+      const bNextRun = b.meta.schedule ? toScheduleInfo(b.meta.id, b.meta.schedule).nextRun : null
+      if (typeof aNextRun === "number" && typeof bNextRun === "number") return aNextRun - bNextRun
+      if (typeof aNextRun === "number") return -1
+      if (typeof bNextRun === "number") return 1
+      return (timestamp(b.meta.updated_at) ?? 0) - (timestamp(a.meta.updated_at) ?? 0)
+    })
+    return typeof input?.limit === "number" ? filtered.slice(0, input.limit) : filtered
+  }
+
   async createSession(directory: string, input?: { title?: string; metadata?: Json }) {
     await this.ensureDirectory(directory)
     const sessionID = id("ses")
@@ -1403,6 +1457,10 @@ export class AtreeStore {
 
   async getSession(directory: string, sessionID: string) {
     return toSessionInfo(directory, await this.requireSession(directory, sessionID))
+  }
+
+  async getNativeSession(directory: string, sessionID: string) {
+    return toNativeSessionInfo(directory, await this.requireSession(directory, sessionID))
   }
 
   async updateSession(
@@ -1520,6 +1578,17 @@ export class AtreeStore {
       }
       return []
     })
+  }
+
+  async listNativeEntries(directory: string, sessionID: string) {
+    await this.requireSession(directory, sessionID)
+    let content = ""
+    try {
+      content = await readFile(sessionPath(directory, sessionID), "utf8")
+    } catch {
+      return []
+    }
+    return parseSessionEntries(content)
   }
 
   async appendUserPrompt(

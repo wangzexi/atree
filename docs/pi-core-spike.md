@@ -90,6 +90,11 @@ bun run dev:pi-split:none
 - `/session/:id/prompt_async`
 - `/session/:id/schedule`
 - `/session/:id/todo`
+- `/atree/session`
+- `/atree/session/:id`
+- `/atree/session/:id/entries`
+
+其中 `/session...` 仍是当前前端依赖的 OpenCode-compatible facade；`/atree...` 是新加入的 atree native 只读接口，直接暴露 `.agents/atree` 中的 session `meta.yaml` 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。后续前端读路径可以优先迁到这些 native endpoint，再逐步缩掉 facade。
 
 已落盘到目录事实源：
 
@@ -192,6 +197,7 @@ bun run test:contract:pi-exec
 当前要求：
 
 - OpenCode-compatible HTTP/SSE 契约通过。
+- atree native 只读 HTTP 契约通过：`/atree/session` 和 `/atree/session/:id/entries` 能直接从 `.agents/atree` 返回原生 meta / Pi entries，且不混入 OpenCode message shape。
 - atree 目录存储结构契约通过。
 - Pi `AgentSession.prompt()` faux 执行契约通过。
 - Pi faux 工具调用流式事件和历史还原契约通过。

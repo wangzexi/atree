@@ -298,6 +298,12 @@ function sessionRoutes(pathname: string) {
   return parts.slice(1)
 }
 
+function atreeRoutes(pathname: string) {
+  const parts = pathname.split("/").filter(Boolean)
+  if (parts[0] !== "atree") return
+  return parts.slice(1)
+}
+
 export async function handle(request: Request): Promise<Response> {
   if (request.method === "OPTIONS") return empty()
 
@@ -328,6 +334,29 @@ export async function handle(request: Request): Promise<Response> {
     if (pathname === "/vcs/status") return json([])
 
     let directory = await directoryFrom(request, url)
+
+    const atreeRoute = atreeRoutes(pathname)
+    if (atreeRoute) {
+      if (atreeRoute[0] === "session") {
+        if (atreeRoute.length === 1 && request.method === "GET") {
+          const limit = Number(url.searchParams.get("limit") ?? 0) || undefined
+          const includeArchived = url.searchParams.get("includeArchived") === "true"
+          return json(await store.listNativeSessions(directory, { includeArchived, limit }))
+        }
+
+        const sessionID = atreeRoute[1]
+        if (!sessionID) return notFound()
+        directory = await directoryForSession(request, url, directory, sessionID)
+
+        if (atreeRoute.length === 2 && request.method === "GET") {
+          return json(await store.getNativeSession(directory, sessionID))
+        }
+        if (atreeRoute.length === 3 && atreeRoute[2] === "entries" && request.method === "GET") {
+          return json(await store.listNativeEntries(directory, sessionID))
+        }
+      }
+      return notFound()
+    }
 
     if (pathname === "/skill") return json(await store.listSkills(directory))
     if (pathname === "/question") return json([])
