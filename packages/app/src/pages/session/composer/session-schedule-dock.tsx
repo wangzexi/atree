@@ -7,6 +7,8 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
+import { useSessionKey } from "@/pages/session/session-layout"
+import { decode64 } from "@/utils/base64"
 import {
   extractSessionScheduleEventSessionID,
   type SessionScheduleSummary,
@@ -44,13 +46,15 @@ export function SessionScheduleDock(props: {
 }) {
   const server = useServer()
   const serverSDK = useServerSDK()
+  const route = useSessionKey()
   const queryClient = useQueryClient()
   const [store, setStore] = createStore({ collapsed: true })
   const [now, setNow] = createSignal(Date.now())
   const clock = setInterval(() => setNow(Date.now()), 1000)
   onCleanup(() => clearInterval(clock))
   const toggle = () => setStore("collapsed", (value) => !value)
-  const queryKey = createMemo(() => ["session", "schedule", server.current?.http.url, props.sessionID])
+  const directory = createMemo(() => decode64(route.params.dir))
+  const queryKey = createMemo(() => ["session", "schedule", server.current?.http.url, directory(), props.sessionID])
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKey() })
   const stopScheduleEvents = serverSDK.event.listen((event) => {
     if (extractSessionScheduleEventSessionID(event.details) !== props.sessionID) return
@@ -59,20 +63,22 @@ export function SessionScheduleDock(props: {
   onCleanup(stopScheduleEvents)
   const query = createQuery(() => ({
     queryKey: queryKey(),
-    enabled: !!server.current && !!props.sessionID,
+    enabled: !!server.current && !!directory() && !!props.sessionID,
     refetchInterval: 30_000,
     queryFn: async () => {
       const current = server.current
-      if (!current || !props.sessionID) return [] as SessionScheduleSummary[]
-      const schedules = await listSessionSchedules(current, props.sessionID)
+      const currentDirectory = directory()
+      if (!current || !currentDirectory || !props.sessionID) return [] as SessionScheduleSummary[]
+      const schedules = await listSessionSchedules(current, currentDirectory, props.sessionID)
       return sortSessionSchedulesByNextRun(schedules)
     },
   }))
   const removeSchedule = useMutation(() => ({
     mutationFn: async (scheduleID: string) => {
       const current = server.current
-      if (!current || !props.sessionID) return
-      await deleteSessionSchedules(current, props.sessionID, [{ id: scheduleID }])
+      const currentDirectory = directory()
+      if (!current || !currentDirectory || !props.sessionID) return
+      await deleteSessionSchedules(current, currentDirectory, props.sessionID, [{ id: scheduleID }])
     },
     onSuccess: refresh,
   }))

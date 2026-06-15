@@ -639,6 +639,62 @@ runContract("atree backend OpenCode-compatible contract", () => {
     }
   })
 
+  test("serves native atree schedule facts from session metadata", async () => {
+    const created = await createSession()
+    const sessionID = String(created.id)
+    const runAt = Date.now() + 10 * 60_000
+
+    try {
+      const schedule = await json<Json>(`/atree/session/${sessionID}/schedule`, {
+        method: "POST",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          type: "at",
+          at: runAt,
+          message: "native atree scheduled message",
+        }),
+      })
+
+      expect(schedule.sessionID).toBe(sessionID)
+      expect(schedule.kind).toBe("once")
+      expect(schedule.message).toBe("native atree scheduled message")
+
+      const nativeSchedules = await json<Json[]>(`/atree/session/${sessionID}/schedule`, { query: sessionQuery() })
+      expect(nativeSchedules).toHaveLength(1)
+      expect(nativeSchedules[0]?.id).toBe(schedule.id)
+      expect(nativeSchedules[0]?.message).toBe("native atree scheduled message")
+
+      const compatSchedules = await json<Json[]>(`/session/${sessionID}/schedule`, { query: sessionQuery() })
+      expect(compatSchedules).toHaveLength(1)
+      expect(compatSchedules[0]?.id).toBe(schedule.id)
+
+      const duplicate = await fetch(url(`/atree/session/${sessionID}/schedule`, sessionQuery()), {
+        method: "POST",
+        headers: headers({
+          accept: "application/json",
+          "content-type": "application/json",
+        }),
+        body: JSON.stringify({
+          type: "cron",
+          cron: "0 9 * * *",
+          message: "native duplicate scheduled message",
+        }),
+      })
+      expect(duplicate.status).toBe(409)
+
+      const deleted = await json<boolean>(`/atree/session/${sessionID}/schedule/${String(schedule.id)}`, {
+        method: "DELETE",
+        query: sessionQuery(),
+      })
+      expect(deleted).toBe(true)
+
+      const afterDelete = await json<Json[]>(`/atree/session/${sessionID}/schedule`, { query: sessionQuery() })
+      expect(afterDelete).toHaveLength(0)
+    } finally {
+      await deleteSession(sessionID)
+    }
+  })
+
   test("rejects a second scheduled message until the existing one is deleted", async () => {
     const created = await createSession()
     const sessionID = String(created.id)

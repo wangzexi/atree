@@ -53,6 +53,7 @@ bun run test:guardrails
 
 - 2026-06-16：`bun run test:guardrails` 通过；storage contract 37 pass，Pi faux execution contract 46 pass，real/default Pi missing-config boundary contract 各 24 pass / 15 skip，restart persistence smoke、multi-directory persistence smoke、interrupted execution smoke、frontend build、frontend browser smoke 均通过。新增 Pi 默认 provider/model 契约、cron `nextRun` 基线契约、手写 Pi tool history 恢复契约、native atree read API 契约、前端目录树/归档菜单/session detail 消费 native session adapter，以及网页发送消息到目录 JSONL 的浏览器 smoke 已进入默认护栏。
 - 2026-06-16：前端消息历史读取改为消费 `/atree/session/:id/entries` 的 Pi 原生 entries adapter；`bun run test:guardrails` 的浏览器 smoke 会明确断言会话页请求过 native detail endpoint 和 native entries endpoint。
+- 2026-06-16：前端自动化消息读取和删除改为消费 `/atree/session/:id/schedule`，并显式传入当前目录；`bun run test:guardrails` 通过，storage contract 38 pass，Pi faux execution contract 47 pass，real/default Pi missing-config boundary contract 各 25 pass / 15 skip，frontend browser smoke 会断言真实页面请求过 native schedule endpoint。
 
 底层单项运行方式：
 
@@ -96,6 +97,7 @@ ATREE_CONTRACT_DIRECTORY=/path/to/workspace bun run test:contract
 - `/atree/session`
 - `/atree/session/:id`
 - `/atree/session/:id/entries`
+- `/atree/session/:id/schedule`
 
 基础契约测试刻意不调用真实模型，因此不依赖 API Key。需要触发模型路径的护栏会使用 Pi faux provider 或空 Pi 配置错误边界。
 
@@ -106,9 +108,10 @@ ATREE_CONTRACT_DIRECTORY=/path/to/workspace bun run test:contract
 - 用户 home、当前目录和祖先目录的 `.agents/skills/<name>/SKILL.md` 可以通过 `/skill` 被发现，并返回 `name`、`description`、`location` 和正文 `content`
 - session 创建、列表、更新、消息读取、删除
 - `/provider` 返回固定的 Pi 默认 provider/model，`/agent` 返回绑定该模型的 primary agent
-- `/atree/session` 和 `/atree/session/:id/entries` 是 native 只读视图，只返回目录内 `meta.yaml` 和 Pi `session.jsonl` entries，不返回 OpenCode-compatible 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts`
+- `/atree/session`、`/atree/session/:id/entries` 和 `/atree/session/:id/schedule` 是 native 视图，只返回目录内 `meta.yaml`、Pi `session.jsonl` entries 和 session schedule facts，不返回 OpenCode-compatible 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts`
 - `prompt_async` 后用户消息立即可从 API 读到
 - schedule 创建和删除
+- native schedule 创建、读取、重复设置 409 和删除
 - 重复设置 schedule 会返回 409，且不会覆盖现有自动化消息
 - 一次性 `at` schedule 到期后写入自动化用户消息，并清除待执行 schedule
 - global SSE 中的 `session.created` 事件
@@ -347,6 +350,7 @@ bun run dev:pi-split:faux
 - 创建临时业务目录和 session，打开 `/:dir/session/:id`
 - 在真实 contenteditable 输入框发送一条消息，等待页面展示 Pi faux assistant 回复
 - 确认会话页请求过 `/atree/session/:id` 和 `/atree/session/:id/entries`
+- 确认会话页请求过 `/atree/session/:id/schedule`，并展示自动化消息 header
 - 确认同一条 user / assistant 写入该目录 `.agents/atree/sessions/<id>/session.jsonl`
 
 手工浏览器验证仍可继续补充更复杂交互，目前自动护栏已经覆盖：
@@ -357,6 +361,7 @@ bun run dev:pi-split:faux
 - 前端请求的是 `http://127.0.0.1:4196/global/config`、`/provider`、`/path`、`/project`、`/global/health`、`/global/event`
 - 前端可以用默认 Pi provider/model 发送消息，并在 ChatView 中看到 faux assistant 回复
 - 前端消息历史从 `/atree/session/:id/entries` 读取并转换为当前 ChatView 可用的 `Message` / `Part`
+- 前端自动化消息 header 从 `/atree/session/:id/schedule` 读取，关闭/归档清理 schedule 时也显式带当前目录请求 native endpoint
 - 消息最终落入当前目录的 `.agents/atree/sessions/<id>/session.jsonl`
 - 没有请求 4096
 
@@ -368,7 +373,7 @@ bun run dev:pi-split:faux
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 会话、自动化和执行历史不以全局数据库为唯一事实源                               | `atree restart persistence smoke` 会先扫描隔离出来的全局目录，确认里面没有普通消息、自动化消息或资产 payload，再删除全局目录并重启，只从业务目录 `.agents/atree/` 恢复 session、emoji、自动化消息、消息文本和资产；`atree multi-directory persistence smoke` 会在同一 runtime 写入两个业务目录，删除全局缓存重启后验证两个目录只恢复自己的 session 和 assets |
 | 执行中断后会话不能依赖内存状态恢复                                             | `atree interrupted execution smoke` 会在 faux Pi `prompt_async` 仍在运行时关闭 runtime，重启后只从业务目录恢复 session 和已落盘消息，并继续发送下一条消息，证明中断不会留下跨进程内存锁或不可读历史                                                                                              |
-| 前端后续能逐步脱离 OpenCode SDK 读形状                                         | OpenCode-compatible contract 额外覆盖 `/atree/session`、`/atree/session/:id` 和 `/atree/session/:id/entries`，验证 native 响应直接暴露 `.agents/atree` 的 session meta 和 Pi entries，且不包含 `slug` / `projectID` / `info` / `parts` 等 OpenCode-compatible 字段；前端目录树、归档菜单、session detail 和消息历史已经通过 adapter 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries`，默认前端 build 和浏览器 smoke 会覆盖这些读路径，并断言会话页请求 native detail endpoint 和 native entries endpoint |
+| 前端后续能逐步脱离 OpenCode SDK 读形状                                         | OpenCode-compatible contract 额外覆盖 `/atree/session`、`/atree/session/:id`、`/atree/session/:id/entries` 和 `/atree/session/:id/schedule`，验证 native 响应直接暴露 `.agents/atree` 的 session meta、Pi entries 和 schedule facts，且不包含 `slug` / `projectID` / `info` / `parts` 等 OpenCode-compatible 字段；前端目录树、归档菜单、session detail、消息历史和自动化消息 header 已经通过 adapter 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/schedule`，默认前端 build 和浏览器 smoke 会覆盖这些读路径，并断言会话页请求 native detail、native entries 和 native schedule endpoint |
 | `.agents/` 根目录是通用 Agent 生态目录，atree 私有状态只在 `.agents/atree/`    | 存储契约验证 `.agents/` 根目录只保留 `skills/` 和 `atree/`，并验证 `.agents/atree/meta.yaml` 不维护 session 清单、schedule、emoji、归档状态或更新时间；新鲜业务目录执行 session、schedule 和 prompt 后，runtime 不会自动创建 `.opencode` 或 `.pi`                                               |
 | `~/.agents/skills`、当前目录和祖先目录 `.agents/skills` 都进入 skill discovery | OpenCode-compatible contract 分别写入 home、当前目录和祖先目录的 `SKILL.md`，并验证 `/skill` 能返回 `name`、`description`、`location` 和正文                                                                                                                                                    |
 | 每个会话是 `.agents/atree/sessions/<id>/` 下的自包含目录                       | 存储契约验证每个 session 目录含 `meta.yaml`、`session.jsonl`、`assets/`，并验证删除 session 会删除整个自包含目录                                                                                                                                                                                |

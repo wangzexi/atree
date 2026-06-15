@@ -314,7 +314,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               const serverCtx = global.createServerCtx(conn)
               const key = tabKey(tab)
               void (async () => {
-                const schedules = await listSessionSchedules(conn, tab.sessionId).catch(
+                const schedules = await listSessionSchedules(conn, directory, tab.sessionId).catch(
                   () => [] as SessionScheduleSummary[],
                 )
                 if (schedules.length > 0 && archiveConfirmKey() !== key) {

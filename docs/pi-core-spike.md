@@ -93,8 +93,9 @@ bun run dev:pi-split:none
 - `/atree/session`
 - `/atree/session/:id`
 - `/atree/session/:id/entries`
+- `/atree/session/:id/schedule`
 
-其中 `/session...` 仍是当前前端写入、SSE 和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 只读接口，直接暴露 `.agents/atree` 中的 session `meta.yaml` 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取、归档菜单、打开会话时的 session detail 和消息历史读取已经通过前端 adapter 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries`。adapter 只把 native session meta 和 Pi message entries 映射成现有 UI 暂时需要的最小 `Session` / `Message` / `Part` 形状。后续可以继续把写入和 SSE 也迁到 native/Pi 接口，再逐步缩掉 facade。
+其中 `/session...` 仍是当前前端 prompt 写入、SSE 和部分兼容逻辑依赖的 OpenCode-compatible facade；`/atree...` 是 atree native 接口，直接暴露 `.agents/atree` 中的 session `meta.yaml`、schedule 和 Pi `session.jsonl` entries，不返回 OpenCode 的 `slug`、`projectID`、`time`、`tokens`、`info`、`parts` 这些前端兼容形状。目录树的会话元信息读取、归档菜单、打开会话时的 session detail、消息历史读取和自动化消息读/删已经通过前端 adapter 消费 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/schedule`。adapter 只把 native session meta、schedule 和 Pi message entries 映射成现有 UI 暂时需要的最小 `Session` / `SessionScheduleSummary` / `Message` / `Part` 形状。后续可以继续把 prompt 写入和 SSE 也迁到 native/Pi 接口，再逐步缩掉 facade。
 
 已落盘到目录事实源：
 
@@ -222,4 +223,4 @@ bun run test:contract:pi-exec
 - `bun run test:guardrails` 会模拟 faux Pi 执行过程中 runtime 被关闭；重启后只依赖同一个业务目录里的 `.agents/atree/` 恢复 session 和已落盘历史，并验证后续 `prompt_async` 仍可继续执行。
 - `bun run test:guardrails` 会在同一个 runtime 里写入两个业务目录，删除全局缓存后重启，验证 `/session` 和 `/atree/session` 都只从当前目录 `.agents/atree/` 恢复当前目录自己的 session 和 assets。
 - Web 前端通过 `dev:pi-split:faux` 启动时请求 4196 的 atree runtime，而不是 4096 的 OpenCode backend；`bun run test:guardrails` 会自动跑 Vite dev bundle smoke，并用 Playwright 打开真实浏览器页面验证 `aTree` 首屏渲染、backend 连接、网页发送消息、faux assistant 回复展示和 `.agents/atree/sessions/<id>/session.jsonl` 落盘。
-- 目录树、归档菜单、session detail 和消息历史读取已经走 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries`，默认护栏中的前端 build 和浏览器 smoke 覆盖了这些 adapter 可以在真实页面中加载、发送消息并保持目录 JSONL 落盘；浏览器 smoke 会明确断言会话页请求过 native detail endpoint 和 native entries endpoint。
+- 目录树、归档菜单、session detail、消息历史读取和自动化消息读/删已经走 `/atree/session` / `/atree/session/:id` / `/atree/session/:id/entries` / `/atree/session/:id/schedule`，默认护栏中的前端 build 和浏览器 smoke 覆盖了这些 adapter 可以在真实页面中加载、发送消息并保持目录 JSONL 落盘；浏览器 smoke 会明确断言会话页请求过 native detail、native entries 和 native schedule endpoint。

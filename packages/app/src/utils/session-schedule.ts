@@ -98,9 +98,19 @@ export const sortSessionSchedulesByNextRun = (schedules: readonly SessionSchedul
     return aNext - bNext
   })
 
-export async function listSessionSchedules(current: ServerConnection.Any | null | undefined, sessionID: string) {
+function scheduleUrl(current: ServerConnection.Any, directory: string, sessionID: string, suffix = "") {
+  const url = new URL(`/atree/session/${sessionID}/schedule${suffix}`, current.http.url)
+  url.searchParams.set("directory", directory)
+  return url
+}
+
+export async function listSessionSchedules(
+  current: ServerConnection.Any | null | undefined,
+  directory: string,
+  sessionID: string,
+) {
   if (!current) return [] as SessionScheduleSummary[]
-  const url = new URL(`/session/${sessionID}/schedule`, current.http.url)
+  const url = scheduleUrl(current, directory, sessionID)
   const response = await fetch(url, { headers: sessionScheduleRequestHeaders(current) })
   if (!response.ok) throw new Error(`Failed to list schedules: ${response.status}`)
 
@@ -110,31 +120,34 @@ export async function listSessionSchedules(current: ServerConnection.Any | null 
 
 export async function deleteSessionSchedule(
   current: ServerConnection.Any | null | undefined,
+  directory: string,
   sessionID: string,
   scheduleID: string,
 ) {
   if (!current) return
-  const url = new URL(`/session/${sessionID}/schedule/${scheduleID}`, current.http.url)
+  const url = scheduleUrl(current, directory, sessionID, `/${scheduleID}`)
   const response = await fetch(url, { method: "DELETE", headers: sessionScheduleRequestHeaders(current) })
   if (!response.ok) throw new Error(`Failed to delete schedule: ${response.status}`)
 }
 
 export async function deleteSessionSchedules(
   current: ServerConnection.Any | null | undefined,
+  directory: string,
   sessionID: string,
   schedules: ReadonlyArray<Pick<SessionScheduleSummary, "id">>,
 ) {
-  await Promise.all(schedules.map((schedule) => deleteSessionSchedule(current, sessionID, schedule.id)))
+  await Promise.all(schedules.map((schedule) => deleteSessionSchedule(current, directory, sessionID, schedule.id)))
 }
 
 export async function clearSessionSchedules(
   current: ServerConnection.Any | null | undefined,
+  directory: string,
   sessionID: string,
   schedules?: ReadonlyArray<Pick<SessionScheduleSummary, "id">>,
 ) {
-  const list = schedules ?? (await listSessionSchedules(current, sessionID))
+  const list = schedules ?? (await listSessionSchedules(current, directory, sessionID))
   if (list.length === 0) return []
-  await deleteSessionSchedules(current, sessionID, list)
+  await deleteSessionSchedules(current, directory, sessionID, list)
   return list
 }
 
@@ -155,7 +168,7 @@ export async function archiveSessionWithSchedules(input: {
     return
   }
 
-  await clearSessionSchedules(input.current, input.sessionID, input.schedules)
+  await clearSessionSchedules(input.current, input.directory, input.sessionID, input.schedules)
   await input.updateSession({
     directory: input.directory,
     sessionID: input.sessionID,

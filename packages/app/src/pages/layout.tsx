@@ -2517,7 +2517,7 @@ export default function Layout(props: ParentProps) {
       if (state?.loading) return
       setTree("schedule", session.id, (prev) => ({ ...prev, loading: true }))
       try {
-        const json = await listSessionSchedules(server.current, session.id)
+        const json = await listSessionSchedules(server.current, session.directory, session.id)
         setTree("schedule", session.id, {
           loaded: true,
           loading: false,

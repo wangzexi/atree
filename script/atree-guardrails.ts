@@ -407,12 +407,22 @@ try {
   const session = await request("/session", { method: "POST", query: { directory } })
   const sessionID = String(session.id)
   const message = "frontend browser prompt chain"
+  await request(\`/atree/session/\${sessionID}/schedule\`, {
+    method: "POST",
+    query: { directory },
+    body: {
+      type: "at",
+      at: Date.now() + 30 * 60_000,
+      message: "frontend browser scheduled prompt",
+    },
+  })
 
   await page.goto(\`\${process.env.ATREE_FRONTEND_URL}\${base64Encode(directory)}/session/\${sessionID}\`, {
     waitUntil: "domcontentloaded",
   })
   const editor = page.locator('[data-component="prompt-input"][contenteditable="true"]').last()
   await editor.waitFor({ timeout: 15000 })
+  await page.getByText("自动化消息").first().waitFor({ timeout: 15000 })
   await editor.click()
   await page.keyboard.type(message)
   await page.locator('[data-action="prompt-submit"]').last().click()
@@ -428,6 +438,12 @@ try {
   )
   if (!sawNativeEntries) {
     throw new Error("frontend browser smoke did not load message history from the native atree entries endpoint")
+  }
+  const sawNativeSchedule = backendRequests.some(
+    (url) => new URL(url).pathname === "/atree/session/" + sessionID + "/schedule",
+  )
+  if (!sawNativeSchedule) {
+    throw new Error("frontend browser smoke did not load schedules from the native atree schedule endpoint")
   }
 
   const sessionJsonl = await readSessionJsonl(

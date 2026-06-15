@@ -354,6 +354,27 @@ export async function handle(request: Request): Promise<Response> {
         if (atreeRoute.length === 3 && atreeRoute[2] === "entries" && request.method === "GET") {
           return json(await store.listNativeEntries(directory, sessionID))
         }
+        if (atreeRoute[2] === "schedule") {
+          if (atreeRoute.length === 3) {
+            if (request.method === "GET") return json(await store.listSchedules(directory, sessionID))
+            if (request.method === "POST") {
+              const body = await requestJson(request)
+              const schedule = await store.createSchedule(directory, sessionID, {
+                type: body.type === "cron" || body.type === "at" ? body.type : undefined,
+                cron: typeof body.cron === "string" ? body.cron : undefined,
+                at: typeof body.at === "string" || typeof body.at === "number" ? body.at : undefined,
+                message: typeof body.message === "string" ? body.message : "",
+              })
+              publish(directory, "schedule.created", { sessionID, scheduleID: schedule.id })
+              return json(schedule)
+            }
+          }
+          if (atreeRoute.length === 4 && request.method === "DELETE") {
+            const deleted = await store.deleteSchedule(directory, sessionID, atreeRoute[3]!)
+            publish(directory, "schedule.deleted", { sessionID, scheduleID: atreeRoute[3] })
+            return json(deleted)
+          }
+        }
       }
       return notFound()
     }
