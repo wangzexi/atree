@@ -54,7 +54,6 @@ import {
 import { useNotification } from "@/context/notification"
 import { usePermission } from "@/context/permission"
 import { Binary } from "@opencode-ai/core/util/binary"
-import { retry } from "@opencode-ai/core/util/retry"
 import { playSoundById } from "@/utils/sound"
 import { createAim } from "@/utils/aim"
 import { setNavigate } from "@/utils/notification-click"
@@ -91,6 +90,7 @@ import {
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
 import { listAtreeSessions } from "@/utils/atree-session"
+import { listAtreeMessages } from "@/utils/atree-message"
 import {
   collectNewSessionDeepLinks,
   collectOpenProjectDeepLinks,
@@ -780,20 +780,29 @@ export default function Layout(props: ParentProps) {
       directory,
       sessionID,
       task: (rev) =>
-        retry(() => serverSDK.client.session.messages({ directory, sessionID, limit: prefetchChunk }))
+        listAtreeMessages({
+          current: serverSDK.connection,
+          directory,
+          sessionID,
+        })
           .then((messages) => {
             if (prefetchToken.value !== token) return
             if (!isSessionPrefetchCurrent(serverSDK.scope, directory, sessionID, rev)) return
 
-            const items = (messages.data ?? []).filter((x) => !!x?.info?.id)
-            const next = items.map((x) => x.info).filter((m): m is Message => !!m?.id)
+            const partByMessage = new Map(messages.part.map((item) => [item.id, item.part] as const))
+            const items = messages.session
+              .filter((info): info is Message => !!info?.id)
+              .map((info) => ({
+                info,
+                parts: partByMessage.get(info.id) ?? [],
+              }))
+            const next = items.map((x) => x.info)
             const sorted = mergeByID([], next)
             const stale = markPrefetched(directory, sessionID)
-            const cursor = messages.response.headers.get("x-next-cursor") ?? undefined
             const meta = {
               limit: sorted.length,
-              cursor,
-              complete: !cursor,
+              cursor: messages.cursor,
+              complete: messages.complete,
               at: Date.now(),
             }
 
