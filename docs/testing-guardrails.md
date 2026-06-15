@@ -44,13 +44,14 @@ bun run test:guardrails
 - 运行对应 contract 测试
 - 关闭测试后端
 - 启动、写入、关闭、重启 atree runtime，确认目录事实源能跨进程恢复
+- 在同一个 runtime 中写入多个业务目录，删除全局缓存后重启，确认各目录只从自己的 `.agents/atree/` 恢复且不会串会话
 - 启动一个延迟的 faux Pi 执行，在 `prompt_async` 尚未完成时关闭 runtime，再重启确认会话不会被卡死
 - 最后执行前端 build
 - 启动临时 Vite dev server，确认前端开发入口会连到 atree runtime
 
 最近一次执行记录：
 
-- 2026-06-16：`bun run test:guardrails` 通过；storage contract 37 pass，Pi faux execution contract 46 pass，real/default Pi missing-config boundary contract 各 24 pass / 15 skip，restart persistence smoke、interrupted execution smoke、frontend build、frontend browser smoke 均通过。新增 Pi 默认 provider/model 契约、cron `nextRun` 基线契约、手写 Pi tool history 恢复契约、native atree read API 契约、前端目录树/归档菜单/session detail 消费 native session adapter，以及网页发送消息到目录 JSONL 的浏览器 smoke 已进入默认护栏。
+- 2026-06-16：`bun run test:guardrails` 通过；storage contract 37 pass，Pi faux execution contract 46 pass，real/default Pi missing-config boundary contract 各 24 pass / 15 skip，restart persistence smoke、multi-directory persistence smoke、interrupted execution smoke、frontend build、frontend browser smoke 均通过。新增 Pi 默认 provider/model 契约、cron `nextRun` 基线契约、手写 Pi tool history 恢复契约、native atree read API 契约、前端目录树/归档菜单/session detail 消费 native session adapter，以及网页发送消息到目录 JSONL 的浏览器 smoke 已进入默认护栏。
 
 底层单项运行方式：
 
@@ -188,6 +189,23 @@ ATREE_STORAGE_CONTRACT=1
 - 只通过同一个业务目录读取数据
 
 它验证 session、emoji、自动化消息、消息文本、`assets/` 文件内容和相对 file part 都能恢复，并且这些业务 payload 不会泄漏到全局缓存或配置目录。它还会验证重启后重新打开同一个业务目录时，runtime 能从 `.agents/atree` 里发现并执行已经过期的一次性自动化消息，而不是依赖重启前的内存定时器。这个测试的目的不是覆盖所有 API 细节，而是防止未来把会话事实源误改回内存状态或全局数据库。
+
+## 多目录独立恢复护栏
+
+完整 runner 还会执行一个多目录 smoke：
+
+- 把 `HOME`、`OPENCODE_TEST_HOME`、`OPENCODE_CONFIG_DIR`、`PI_CODING_AGENT_DIR` 和 XDG 目录指到同一个临时全局目录
+- 启动 atree runtime
+- 在两个不同的临时业务目录中分别创建 session
+- 分别写入标题、emoji、普通消息和会话资产
+- 关闭 runtime
+- 扫描隔离出来的全局目录，确认两个目录的消息文本和资产 payload 都没有泄漏到全局缓存
+- 删除临时全局目录
+- 重新启动 runtime
+- 分别用 `/session` 和 `/atree/session` 读取两个业务目录
+- 验证每个目录只恢复自己的 session、标题、emoji、消息和 assets，不会列出另一个目录的 session
+
+这个测试防止未来重新引入全局 session registry 或全局数据库后，多个目录的会话分组在重启后互相污染。
 
 ## 执行中断恢复护栏
 
@@ -345,7 +363,7 @@ bun run dev:pi-split:faux
 
 | 第二版要求                                                                     | 当前证据                                                                                                                                                                                                                                                                                        |
 | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 会话、自动化和执行历史不以全局数据库为唯一事实源                               | `atree restart persistence smoke` 会先扫描隔离出来的全局目录，确认里面没有普通消息、自动化消息或资产 payload，再删除全局目录并重启，只从业务目录 `.agents/atree/` 恢复 session、emoji、自动化消息、消息文本和资产                                                                               |
+| 会话、自动化和执行历史不以全局数据库为唯一事实源                               | `atree restart persistence smoke` 会先扫描隔离出来的全局目录，确认里面没有普通消息、自动化消息或资产 payload，再删除全局目录并重启，只从业务目录 `.agents/atree/` 恢复 session、emoji、自动化消息、消息文本和资产；`atree multi-directory persistence smoke` 会在同一 runtime 写入两个业务目录，删除全局缓存重启后验证两个目录只恢复自己的 session 和 assets |
 | 执行中断后会话不能依赖内存状态恢复                                             | `atree interrupted execution smoke` 会在 faux Pi `prompt_async` 仍在运行时关闭 runtime，重启后只从业务目录恢复 session 和已落盘消息，并继续发送下一条消息，证明中断不会留下跨进程内存锁或不可读历史                                                                                              |
 | 前端后续能逐步脱离 OpenCode SDK 读形状                                         | OpenCode-compatible contract 额外覆盖 `/atree/session`、`/atree/session/:id` 和 `/atree/session/:id/entries`，验证 native 响应直接暴露 `.agents/atree` 的 session meta 和 Pi entries，且不包含 `slug` / `projectID` / `info` / `parts` 等 OpenCode-compatible 字段；前端目录树、归档菜单和 session detail 已经通过 adapter 消费 `/atree/session` / `/atree/session/:id`，默认前端 build 和浏览器 smoke 会覆盖该读路径，并断言会话页请求 native detail endpoint |
 | `.agents/` 根目录是通用 Agent 生态目录，atree 私有状态只在 `.agents/atree/`    | 存储契约验证 `.agents/` 根目录只保留 `skills/` 和 `atree/`，并验证 `.agents/atree/meta.yaml` 不维护 session 清单、schedule、emoji、归档状态或更新时间；新鲜业务目录执行 session、schedule 和 prompt 后，runtime 不会自动创建 `.opencode` 或 `.pi`                                               |

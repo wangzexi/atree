@@ -216,8 +216,10 @@ bun run test:contract:pi-exec
 - 真实 Pi 成功路径有显式 opt-in 契约入口：它会验证真实模型回复可以穿过 `prompt_async` 并写回当前目录的 `session.jsonl`，但不进入默认护栏。
 - 文件 part 会落入 `assets/` 并从 `session.jsonl` 还原成 file part。
 - atree runtime 重启后，即使隔离出来的全局缓存/config 目录被删除，也可以只依赖同一个业务目录里的 `.agents/atree/` 恢复 session、emoji、自动化消息、消息文本和资产引用。
+- 同一个 runtime 访问多个业务目录后，即使隔离出来的全局缓存/config 目录被删除，重启后也只能从各自业务目录里的 `.agents/atree/` 恢复各自 session、消息和资产，不能依赖全局 session registry，也不能串目录。
 - 单个 `.agents/atree/sessions/<id>/` 目录移动到另一个业务目录后，可以作为自包含会话单元恢复。
 - 复制业务目录或移动单个会话目录后，runtime 会在打开会话时把 `session.jsonl` 第一行 Pi session header 的 `cwd` 修复为当前业务目录。
 - `bun run test:guardrails` 会模拟 faux Pi 执行过程中 runtime 被关闭；重启后只依赖同一个业务目录里的 `.agents/atree/` 恢复 session 和已落盘历史，并验证后续 `prompt_async` 仍可继续执行。
+- `bun run test:guardrails` 会在同一个 runtime 里写入两个业务目录，删除全局缓存后重启，验证 `/session` 和 `/atree/session` 都只从当前目录 `.agents/atree/` 恢复当前目录自己的 session 和 assets。
 - Web 前端通过 `dev:pi-split:faux` 启动时请求 4196 的 atree runtime，而不是 4096 的 OpenCode backend；`bun run test:guardrails` 会自动跑 Vite dev bundle smoke，并用 Playwright 打开真实浏览器页面验证 `aTree` 首屏渲染、backend 连接、网页发送消息、faux assistant 回复展示和 `.agents/atree/sessions/<id>/session.jsonl` 落盘。
 - 目录树、归档菜单和 session detail 的元信息读取已经走 `/atree/session` / `/atree/session/:id`，默认护栏中的前端 build 和浏览器 smoke 覆盖了该 adapter 可以在真实页面中加载、发送消息并保持目录 JSONL 落盘；浏览器 smoke 会明确断言会话页请求过 native detail endpoint。

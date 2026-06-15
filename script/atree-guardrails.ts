@@ -765,6 +765,185 @@ async function runRestartPersistenceSmoke() {
   }
 }
 
+async function runMultiDirectoryPersistenceSmoke() {
+  console.log("\n## atree multi-directory persistence smoke")
+  const port = portBase + 8
+  const baseUrl = `http://127.0.0.1:${port}`
+  const directoryA = await mkdtemp(join(tmpdir(), "atree-multi-directory-a-"))
+  const directoryB = await mkdtemp(join(tmpdir(), "atree-multi-directory-b-"))
+  const globalRoot = await mkdtemp(join(tmpdir(), "atree-multi-directory-global-cache-"))
+  const backendEnv = {
+    HOME: join(globalRoot, "home"),
+    OPENCODE_TEST_HOME: join(globalRoot, "opencode-home"),
+    OPENCODE_CONFIG_DIR: join(globalRoot, "opencode-config"),
+    PI_CODING_AGENT_DIR: join(globalRoot, "pi-agent"),
+    XDG_CACHE_HOME: join(globalRoot, "xdg-cache"),
+    XDG_CONFIG_HOME: join(globalRoot, "xdg-config"),
+    XDG_DATA_HOME: join(globalRoot, "xdg-data"),
+    XDG_STATE_HOME: join(globalRoot, "xdg-state"),
+  }
+  const specs = [
+    {
+      directory: directoryA,
+      label: "alpha",
+      title: "Multi directory alpha",
+      emoji: "🧭",
+      text: "multi directory alpha prompt",
+      assetText: "multi directory alpha asset payload",
+      filename: "alpha-note.txt",
+    },
+    {
+      directory: directoryB,
+      label: "beta",
+      title: "Multi directory beta",
+      emoji: "📦",
+      text: "multi directory beta prompt",
+      assetText: "multi directory beta asset payload",
+      filename: "beta-note.txt",
+    },
+  ]
+  let backend: Awaited<ReturnType<typeof startBackend>> | undefined
+
+  try {
+    backend = await startBackend({
+      name: "atree multi-directory persistence backend",
+      port,
+      backendEnv,
+    })
+
+    const created = new Map<string, string>()
+    for (const spec of specs) {
+      const session = await fetchJson<Json>(baseUrl, "/session", {
+        method: "POST",
+        query: { directory: spec.directory },
+      })
+      const sessionID = String(session.id)
+      created.set(spec.label, sessionID)
+
+      await fetchJson<Json>(baseUrl, `/session/${sessionID}`, {
+        method: "PATCH",
+        query: { directory: spec.directory },
+        body: {
+          title: spec.title,
+          metadata: {
+            atree: {
+              emoji: spec.emoji,
+            },
+          },
+        },
+      })
+
+      await fetchJson<unknown>(baseUrl, `/session/${sessionID}/prompt_async`, {
+        method: "POST",
+        query: { directory: spec.directory },
+        body: {
+          parts: [
+            { type: "text", text: spec.text },
+            {
+              type: "file",
+              mime: "text/plain",
+              filename: spec.filename,
+              url: `data:text/plain;base64,${Buffer.from(spec.assetText).toString("base64")}`,
+            },
+          ],
+        },
+      })
+    }
+
+    await stopProcess(backend.child)
+    backend = undefined
+    await assertNoFileContains(
+      globalRoot,
+      specs.flatMap((spec) => [
+        { label: `${spec.label} user message`, value: spec.text },
+        { label: `${spec.label} asset payload`, value: spec.assetText },
+      ]),
+    )
+    await rm(globalRoot, { recursive: true, force: true })
+
+    backend = await startBackend({
+      name: "atree multi-directory persistence backend after restart",
+      port,
+      backendEnv,
+    })
+
+    for (const spec of specs) {
+      const sessionID = created.get(spec.label)
+      if (!sessionID) throw new Error(`multi-directory smoke lost created ${spec.label} session id`)
+      const other = specs.find((item) => item.label !== spec.label)
+      const otherSessionID = other ? created.get(other.label) : undefined
+
+      const sessions = await fetchJson<Json[]>(baseUrl, "/session", {
+        query: { directory: spec.directory, roots: true, includeArchived: true, limit: 100 },
+      })
+      const restored = sessions.find((session) => session.id === sessionID)
+      if (!restored) throw new Error(`multi-directory smoke did not restore ${spec.label} session`)
+      if (restored.title !== spec.title) throw new Error(`multi-directory smoke lost ${spec.label} title`)
+      if (
+        !isRecord(restored.metadata) ||
+        !isRecord(restored.metadata.atree) ||
+        restored.metadata.atree.emoji !== spec.emoji
+      ) {
+        throw new Error(`multi-directory smoke lost ${spec.label} emoji metadata`)
+      }
+      if (otherSessionID && sessions.some((session) => session.id === otherSessionID)) {
+        throw new Error(`multi-directory smoke leaked ${other.label} session into ${spec.label} directory`)
+      }
+
+      const nativeSessions = await fetchJson<Json[]>(baseUrl, "/atree/session", {
+        query: { directory: spec.directory, includeArchived: true, limit: 100 },
+      })
+      if (!nativeSessions.some((session) => session.id === sessionID)) {
+        throw new Error(`multi-directory smoke did not restore ${spec.label} native session`)
+      }
+      if (otherSessionID && nativeSessions.some((session) => session.id === otherSessionID)) {
+        throw new Error(`multi-directory smoke leaked ${other.label} native session into ${spec.label} directory`)
+      }
+
+      const messages = await fetchJson<Json[]>(baseUrl, `/session/${sessionID}/message`, {
+        query: { directory: spec.directory },
+      })
+      const hasText = messages.some((message) => {
+        if (!isRecord(message.info) || message.info.role !== "user") return false
+        if (!Array.isArray(message.parts)) return false
+        return message.parts.some((part) => isRecord(part) && part.type === "text" && part.text === spec.text)
+      })
+      if (!hasText) throw new Error(`multi-directory smoke did not restore ${spec.label} user message`)
+
+      const assetRoot = join(spec.directory, ".agents", "atree", "sessions", sessionID, "assets")
+      const assets = await readdir(assetRoot)
+      if (assets.length !== 1) throw new Error(`multi-directory smoke expected one ${spec.label} asset`)
+      const assetName = assets[0]!
+      const assetContent = await readFile(join(assetRoot, assetName), "utf8")
+      if (assetContent !== spec.assetText) throw new Error(`multi-directory smoke restored wrong ${spec.label} asset`)
+      const hasFile = messages
+        .flatMap((message) => (Array.isArray(message.parts) ? message.parts : []))
+        .some((part) => {
+          return (
+            isRecord(part) &&
+            part.type === "file" &&
+            part.url === `assets/${assetName}` &&
+            part.filename === spec.filename
+          )
+        })
+      if (!hasFile) throw new Error(`multi-directory smoke did not restore ${spec.label} relative asset file part`)
+    }
+
+    console.log(`multi-directory restored ${created.get("alpha")} from ${directoryA}`)
+    console.log(`multi-directory restored ${created.get("beta")} from ${directoryB}`)
+  } catch (error) {
+    const logs = backend?.getLogs()
+    if (logs?.trim())
+      console.error(`\n--- multi-directory persistence backend log ---\n${trimLog(logs)}\n--- end backend log ---`)
+    throw error
+  } finally {
+    if (backend) await stopProcess(backend.child)
+    await rm(directoryA, { recursive: true, force: true })
+    await rm(directoryB, { recursive: true, force: true })
+    await rm(globalRoot, { recursive: true, force: true })
+  }
+}
+
 async function runInterruptedExecutionSmoke() {
   console.log("\n## atree interrupted execution smoke")
   const port = portBase + 7
@@ -984,6 +1163,7 @@ try {
   await assertRuntimeCoreBoundary()
   for (const suite of suites) await runSuite(suite)
   await runRestartPersistenceSmoke()
+  await runMultiDirectoryPersistenceSmoke()
   await runInterruptedExecutionSmoke()
   await runCommand("frontend build", ["--cwd", "packages/app", "build"], {
     VITE_ATREE_SERVER_PORT: "4196",
