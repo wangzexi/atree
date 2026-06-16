@@ -9,7 +9,7 @@ import { ServerConnection, useServer } from "./server"
 import { usePlatform } from "./platform"
 import { Project } from "@opencode-ai/sdk/v2"
 import { Persist, persisted, removePersisted } from "@/utils/persist"
-import { decode64 } from "@/utils/base64"
+import { decodeDirectory64 } from "@/utils/base64"
 import { same } from "@/utils/same"
 import { createScrollPersistence, type SessionScroll } from "./layout-scroll"
 import { createPathHelpers } from "./file/path"
@@ -92,7 +92,7 @@ function nextSessionTabsForOpen(current: SessionTabs | undefined, tab: string): 
 const sessionPath = (key: string) => {
   const dir = SessionStateKey.route(key).split("/")[0]
   if (!dir) return
-  const root = decode64(dir)
+  const root = decodeDirectory64(dir)
   if (!root) return
   return createPathHelpers(() => root)
 }
@@ -132,7 +132,7 @@ const currentRoute = (pathname: string, search: string): LayoutRoute => {
   }
 
   const dirBase64 = parts[0]
-  const dir = decode64(dirBase64)
+  const dir = decodeDirectory64(dirBase64)
   if (!dir) return { type: "home" }
 
   if (parts[1] !== "session") return { type: "home" }

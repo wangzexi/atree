@@ -26,7 +26,7 @@ import {
   terminalInput,
   useSettings,
 } from "@/context/settings"
-import { decode64 } from "@/utils/base64"
+import { decodeDirectory64 } from "@/utils/base64"
 import { playSoundById, SOUND_OPTIONS } from "@/utils/sound"
 import { Link } from "./link"
 import { SettingsList } from "./settings-list"
@@ -93,7 +93,7 @@ export const SettingsGeneral: Component = () => {
   const updater = useUpdaterAction()
 
   const linux = createMemo(() => platform.platform === "desktop" && platform.os === "linux")
-  const dir = createMemo(() => decode64(params.dir))
+  const dir = createMemo(() => decodeDirectory64(params.dir))
   const accepting = createMemo(() => {
     const value = dir()
     if (!value) return false

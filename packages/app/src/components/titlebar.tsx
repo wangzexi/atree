@@ -36,7 +36,7 @@ import { nextSessionMetadata, sessionEmoji, sessionEmojiOptions } from "@/pages/
 import { makeEventListener } from "@solid-primitives/event-listener"
 import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/components/titlebar-session-events"
 import { useGlobal } from "@/context/global"
-import { decode64 } from "@/utils/base64"
+import { decodeDirectory64, decode64 } from "@/utils/base64"
 import { ServerConnection, useServer } from "@/context/server"
 import { tabHref, tabKey, useTabs, type Tab } from "@/context/tabs"
 import type { Session } from "@opencode-ai/sdk/v2/client"
@@ -476,7 +476,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             let tabScrollRef!: HTMLDivElement
 
             const currentDirectory = createMemo(() => {
-              if (params.dir) return decode64(params.dir)
+              if (params.dir) return decodeDirectory64(params.dir)
               const current = currentTab()
               if (current?.type === "draft") return current.directory
               if (current?.type === "session") return decode64(current.dirBase64)

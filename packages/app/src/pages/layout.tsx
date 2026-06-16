@@ -19,7 +19,7 @@ import { useLayout, LocalProject } from "@/context/layout"
 import { useServerSync } from "@/context/server-sync"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { decode64 } from "@/utils/base64"
+import { decodeDirectory64, decode64 } from "@/utils/base64"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -148,12 +148,12 @@ export default function Layout(props: ParentProps) {
   const language = useLanguage()
   const newDesign = createMemo(() => settings.general.newLayoutDesigns())
   createEffect(() => setV2Toast(newDesign()))
-  const initialDirectory = decode64(params.dir)
+  const initialDirectory = decodeDirectory64(params.dir)
   const location = useLocation()
   const route = createMemo(() => {
     const slug = params.dir
     if (!slug) return { slug, dir: "" }
-    const dir = decode64(slug)
+    const dir = decodeDirectory64(slug)
     if (!dir) return { slug, dir: "" }
     const store = serverSync.peek(dir, { bootstrap: false })
     return {
@@ -332,7 +332,7 @@ export default function Layout(props: ParentProps) {
     if (!state.autoselect) return
     const dir = params.dir
     if (!dir) return
-    const directory = decode64(dir)
+    const directory = decodeDirectory64(dir)
     if (!directory) return
     setState("autoselect", false)
   })

@@ -1,5 +1,5 @@
 import { useServerSync } from "@/context/server-sync"
-import { decode64 } from "@/utils/base64"
+import { decodeDirectory64 } from "@/utils/base64"
 import { useParams } from "@solidjs/router"
 import { Iterable, pipe } from "effect"
 import { createMemo } from "solid-js"
@@ -19,7 +19,7 @@ const popularProviderSet = new Set(popularProviders)
 export function useProviders() {
   const serverSync = useServerSync()
   const params = useParams()
-  const dir = createMemo(() => decode64(params.dir) ?? "")
+  const dir = createMemo(() => decodeDirectory64(params.dir) ?? "")
   const providers = () => {
     if (dir()) {
       const [projectStore] = serverSync.child(dir())

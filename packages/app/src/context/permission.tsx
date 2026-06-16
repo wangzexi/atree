@@ -6,7 +6,7 @@ import { Persist, persisted } from "@/utils/persist"
 import { useServerSDK } from "@/context/server-sdk"
 import { useServerSync } from "./server-sync"
 import { useParams } from "@solidjs/router"
-import { decode64 } from "@/utils/base64"
+import { decodeDirectory64 } from "@/utils/base64"
 import {
   acceptKey,
   directoryAcceptKey,
@@ -53,7 +53,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
     const serverSync = useServerSync()
 
     const permissionsEnabled = createMemo(() => {
-      const directory = decode64(params.dir)
+      const directory = decodeDirectory64(params.dir)
       if (!directory) return false
       const [store] = serverSync.child(directory)
       return hasPermissionPromptRules(store.config.permission)
@@ -85,7 +85,7 @@ export const { use: usePermission, provider: PermissionProvider } = createSimple
     // When config has permission: "allow", auto-enable directory-level auto-accept
     createEffect(() => {
       if (!ready()) return
-      const directory = decode64(params.dir)
+      const directory = decodeDirectory64(params.dir)
       if (!directory) return
       const [childStore] = serverSync.child(directory)
       const perm = childStore.config.permission
