@@ -399,7 +399,7 @@ export function AppInterface(props: {
           >
             <Route path="/" component={HomeRoute} />
             <Route path="/new-session" component={DraftRoute} />
-            <Route path="/:dir" component={DirectoryLayout}>
+            <Route path="/:dir([%0-9A-Za-z._~+=-]+)" component={DirectoryLayout}>
               <Route path="/" component={() => <Navigate href="session" />} />
               <Route path="/session/:id?" component={SessionRoute} />
             </Route>

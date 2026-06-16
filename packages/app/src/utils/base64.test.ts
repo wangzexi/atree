@@ -5,6 +5,14 @@ describe("decode64", () => {
   test("keeps any base64 encoded payload", () => {
     expect(decode64("c2Vzc2lvbg")).toBe("session")
   })
+
+  test("accepts URL encoded padding", () => {
+    expect(decode64("L3RtcA%3D%3D")).toBe("/tmp")
+  })
+
+  test("accepts no URL-safe padded base64", () => {
+    expect(decode64("L3RtcA==")).toBe("/tmp")
+  })
 })
 
 describe("decodeDirectory64", () => {
