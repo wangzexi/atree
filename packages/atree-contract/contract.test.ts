@@ -2132,6 +2132,42 @@ runStorageContract("atree directory storage contract", () => {
     }
   })
 
+  test("archives a recurring session by clearing cron schedule in directory metadata", async () => {
+    const created = await createSession()
+    const sessionID = String(created.id)
+
+    try {
+      await json<Json>(`/session/${sessionID}/schedule`, {
+        method: "POST",
+        query: sessionQuery(),
+        body: JSON.stringify({
+          type: "cron",
+          cron: "*/5 * * * *",
+          message: "storage contract recurring scheduled message",
+        }),
+      })
+
+      const before = await json<Json[]>(`/session/${sessionID}/schedule`, { query: sessionQuery() })
+      expect(before).toHaveLength(1)
+
+      await json<Json>(`/session/${sessionID}`, {
+        method: "PATCH",
+        query: sessionQuery(),
+        body: JSON.stringify({ time: { archived: Date.now() } }),
+      })
+
+      const after = await json<Json[]>(`/session/${sessionID}/schedule`, { query: sessionQuery() })
+      expect(after).toHaveLength(0)
+
+      const meta = await readFile(join(directory!, ".agents", "atree", "sessions", sessionID, "meta.yaml"), "utf8")
+      expect(meta.trim().startsWith("{")).toBe(false)
+      expect(meta).toMatch(/archived_at: .+/)
+      expect(meta).not.toContain("schedule:")
+    } finally {
+      await deleteSession(sessionID)
+    }
+  })
+
   runPromptSuccessTest("runs due at schedules into session.jsonl and clears the pending schedule", async () => {
     const created = await createSession()
     const sessionID = String(created.id)
