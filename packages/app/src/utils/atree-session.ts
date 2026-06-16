@@ -34,6 +34,15 @@ type NativeSessionMeta = {
   created_at: string
   updated_at: string
   archived_at: string | null
+  share?: {
+    url: string
+  }
+  revert?: {
+    messageID: string
+    partID?: string
+    snapshot?: string
+    diff?: string
+  }
   schedule?: NativeScheduleMeta
 }
 
@@ -110,6 +119,8 @@ function toSession(item: NativeSessionInfo): Session {
       ...(archived !== undefined ? { archived } : {}),
     },
     cost: 0,
+    ...(item.meta.share ? { share: item.meta.share } : {}),
+    ...(item.meta.revert ? { revert: item.meta.revert } : {}),
     tokens: {
       input: 0,
       output: 0,

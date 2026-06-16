@@ -500,6 +500,38 @@ export async function handle(request: Request): Promise<Response> {
 
       if (sessionRoute[1] === "todo" && request.method === "GET") return json([])
 
+      if (sessionRoute[1] === "share" && request.method === "POST") {
+        const shareURL = `${url.origin}/atree/session/${sessionID}`
+        return json(await store.shareSession(directory, sessionID, shareURL))
+      }
+      if (sessionRoute[1] === "unshare" && request.method === "DELETE") {
+        return json(await store.unshareSession(directory, sessionID))
+      }
+      if (sessionRoute[1] === "unshare" && request.method === "POST") {
+        return json(await store.unshareSession(directory, sessionID))
+      }
+      if (sessionRoute[1] === "abort" && request.method === "POST") {
+        return json(await store.abortSession(directory, sessionID))
+      }
+      if (sessionRoute[1] === "summarize" && request.method === "POST") {
+        await store.summarizeSession(directory, sessionID, await requestJson(request))
+        return json(true)
+      }
+      if (sessionRoute[1] === "revert" && request.method === "POST") {
+        const body = await requestJson(request)
+        return json(
+          await store.revertSession(directory, sessionID, {
+            messageID: typeof body.messageID === "string" ? body.messageID : "",
+            partID: typeof body.partID === "string" ? body.partID : undefined,
+            snapshot: typeof body.snapshot === "string" ? body.snapshot : undefined,
+            diff: typeof body.diff === "string" ? body.diff : undefined,
+          }),
+        )
+      }
+      if (sessionRoute[1] === "unrevert" && request.method === "POST") {
+        return json(await store.unrevertSession(directory, sessionID))
+      }
+
       if (sessionRoute[1] === "prompt_async" && request.method === "POST") {
         return runPromptAsync(directory, sessionID, await requestJson(request))
       }

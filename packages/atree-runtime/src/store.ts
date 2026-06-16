@@ -49,8 +49,19 @@ export type ScheduleMeta =
       message: string
       created_at: string
       last_ran_at: string | null
-      last_run_status: "ran" | "skipped" | null
-    }
+    last_run_status: "ran" | "skipped" | null
+  }
+
+export type SessionShare = {
+  url: string
+}
+
+export type SessionRevert = {
+  messageID: string
+  partID?: string
+  snapshot?: string
+  diff?: string
+}
 
 export type SessionMeta = {
   version: number
@@ -61,6 +72,8 @@ export type SessionMeta = {
   created_at: string
   updated_at: string
   archived_at: string | null
+  share?: SessionShare
+  revert?: SessionRevert
   schedule?: ScheduleMeta
 }
 
@@ -79,6 +92,8 @@ export type SessionInfo = {
     updated: number
     archived?: number
   }
+  share?: SessionShare
+  revert?: SessionRevert
   cost: number
   tokens: {
     input: number
@@ -548,6 +563,8 @@ function toSessionInfo(directory: string, meta: SessionMeta): SessionInfo {
       updated,
       ...(archived !== undefined ? { archived } : {}),
     },
+    ...(meta.share ? { share: meta.share } : {}),
+    ...(meta.revert ? { revert: meta.revert } : {}),
     cost: 0,
     tokens: defaultTokens(),
   }
@@ -1485,6 +1502,76 @@ export class AtreeStore {
       await writeJsonYaml(metaPath(directory, sessionID), next)
       return toSessionInfo(directory, next)
     })
+  }
+
+  async shareSession(directory: string, sessionID: string, share: string) {
+    return this.withSessionWriteLock(directory, sessionID, async () => {
+      const meta = await this.requireSession(directory, sessionID)
+      const next: SessionMeta = {
+        ...meta,
+        share: { url: share },
+        updated_at: new Date().toISOString(),
+      }
+      await writeJsonYaml(metaPath(directory, sessionID), next)
+      return toSessionInfo(directory, next)
+    })
+  }
+
+  async unshareSession(directory: string, sessionID: string) {
+    return this.withSessionWriteLock(directory, sessionID, async () => {
+      const meta = await this.requireSession(directory, sessionID)
+      const { share: _share, ...next } = meta
+      await writeJsonYaml(metaPath(directory, sessionID), {
+        ...next,
+        updated_at: new Date().toISOString(),
+      })
+      return toSessionInfo(directory, next as SessionMeta)
+    })
+  }
+
+  async revertSession(
+    directory: string,
+    sessionID: string,
+    input: { messageID: string; partID?: string; snapshot?: string; diff?: string },
+  ) {
+    if (!input.messageID) throw new Response("messageID is required", { status: 400 })
+    return this.withSessionWriteLock(directory, sessionID, async () => {
+      const meta = await this.requireSession(directory, sessionID)
+      const next: SessionMeta = {
+        ...meta,
+        revert: {
+          messageID: input.messageID,
+          partID: input.partID,
+          snapshot: input.snapshot,
+          diff: input.diff,
+        },
+        updated_at: new Date().toISOString(),
+      }
+      await writeJsonYaml(metaPath(directory, sessionID), next)
+      return toSessionInfo(directory, next)
+    })
+  }
+
+  async unrevertSession(directory: string, sessionID: string) {
+    return this.withSessionWriteLock(directory, sessionID, async () => {
+      const meta = await this.requireSession(directory, sessionID)
+      const { revert: _revert, ...next } = meta
+      await writeJsonYaml(metaPath(directory, sessionID), {
+        ...next,
+        updated_at: new Date().toISOString(),
+      })
+      return toSessionInfo(directory, next as SessionMeta)
+    })
+  }
+
+  async abortSession(directory: string, sessionID: string) {
+    await this.requireSession(directory, sessionID)
+    return true
+  }
+
+  async summarizeSession(directory: string, sessionID: string, _input?: { providerID?: string; modelID?: string; auto?: boolean }) {
+    await this.requireSession(directory, sessionID)
+    return true
   }
 
   async deleteSession(directory: string, sessionID: string) {
