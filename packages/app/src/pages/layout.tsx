@@ -2438,14 +2438,6 @@ export default function Layout(props: ParentProps) {
     const homedir = createMemo(() => serverSync.data.path.home)
     const label = (directory: string) => getFilename(directory) || directory
     const shortPath = (directory: string) => directory.replace(homedir(), "~")
-    const normalizeRelative = (path: string) => path.replace(/^\/+/, "").replace(/\/+$/, "")
-    const relativePath = (root: string, directory: string) => {
-      const rootKey = pathKey(root)
-      const directoryKey = pathKey(directory)
-      if (rootKey === directoryKey) return ""
-      if (!directoryKey.startsWith(rootKey + "/")) return ""
-      return normalizeRelative(directoryKey.slice(rootKey.length + 1))
-    }
     const directoryKey = (directory: string) => pathKey(directory)
     const directoryState = (directory: string) => tree.directory[directoryKey(directory)]
     const scheduleIndex = createMemo(() =>
@@ -2466,11 +2458,14 @@ export default function Layout(props: ParentProps) {
     const firstScheduledSession = (directory: string) => scheduledSessions(directory)[0]
     const firstScheduleRun = (directory: string) =>
       sessionNextScheduleRun(firstScheduledSession(directory), scheduleIndex()) ?? Number.MAX_SAFE_INTEGER
-    const isVisiblePath = (directory: string): boolean => {
+    const isVisiblePath = (directory: string, visited = new Set<string>()): boolean => {
+      if (visited.has(directory)) return false
+      visited.add(directory)
+
       if (isSessionNode(directory)) return true
       const state = directoryState(directory)
       if (!state?.loaded) return false
-      return (state.children ?? []).some((child) => isVisiblePath(child.absolute))
+      return (state.children ?? []).some((child) => isVisiblePath(child.absolute, visited))
     }
     const hasHiddenPlainDirectories = (children: AtreeDirectoryNode[]) =>
       children.some((child) => !isVisiblePath(child.absolute))
@@ -2532,15 +2527,17 @@ export default function Layout(props: ParentProps) {
         void fetchSessionSchedules(session)
       }
     }
-    const probeChildDirectories = async (root: string, children: AtreeDirectoryNode[]) => {
-      const client = serverSDK.createClient({ directory: root, throwOnError: true })
+    const probeChildDirectories = async (children: AtreeDirectoryNode[]) => {
       await Promise.all(
         children.map(async (child) => {
           const childKey = directoryKey(child.absolute)
           if (tree.directory[childKey]?.loaded) return
           try {
             const [files, sessions] = await Promise.all([
-              client.file.list({ directory: root, path: relativePath(root, child.absolute) }),
+              serverSDK.createClient({ directory: child.absolute, throwOnError: true }).file.list({
+                directory: child.absolute,
+                path: "",
+              }),
               serverSDK
                 .createClient({ directory: child.absolute, throwOnError: true })
                 .session.list({ directory: child.absolute, roots: true }),
@@ -2571,7 +2568,7 @@ export default function Layout(props: ParentProps) {
       const state = tree.directory[key]
       if (!opts?.force && state?.loaded) {
         if (opts?.probeChildren && !state.childrenProbed) {
-          await probeChildDirectories(root, state.children ?? [])
+          await probeChildDirectories(state.children ?? [])
           setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
         }
         return
@@ -2579,12 +2576,14 @@ export default function Layout(props: ParentProps) {
       if (state?.loading) return
 
       setTree("directory", key, (prev) => ({ ...prev, loading: true }))
-      const client = serverSDK.createClient({ directory: root, throwOnError: true })
       const sessionClient = serverSDK.createClient({ directory, throwOnError: true })
 
       try {
         const [files, sessions] = await Promise.all([
-          client.file.list({ directory: root, path: relativePath(root, directory) }),
+          serverSDK.createClient({ directory, throwOnError: true }).file.list({
+            directory,
+            path: "",
+          }),
           sessionClient.session.list({ directory, roots: true }),
         ])
         const children = toDirectoryNodes(files.data)
@@ -2597,7 +2596,7 @@ export default function Layout(props: ParentProps) {
         }))
         preloadSessionSchedules(sessions.data ?? [])
         for (const child of children) ensureDirectory(child.absolute)
-        await probeChildDirectories(root, children)
+        await probeChildDirectories(children)
         setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
       } catch (error) {
         setTree("directory", key, (prev) => ({ ...prev, loading: false }))
