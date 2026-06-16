@@ -94,6 +94,7 @@ function json(value: unknown, init?: ResponseInit) {
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      "connection": "close",
       ...init?.headers,
     },
   })
@@ -106,6 +107,7 @@ function empty(init?: ResponseInit) {
       "access-control-allow-origin": "*",
       "access-control-allow-headers": "*",
       "access-control-allow-methods": "GET,POST,PATCH,DELETE,OPTIONS",
+      "connection": "close",
       ...init?.headers,
     },
   })
@@ -120,6 +122,7 @@ function withCors(response: Response) {
   headers.set("access-control-allow-origin", "*")
   headers.set("access-control-allow-headers", "*")
   headers.set("access-control-allow-methods", "GET,POST,PATCH,DELETE,OPTIONS")
+  headers.set("connection", "close")
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,

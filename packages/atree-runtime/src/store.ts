@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import { existsSync } from "node:fs"
-import { mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
+import { appendFile, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises"
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import {
@@ -347,6 +347,19 @@ function flushPiSession(manager: SessionManager) {
     throw new Error("Pi SessionManager no longer exposes _rewriteFile; update atree session.jsonl flush logic")
   }
   rewriteFile.call(manager)
+}
+
+async function appendSessionEntry(directory: string, sessionID: string, value: Json) {
+  await appendFile(sessionPath(directory, sessionID), `${JSON.stringify(value)}\n`, "utf8")
+}
+
+function previousMessageEntryID(entries: ReturnType<typeof parseSessionEntries>) {
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (!entry || entry.type !== "message") continue
+    if (typeof entry.id === "string" && entry.id) return entry.id
+  }
+  return undefined
 }
 
 function piExecutionMode(): PiExecutionMode {
@@ -1687,6 +1700,55 @@ export class AtreeStore {
       const meta = await this.requireSession(directory, sessionID)
       const now = new Date()
       const content = await requestContent(directory, sessionID, input.parts)
+      const mode = piExecutionMode()
+
+      if (mode === "none") {
+        const entryID = id("pi")
+        const messageID = typeof input.messageID === "string" ? input.messageID : `msg_${entryID}`
+        const message: Json = {
+          role: "user",
+          content,
+          timestamp: now.getTime(),
+          ...(isRecord(input.source) ? { source: input.source } : {}),
+        }
+
+        let parentId: string | undefined
+        try {
+          const existingEntries = parseSessionEntries(await readFile(sessionPath(directory, sessionID), "utf8"))
+          parentId = previousMessageEntryID(existingEntries)
+        } catch {
+          parentId = undefined
+        }
+
+        await appendSessionEntry(directory, sessionID, {
+          type: "message",
+          id: entryID,
+          parentId,
+          timestamp: now.toISOString(),
+          message,
+        })
+
+        await writeJsonYaml(metaPath(directory, sessionID), {
+          ...meta,
+          updated_at: now.toISOString(),
+        })
+        const model = input.model ?? {}
+        const info: MessageInfo = {
+          id: messageID,
+          sessionID,
+          role: "user",
+          time: { created: now.getTime() },
+          agent: typeof input.agent === "string" ? input.agent : "pi",
+          model: {
+            providerID: typeof model.providerID === "string" ? model.providerID : "pi",
+            modelID: typeof model.modelID === "string" ? model.modelID : "default",
+            ...(typeof model.variant === "string" ? { variant: model.variant } : {}),
+          },
+        }
+        const parts = contentToMessageParts(content, sessionID, messageID, now.getTime())
+        return { info, parts }
+      }
+
       const manager = openPiSession(directory, sessionID)
       const entryID = manager.appendMessage({
         role: "user",
