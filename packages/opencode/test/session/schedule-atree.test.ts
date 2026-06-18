@@ -182,4 +182,48 @@ describe("atree schedule restore", () => {
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
     }),
   )
+
+  it.instance(
+    "does not restore stale schedule state for an archived file-backed session",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const sessionID = "ses_file_archived_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-archived-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File archived schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now, archived: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: "sch_archived_stale",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "should not restore",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      expect(schedules).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+    }),
+  )
 })

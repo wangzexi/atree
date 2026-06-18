@@ -186,6 +186,14 @@ function stopTimer(timer: Timer) {
   else clearTimeout(timer.timeout)
 }
 
+function stopSessionTimers(timers: Map<ID, Timer>, sessionID: SessionID) {
+  for (const [id, timer] of timers.entries()) {
+    if (timer.sessionID !== sessionID) continue
+    stopTimer(timer)
+    timers.delete(id)
+  }
+}
+
 function canRestoreStoredSchedule(schedule: {
   kind: Kind
   expression: string
@@ -313,6 +321,24 @@ export const layer = Layer.effect(
         .run()
         .pipe(Effect.orDie)
       return session?.directory
+    })
+
+    const sessionArchiveState = Effect.fn("Schedule.sessionArchiveState")(function* (sessionID: SessionID) {
+      const row = yield* db
+        .select({ directory: SessionTable.directory, archived: SessionTable.time_archived })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (row?.directory) return { directory: row.directory, archived: row.archived !== null }
+
+      const directory = yield* InstanceState.directory.pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (!directory) return
+      const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      if (!session) return
+      return { directory: session.directory, archived: session.time.archived !== undefined }
     })
 
     const activeSchedules = Effect.fn("Schedule.activeSchedules")(function* (sessionID: SessionID) {
@@ -500,8 +526,15 @@ export const layer = Layer.effect(
 
     const serviceBridge = yield* EffectBridge.make()
     const restoreStoredSchedules = Effect.fn("Schedule.restoreStoredSchedules")(function* (sessionID: SessionID) {
-      const directory = yield* sessionDirectory(sessionID)
-      if (!directory) return [] as Info[]
+      const archiveState = yield* sessionArchiveState(sessionID)
+      if (!archiveState) return [] as Info[]
+      if (archiveState.archived) {
+        stopSessionTimers(timers, sessionID)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
+        yield* Effect.promise(() => writeSessionScheduleState(archiveState.directory, sessionID, []))
+        return [] as Info[]
+      }
+      const directory = archiveState.directory
       const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
       if (stored.length === 0) return [] as Info[]
 
@@ -545,15 +578,23 @@ export const layer = Layer.effect(
     const hydrated = yield* db.select().from(ScheduleTable).all().pipe(Effect.orDie)
     for (const row of hydrated) {
       const id = row.id as ID
+      const sessionID = row.session_id as SessionID
+      const archiveState = yield* sessionArchiveState(sessionID)
+      if (archiveState?.archived) {
+        stopSessionTimers(timers, sessionID)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
+        yield* Effect.promise(() => writeSessionScheduleState(archiveState.directory, sessionID, []))
+        continue
+      }
       const kind = (row.kind ?? "recurring") as Kind
       if (kind === "once") {
         const lastRun = yield* getLastRun(id)
         if (lastRun) {
-          yield* completeOnce(id, row.session_id as SessionID)
+          yield* completeOnce(id, sessionID)
           continue
         }
       }
-      startTimer(id, row.session_id as SessionID, kind, row.expression, row.run_at ?? null, serviceBridge)
+      startTimer(id, sessionID, kind, row.expression, row.run_at ?? null, serviceBridge)
     }
     const sessions = yield* db.select({ id: SessionTable.id }).from(SessionTable).all().pipe(Effect.orDie)
     for (const session of sessions) {
@@ -561,6 +602,13 @@ export const layer = Layer.effect(
     }
 
     const list: Interface["list"] = Effect.fn("Schedule.list")(function* (sessionID: SessionID) {
+      const archiveState = yield* sessionArchiveState(sessionID)
+      if (archiveState?.archived) {
+        stopSessionTimers(timers, sessionID)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
+        yield* Effect.promise(() => writeSessionScheduleState(archiveState.directory, sessionID, []))
+        return [] as Info[]
+      }
       const rows = yield* db
         .select({
           id: ScheduleTable.id,
@@ -689,6 +737,7 @@ export const layer = Layer.effect(
     })
 
     const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (sessionID: SessionID) {
+      stopSessionTimers(timers, sessionID)
       const rows = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
@@ -700,11 +749,6 @@ export const layer = Layer.effect(
       }
       for (const row of rows) {
         const id = row.id as ID
-        const timer = timers.get(id)
-        if (timer) {
-          stopTimer(timer)
-          timers.delete(id)
-        }
         yield* events.publish(Event.Deleted, { scheduleID: id, sessionID })
       }
       yield* syncScheduleState(sessionID)

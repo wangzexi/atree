@@ -205,6 +205,27 @@ it.instance("clears scheduled tasks and directory schedule state for a session",
   }),
 )
 
+it.instance("does not list scheduled tasks for archived sessions", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    const { db } = yield* Database.Service
+    yield* initScheduleTables
+
+    const session = yield* createFixtureSession("schedule archived test")
+    yield* schedules.create({
+      sessionID: session.id,
+      expression: "* * * * *",
+      message: "do not list after archive",
+    })
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(1)
+
+    yield* db.run(sql`UPDATE session SET time_archived = ${Date.now()} WHERE id = ${session.id}`).pipe(Effect.orDie)
+
+    expect(yield* schedules.list(session.id)).toEqual([])
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
+  }),
+)
+
 it.instance("runs a one-time scheduled task once", () =>
   Effect.gen(function* () {
     const schedules = yield* Schedule.Service
