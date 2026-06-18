@@ -733,7 +733,22 @@ export const layer: Layer.Layer<
         .where(and(eq(SessionTable.parent_id, parentID)))
         .all()
         .pipe(Effect.orDie)
-      return rows.map(fromRow)
+      const byID = new Map<string, Info>()
+      for (const row of rows) byID.set(row.id, fromRow(row))
+
+      const parent = yield* get(parentID).pipe(Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)))
+      const directory =
+        parent?.directory ??
+        (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
+      if (directory) {
+        const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
+        for (const item of fileSessions) {
+          if (item.parentID !== parentID) continue
+          byID.set(item.id, item)
+        }
+      }
+
+      return [...byID.values()]
     })
 
     const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID) {

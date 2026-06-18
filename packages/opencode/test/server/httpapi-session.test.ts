@@ -504,6 +504,53 @@ describe("session HttpApi", () => {
     { git: true, config: { formatter: false, lsp: false } },
   )
 
+  it.instance(
+    "serves file-backed child sessions when database cache is missing",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory }
+        const parentID = SessionID.descending()
+        const childID = SessionID.descending()
+        const base = {
+          version: "test",
+          projectID: ctx.project.id,
+          directory: test.directory,
+          path: ".",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            id: parentID,
+            slug: "file-backed-parent",
+            title: "File backed parent",
+            time: { created: 10, updated: 20 },
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            id: childID,
+            slug: "file-backed-child",
+            parentID,
+            title: "File backed child",
+            time: { created: 11, updated: 21 },
+          } as any),
+        )
+
+        const children = yield* requestJson<Session.Info[]>(pathFor(SessionPaths.children, { sessionID: parentID }), {
+          headers,
+        })
+        expect(children.map((item) => item.id)).toEqual([childID])
+        expect(children[0]).toMatchObject({ parentID, title: "File backed child" })
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
   it.live("uses the persisted session directory for prompt requests", () =>
     Effect.gen(function* () {
       const llm = yield* TestLLMServer
