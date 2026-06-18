@@ -736,7 +736,11 @@ export const layer: Layer.Layer<
         .all()
         .pipe(Effect.orDie)
       const byID = new Map<string, Info>()
-      for (const row of rows) byID.set(row.id, fromRow(row))
+      for (const row of rows) {
+        const item = fromRow(row)
+        if (item.time.archived !== undefined) continue
+        byID.set(item.id, item)
+      }
 
       const parent = yield* get(parentID).pipe(Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)))
       const directory =
@@ -746,6 +750,7 @@ export const layer: Layer.Layer<
         const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
         for (const item of fileSessions) {
           if (item.parentID !== parentID) continue
+          if (item.time.archived !== undefined) continue
           byID.set(item.id, item)
         }
       }

@@ -513,6 +513,7 @@ describe("session HttpApi", () => {
         const headers = { "x-opencode-directory": test.directory }
         const parentID = SessionID.descending()
         const childID = SessionID.descending()
+        const archivedChildID = SessionID.descending()
         const base = {
           version: "test",
           projectID: ctx.project.id,
@@ -539,6 +540,16 @@ describe("session HttpApi", () => {
             parentID,
             title: "File backed child",
             time: { created: 11, updated: 21 },
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            id: archivedChildID,
+            slug: "file-backed-archived-child",
+            parentID,
+            title: "File backed archived child",
+            time: { created: 12, updated: 22, archived: 23 },
           } as any),
         )
 
