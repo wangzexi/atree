@@ -249,6 +249,13 @@ describe("Session", () => {
       expect(messages).toHaveLength(1)
       expect(messages[0]?.info).toMatchObject({ id: "msg_file", role: "user" })
       expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_file", type: "text", text: "from file" })
+
+      const part = yield* session.getPart({
+        sessionID: id,
+        messageID: "msg_file" as MessageID,
+        partID: "prt_file" as PartID,
+      })
+      expect(part).toMatchObject({ id: "prt_file", type: "text", text: "from file" })
     }),
   )
 

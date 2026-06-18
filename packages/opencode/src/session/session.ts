@@ -746,7 +746,16 @@ export const layer: Layer.Layer<
         )
         .get()
         .pipe(Effect.orDie)
-      if (!row) return
+      if (!row) {
+        const session = yield* get(input.sessionID).pipe(
+          Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+        )
+        if (!session) return
+        const messages = yield* Effect.promise(() => readSessionJsonlMessages(session))
+        return messages
+          .find((message) => message.info.id === input.messageID)
+          ?.parts.find((part) => part.id === input.partID)
+      }
       return {
         ...row.data,
         id: row.id,
