@@ -616,11 +616,11 @@ export const layer: Layer.Layer<
       input?: ListInput,
     ) {
       if (!input?.directory) return items
+      if (input.path !== undefined) return items
       const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
       const byID = new Map<string, Info>()
       for (const item of items) byID.set(item.id, item)
       for (const item of fileSessions) {
-        if (item.time.archived !== undefined) continue
         if (input.roots && item.parentID) continue
         if (input.start && item.time.updated < input.start) continue
         if (input.search && !item.title.includes(input.search)) continue

@@ -13,6 +13,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { Storage } from "@/storage/storage"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
+import { writeSessionStore } from "@/atree/session-store"
 
 const layer = (experimentalWorkspaces: boolean) =>
   Layer.mergeAll(
@@ -94,6 +95,50 @@ describe("session.list", () => {
         expect(ids).not.toContain(parent.id)
         expect(ids).toContain(current.id)
         expect(ids).not.toContain(sibling.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "includes archived file-backed sessions when listing a directory",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const directory = test.directory
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_file_active",
+            slug: "file-active",
+            version: "test",
+            projectID: "proj_file",
+            directory,
+            path: ".",
+            title: "File active",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 1 },
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_file_archived",
+            slug: "file-archived",
+            version: "test",
+            projectID: "proj_file",
+            directory,
+            path: ".",
+            title: "File archived",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 2, updated: 2, archived: 3 },
+          } as any),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) => session.list({ directory, roots: true }))
+        const byID = new Map(sessions.map((session) => [String(session.id), session]))
+        expect(byID.get("ses_file_active")?.time.archived).toBeUndefined()
+        expect(byID.get("ses_file_archived")?.time.archived).toBe(3)
       }),
     { git: true },
   )
