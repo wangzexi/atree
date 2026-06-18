@@ -320,6 +320,7 @@ export type ListInput = {
   start?: number
   search?: string
   limit?: number
+  archived?: boolean
 }
 
 export type GlobalListInput = {
@@ -652,6 +653,7 @@ export const layer: Layer.Layer<
         if (input.roots && item.parentID) continue
         if (input.start && item.time.updated < input.start) continue
         if (input.search && !item.title.includes(input.search)) continue
+        if (!input.archived && item.time.archived !== undefined) continue
         byID.set(item.id, item)
       }
       return [...byID.values()]
@@ -1173,6 +1175,9 @@ function listByProject(
   }
   if (input.search) {
     conditions.push(like(SessionTable.title, `%${input.search}%`))
+  }
+  if (!input.archived) {
+    conditions.push(isNull(SessionTable.time_archived))
   }
 
   const limit = input.limit ?? 100

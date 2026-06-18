@@ -100,7 +100,7 @@ describe("session.list", () => {
   )
 
   it.instance(
-    "includes archived file-backed sessions when listing a directory",
+    "filters archived file-backed sessions unless requested",
     () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
@@ -138,7 +138,13 @@ describe("session.list", () => {
         const sessions = yield* SessionNs.Service.use((session) => session.list({ directory, roots: true }))
         const byID = new Map(sessions.map((session) => [String(session.id), session]))
         expect(byID.get("ses_file_active")?.time.archived).toBeUndefined()
-        expect(byID.get("ses_file_archived")?.time.archived).toBe(3)
+        expect(byID.has("ses_file_archived")).toBe(false)
+
+        const withArchived = yield* SessionNs.Service.use((session) =>
+          session.list({ directory, roots: true, archived: true }),
+        )
+        const archivedByID = new Map(withArchived.map((session) => [String(session.id), session]))
+        expect(archivedByID.get("ses_file_archived")?.time.archived).toBe(3)
       }),
     { git: true },
   )

@@ -3299,6 +3299,7 @@ export class Session2 extends HeyApiClient {
       start?: number
       search?: string
       limit?: number
+      archived?: boolean | "true" | "false"
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3315,6 +3316,7 @@ export class Session2 extends HeyApiClient {
             { in: "query", key: "start" },
             { in: "query", key: "search" },
             { in: "query", key: "limit" },
+            { in: "query", key: "archived" },
           ],
         },
       ],

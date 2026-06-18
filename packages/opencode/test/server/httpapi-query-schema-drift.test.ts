@@ -77,6 +77,7 @@ const booleanSdkQueryParams = [
   { method: "get", path: ExperimentalPaths.session, name: "roots" },
   { method: "get", path: ExperimentalPaths.session, name: "archived" },
   { method: "get", path: SessionPaths.list, name: "roots" },
+  { method: "get", path: SessionPaths.list, name: "archived" },
 ] satisfies Array<{ method: Method; path: string; name: string }>
 
 const queryParamPatterns = [

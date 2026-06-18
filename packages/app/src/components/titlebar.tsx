@@ -993,7 +993,7 @@ function ArchivedSessionsMenu(props: {
     () => [serverCtx(), props.directory, props.version] as const,
     async ([serverCtx, directory]) => {
       if (!serverCtx) return [] as Session[]
-      const result = await serverCtx.sdk.client.session.list({ directory, roots: true })
+      const result = await serverCtx.sdk.client.session.list({ directory, roots: true, archived: true })
       return (result.data ?? [])
         .filter((session) => !session.parentID && !!session.time?.archived)
         .sort((a, b) => (b.time.archived ?? 0) - (a.time.archived ?? 0))
