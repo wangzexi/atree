@@ -411,6 +411,8 @@ describe("session HttpApi", () => {
         const sessionID = SessionID.descending()
         const messageID = MessageID.ascending()
         const partID = PartID.ascending()
+        const secondMessageID = MessageID.ascending()
+        const secondPartID = PartID.ascending()
         const info = {
           id: sessionID,
           slug: "file-backed-http",
@@ -447,6 +449,33 @@ describe("session HttpApi", () => {
             part: { id: partID, sessionID, messageID, type: "text", text: "from file-backed route" },
           }),
         )
+        yield* Effect.promise(() =>
+          appendSessionJsonl(info, {
+            type: "message.updated",
+            message: {
+              id: secondMessageID,
+              sessionID,
+              role: "user",
+              agent: "build",
+              model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+              tools: {},
+              mode: "",
+              time: { created: 40 },
+            },
+          }),
+        )
+        yield* Effect.promise(() =>
+          appendSessionJsonl(info, {
+            type: "message.part.updated",
+            part: {
+              id: secondPartID,
+              sessionID,
+              messageID: secondMessageID,
+              type: "text",
+              text: "second file-backed route",
+            },
+          }),
+        )
 
         expect(
           yield* requestJson<SessionV1.WithParts>(
@@ -457,6 +486,20 @@ describe("session HttpApi", () => {
           info: { id: messageID, role: "user" },
           parts: [{ id: partID, type: "text", text: "from file-backed route" }],
         })
+
+        const firstPage = yield* request(`${pathFor(SessionPaths.messages, { sessionID })}?limit=1`, { headers })
+        const firstItems = yield* json<SessionV1.WithParts[]>(firstPage)
+        const nextCursor = firstPage.headers["x-next-cursor"]
+        expect(firstItems.map((item) => item.info.id)).toEqual([secondMessageID])
+        expect(nextCursor).toBeTruthy()
+
+        const secondPage = yield* request(
+          `${pathFor(SessionPaths.messages, { sessionID })}?limit=1&before=${nextCursor}`,
+          { headers },
+        )
+        const secondItems = yield* json<SessionV1.WithParts[]>(secondPage)
+        expect(secondItems.map((item) => item.info.id)).toEqual([messageID])
+        expect(secondPage.headers["x-next-cursor"]).toBeUndefined()
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

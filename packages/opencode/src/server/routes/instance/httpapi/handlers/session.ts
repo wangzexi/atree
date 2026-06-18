@@ -40,13 +40,35 @@ import {
 import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 import { buildScheduleCreateInput } from "@/session/schedule-input"
-import { NotFoundError as StorageNotFoundError } from "@/storage/storage"
 
 const tryParseJson = (text: string) =>
   Effect.try({
     try: () => JSON.parse(text) as unknown,
     catch: () => new HttpApiError.BadRequest({}),
   })
+
+function messageCreated(item: SessionV1.WithParts) {
+  return item.info.time.created
+}
+
+function olderThanCursor(item: SessionV1.WithParts, cursor: { id: MessageID; time: number }) {
+  const created = messageCreated(item)
+  return created < cursor.time || (created === cursor.time && item.info.id < cursor.id)
+}
+
+function pageMessages(items: SessionV1.WithParts[], input: { limit: number; before?: { id: MessageID; time: number } }) {
+  const candidates = input.before ? items.filter((item) => olderThanCursor(item, input.before!)) : items
+  const pageWithExtra = candidates.slice(Math.max(0, candidates.length - (input.limit + 1)))
+  const more = pageWithExtra.length > input.limit
+  const page = more ? pageWithExtra.slice(1) : pageWithExtra
+  const cursorItem = more ? page[0] : undefined
+  return {
+    items: page,
+    cursor: cursorItem
+      ? MessageV2.cursor.encode({ id: cursorItem.info.id as MessageID, time: messageCreated(cursorItem) })
+      : undefined,
+  }
+}
 
 export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", (handlers) =>
   Effect.gen(function* () {
@@ -143,32 +165,20 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       query: typeof MessagesQuery.Type
     }) {
       if (ctx.query.before && ctx.query.limit === undefined) return yield* new HttpApiError.BadRequest({})
+      let before: { id: MessageID; time: number } | undefined
       if (ctx.query.before) {
-        const before = ctx.query.before
-        yield* Effect.try({
-          try: () => MessageV2.cursor.decode(before),
+        before = yield* Effect.try({
+          try: () => MessageV2.cursor.decode(ctx.query.before!),
           catch: () => new HttpApiError.BadRequest({}),
         })
       }
       yield* requireSession(ctx.params.sessionID)
+      const allMessages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
       if (ctx.query.limit === undefined || ctx.query.limit === 0) {
-        return yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+        return allMessages
       }
 
-      const page = yield* MessageV2.page({
-        sessionID: ctx.params.sessionID,
-        limit: ctx.query.limit,
-        before: ctx.query.before,
-      }).pipe(
-        Effect.catchIf(StorageNotFoundError.isInstance, () =>
-          Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
-        ),
-      )
-      if (page.items.length === 0 && !ctx.query.before) {
-        return yield* SessionError.mapStorageNotFound(
-          session.messages({ sessionID: ctx.params.sessionID, limit: ctx.query.limit }),
-        )
-      }
+      const page = pageMessages(allMessages, { limit: ctx.query.limit, before })
       if (!page.cursor) return page.items
 
       const request = yield* HttpServerRequest.HttpServerRequest
