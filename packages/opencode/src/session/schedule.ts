@@ -12,7 +12,7 @@ import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
-import { readSessionStore } from "@/atree/session-store"
+import { readSessionStore, readSessionStores } from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
 
 export const MAX_PER_SESSION = 1
@@ -114,6 +114,8 @@ export interface Interface {
   readonly recordRun: (scheduleID: ID, sessionID: SessionID, status: RunStatus, ranAt: number) => Effect.Effect<void>
   /** Remove every scheduled message for a session. */
   readonly clear: (sessionID: SessionID) => Effect.Effect<void>
+  /** Restore scheduled messages for every file-backed session in a directory. */
+  readonly restoreDirectory: (directory: string) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Schedule") {}
@@ -602,6 +604,18 @@ export const layer = Layer.effect(
       yield* restoreStoredSchedules(session.id as SessionID)
     }
 
+    const restoreDirectory: Interface["restoreDirectory"] = Effect.fn("Schedule.restoreDirectory")(function* (directory) {
+      const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
+      yield* Effect.forEach(
+        fileSessions,
+        (session) =>
+          restoreStoredSchedules(session.id).pipe(
+            Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
+          ),
+        { concurrency: "unbounded", discard: true },
+      )
+    })
+
     const list: Interface["list"] = Effect.fn("Schedule.list")(function* (sessionID: SessionID) {
       const archiveState = yield* sessionArchiveState(sessionID)
       if (archiveState?.archived) {
@@ -763,6 +777,7 @@ export const layer = Layer.effect(
       clear,
       tick,
       recordRun,
+      restoreDirectory,
     })
   }),
 )

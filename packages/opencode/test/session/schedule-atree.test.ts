@@ -141,6 +141,59 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
+    "restores file-backed schedules for a directory",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const sessionID = "ses_file_directory_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-directory-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File directory schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: "sch_file_directory",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "restore directory schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.restoreDirectory(instance.directory))
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, "sch_file_directory" as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+      expect(row?.message).toBe("restore directory schedule")
+    }),
+  )
+
+  it.instance(
     "creates a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {
       const instance = yield* TestInstance

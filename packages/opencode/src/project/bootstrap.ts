@@ -7,6 +7,7 @@ import * as Project from "./project"
 import * as Vcs from "./vcs"
 import { InstanceState } from "@/effect/instance-state"
 import { ShareNext } from "@/share/share-next"
+import { Schedule } from "@/session/schedule"
 import { Effect, Layer } from "effect"
 import { Config } from "@/config/config"
 import { Service } from "./bootstrap-service"
@@ -25,6 +26,7 @@ export const layer = Layer.effect(
     const lsp = yield* LSP.Service
     const plugin = yield* Plugin.Service
     const project = yield* Project.Service
+    const schedule = yield* Schedule.Service
     const shareNext = yield* ShareNext.Service
     const snapshot = yield* Snapshot.Service
     const vcs = yield* Vcs.Service
@@ -43,6 +45,10 @@ export const layer = Layer.effect(
         (s) => s.init().pipe(Effect.catchCause((cause) => Effect.logWarning("init failed", { cause }))),
         { concurrency: "unbounded", discard: true },
       ).pipe(Effect.withSpan("InstanceBootstrap.init"))
+      yield* schedule.restoreDirectory(ctx.directory).pipe(
+        Effect.catchCause((cause) => Effect.logWarning("schedule init failed", { cause })),
+        Effect.withSpan("InstanceBootstrap.schedules"),
+      )
     }).pipe(Effect.withSpan("InstanceBootstrap"))
 
     return Service.of({ run })
@@ -56,6 +62,7 @@ export const defaultLayer = layer.pipe(
     LSP.defaultLayer,
     Plugin.defaultLayer,
     Project.defaultLayer,
+    Schedule.defaultLayer,
     ShareNext.defaultLayer,
     Snapshot.defaultLayer,
     Vcs.defaultLayer,
@@ -68,6 +75,7 @@ export const node = LayerNode.make(layer, [
   LSP.node,
   Plugin.node,
   Project.node,
+  Schedule.node,
   ShareNext.node,
   Snapshot.node,
   Vcs.node,
