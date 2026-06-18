@@ -228,6 +228,8 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     throw error
   })
   let hasEvents = false
+  const removedMessageIDs = new Set<string>()
+  const removedPartIDs = new Set<string>()
   const messages = new Map<string, SessionV1.WithParts>()
   const orphanParts = new Map<string, SessionV1.Part[]>()
 
@@ -279,6 +281,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     if (entry.type === "message.removed") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       if (!messageID) continue
+      removedMessageIDs.add(messageID)
       messages.delete(messageID)
       orphanParts.delete(messageID)
       continue
@@ -288,6 +291,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       const partID = typeof entry.partID === "string" ? entry.partID : undefined
       if (!messageID || !partID) continue
+      removedPartIDs.add(`${messageID}:${partID}`)
       const message = messages.get(messageID)
       if (message) message.parts = message.parts.filter((part) => part.id !== partID)
       const parts = orphanParts.get(messageID)
@@ -297,6 +301,8 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
 
   return {
     hasEvents,
+    removedMessageIDs,
+    removedPartIDs,
     messages: [...messages.values()].sort(
       (a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id),
     ),

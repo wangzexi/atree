@@ -319,6 +319,42 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers session.jsonl part removals over stale cached parts", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const info = yield* Effect.acquireRelease(session.create({ title: "jsonl-part-removal-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: partID,
+        messageID,
+        sessionID: info.id,
+        type: "text",
+        text: "stale part",
+      })
+      yield* Effect.promise(() => appendSessionJsonl(info, { type: "message.part.removed", messageID, partID }))
+
+      const messages = yield* session.messages({ sessionID: info.id, limit: 10 })
+      expect(messages.find((message) => message.info.id === messageID)?.parts).toEqual([])
+
+      const part = yield* session.getPart({ sessionID: info.id, messageID, partID })
+      expect(part).toBeUndefined()
+    }),
+  )
+
   it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

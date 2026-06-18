@@ -801,6 +801,16 @@ export const layer: Layer.Layer<
       }).pipe(Effect.withSpan("Session.updatePart"))
 
     const getPart: Interface["getPart"] = Effect.fn("Session.getPart")(function* (input) {
+      const session = yield* get(input.sessionID).pipe(
+        Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+      )
+      let projection: Awaited<ReturnType<typeof readSessionJsonlProjection>> | undefined
+      if (session) {
+        projection = yield* Effect.promise(() => readSessionJsonlProjection(session))
+        const partKey = `${input.messageID}:${input.partID}`
+        if (projection.removedMessageIDs.has(input.messageID) || projection.removedPartIDs.has(partKey)) return
+      }
+
       const row = yield* db
         .select()
         .from(PartTable)
@@ -814,12 +824,8 @@ export const layer: Layer.Layer<
         .get()
         .pipe(Effect.orDie)
       if (!row) {
-        const session = yield* get(input.sessionID).pipe(
-          Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
-        )
         if (!session) return
-        const messages = yield* Effect.promise(() => readSessionJsonlMessages(session))
-        return messages
+        return (projection?.messages ?? (yield* Effect.promise(() => readSessionJsonlMessages(session))))
           .find((message) => message.info.id === input.messageID)
           ?.parts.find((part) => part.id === input.partID)
       }
@@ -983,10 +989,21 @@ export const layer: Layer.Layer<
       return [] as Snapshot.FileDiff[]
     })
 
+    const filterRemovedProjection = (
+      items: SessionV1.WithParts[],
+      projection: Awaited<ReturnType<typeof readSessionJsonlProjection>>,
+    ) =>
+      items
+        .filter((item) => !projection.removedMessageIDs.has(item.info.id))
+        .map((item) => ({
+          ...item,
+          parts: item.parts.filter((part) => !projection.removedPartIDs.has(`${item.info.id}:${part.id}`)),
+        }))
+
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
       const session = yield* get(input.sessionID)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-      if (fileProjection.hasEvents) {
+      if (fileProjection.messages.length > 0) {
         return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
       }
 
@@ -997,7 +1014,7 @@ export const layer: Layer.Layer<
             Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
           ),
         )
-        return page.items
+        return filterRemovedProjection(page.items, fileProjection)
       }
 
       const size = 50
@@ -1015,7 +1032,7 @@ export const layer: Layer.Layer<
         if (!page.more || !page.cursor) break
         before = page.cursor
       }
-      const items = result.reverse()
+      const items = filterRemovedProjection(result.reverse(), fileProjection)
       if (items.length > 0) return items
       return []
     })
@@ -1065,14 +1082,6 @@ export const layer: Layer.Layer<
     const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (sessionID, predicate) {
       const session = yield* get(sessionID)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-      if (fileProjection.hasEvents) {
-        for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
-          const item = fileProjection.messages[i]
-          if (item && predicate(item)) return Option.some(item)
-        }
-        return Option.none<SessionV1.WithParts>()
-      }
-
       const size = 50
       let before: string | undefined
       while (true) {
@@ -1084,11 +1093,15 @@ export const layer: Layer.Layer<
         )
         if (page.items.length === 0) break
         for (let i = page.items.length - 1; i >= 0; i--) {
-          const item = page.items[i]
+          const item = filterRemovedProjection(page.items[i] ? [page.items[i]] : [], fileProjection)[0]
           if (item && predicate(item)) return Option.some(item)
         }
         if (!page.more || !page.cursor) break
         before = page.cursor
+      }
+      for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
+        const item = fileProjection.messages[i]
+        if (item && predicate(item)) return Option.some(item)
       }
       return Option.none<SessionV1.WithParts>()
     })
