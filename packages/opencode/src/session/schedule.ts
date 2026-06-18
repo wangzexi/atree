@@ -12,6 +12,8 @@ import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
+import { readSessionStore } from "@/atree/session-store"
+import { InstanceState } from "@/effect/instance-state"
 
 export const MAX_PER_SESSION = 1
 export const MIN_INTERVAL_MS = 60_000
@@ -263,7 +265,52 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      return row?.directory
+      if (row?.directory) return row.directory
+
+      const directory = yield* InstanceState.directory.pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (!directory) return
+      const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      if (!session) return
+      const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: session.id,
+          project_id: ctx?.project.id ?? session.projectID,
+          workspace_id: session.workspaceID,
+          parent_id: session.parentID,
+          slug: session.slug,
+          directory: session.directory,
+          path: session.path,
+          title: session.title,
+          agent: session.agent,
+          model: session.model,
+          version: session.version,
+          share_url: session.share?.url,
+          summary_additions: session.summary?.additions,
+          summary_deletions: session.summary?.deletions,
+          summary_files: session.summary?.files,
+          summary_diffs: session.summary?.diffs,
+          revert: session.revert,
+          metadata: session.metadata,
+          permission: session.permission,
+          cost: session.cost,
+          tokens_input: tokens.input,
+          tokens_output: tokens.output,
+          tokens_reasoning: tokens.reasoning,
+          tokens_cache_read: tokens.cache.read,
+          tokens_cache_write: tokens.cache.write,
+          time_created: session.time.created,
+          time_updated: session.time.updated,
+          time_compacting: session.time.compacting,
+          time_archived: session.time.archived,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      return session?.directory
     })
 
     const activeSchedules = Effect.fn("Schedule.activeSchedules")(function* (sessionID: SessionID) {
