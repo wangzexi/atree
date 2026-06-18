@@ -195,6 +195,61 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
+    "restores recurring schedule run state from directory state",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const sessionID = "ses_file_run_state_schedule" as SessionID
+      const now = Date.now()
+      const lastRanAt = now - 30_000
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-run-state-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File run state schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: "sch_file_run_state",
+            sessionID,
+            kind: "recurring",
+            expression: "* * * * *",
+            runAt: null,
+            message: "restore run state",
+            createdAt: now,
+            lastRanAt,
+            lastRunStatus: "ran",
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const state = yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))
+
+      expect(schedules[0]).toMatchObject({
+        id: "sch_file_run_state",
+        lastRanAt,
+        lastRunStatus: "ran",
+      })
+      expect(state[0]).toMatchObject({
+        id: "sch_file_run_state",
+        lastRanAt,
+        lastRunStatus: "ran",
+      })
+    }),
+  )
+
+  it.instance(
     "creates a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {
       const instance = yield* TestInstance

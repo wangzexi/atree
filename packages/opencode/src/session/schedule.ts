@@ -272,6 +272,30 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
+    const restoreStoredRun = Effect.fn("Schedule.restoreStoredRun")(function* (schedule: {
+      id: string
+      lastRanAt: number | null
+      lastRunStatus: RunStatus | null
+    }) {
+      if (schedule.lastRanAt === null || schedule.lastRunStatus === null) return
+      const scheduleID = schedule.id as ID
+      const existing = yield* getLastRun(scheduleID)
+      if (existing && existing.ran_at >= schedule.lastRanAt) return
+      yield* db
+        .transaction((tx) =>
+          tx
+            .insert(ScheduleRunTable)
+            .values({
+              id: Identifier.create("shr", "ascending"),
+              schedule_id: scheduleID,
+              ran_at: schedule.lastRanAt,
+              status: schedule.lastRunStatus,
+            } as typeof ScheduleRunTable.$inferInsert)
+            .run(),
+        )
+        .pipe(Effect.orDie)
+    })
+
     const upsertFileSessionCache = Effect.fn("Schedule.upsertFileSessionCache")(function* (session: FileSession) {
       const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
@@ -573,26 +597,28 @@ export const layer = Layer.effect(
       const sorted = [...stored].sort((a, b) => (a.nextRun ?? Number.MAX_SAFE_INTEGER) - (b.nextRun ?? Number.MAX_SAFE_INTEGER))
 
       for (const schedule of sorted.slice(0, MAX_PER_SESSION)) {
-        if (existingIDs.has(schedule.id)) continue
         if (!canRestoreStoredSchedule(schedule)) continue
         const id = schedule.id as ID
-        yield* db
-          .transaction((tx) =>
-            tx
-              .insert(ScheduleTable)
-              .values({
-                id,
-                session_id: sessionID,
-                kind: schedule.kind,
-                expression: schedule.expression,
-                run_at: schedule.runAt,
-                message: schedule.message,
-                created_at: schedule.createdAt,
-              })
-              .run(),
-          )
-          .pipe(Effect.orDie)
-        startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge)
+        if (!existingIDs.has(schedule.id)) {
+          yield* db
+            .transaction((tx) =>
+              tx
+                .insert(ScheduleTable)
+                .values({
+                  id,
+                  session_id: sessionID,
+                  kind: schedule.kind,
+                  expression: schedule.expression,
+                  run_at: schedule.runAt,
+                  message: schedule.message,
+                  created_at: schedule.createdAt,
+                })
+                .run(),
+            )
+            .pipe(Effect.orDie)
+          startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge)
+        }
+        yield* restoreStoredRun(schedule)
       }
 
       const schedules = yield* activeSchedules(sessionID)
