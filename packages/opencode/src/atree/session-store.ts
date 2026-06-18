@@ -328,6 +328,10 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefi
   const created = typeof data.createdAt === "number" ? data.createdAt : 0
   const updated = typeof data.updatedAt === "number" ? data.updatedAt : created
   const archived = typeof data.archivedAt === "number" ? data.archivedAt : undefined
+  const metadata =
+    data.metadata && typeof data.metadata === "object" && Object.keys(data.metadata).length > 0
+      ? (data.metadata as SessionInfo["metadata"])
+      : undefined
   return {
     id: data.id as SessionID,
     slug: typeof data.slug === "string" ? data.slug : data.id,
@@ -341,7 +345,7 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefi
     title: typeof data.title === "string" ? data.title : data.id,
     agent: typeof data.agent === "string" ? data.agent : undefined,
     model: data.model && typeof data.model === "object" ? (data.model as SessionInfo["model"]) : undefined,
-    metadata: data.metadata && typeof data.metadata === "object" ? (data.metadata as SessionInfo["metadata"]) : undefined,
+    metadata,
     permission: Array.isArray(data.permission) ? (data.permission as SessionInfo["permission"]) : undefined,
     share: data.share && typeof data.share === "object" ? (data.share as SessionInfo["share"]) : undefined,
     summary: data.summary && typeof data.summary === "object" ? (data.summary as SessionInfo["summary"]) : undefined,

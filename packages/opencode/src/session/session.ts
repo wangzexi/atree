@@ -155,6 +155,21 @@ export function toRow(info: Info) {
   }
 }
 
+function mergeFileSession(cached: Info | undefined, file: Info): Info {
+  if (!cached) return file
+  return {
+    ...file,
+    summary: file.summary ?? cached.summary,
+    share: file.share ?? cached.share,
+    revert: file.revert ?? cached.revert,
+    permission: file.permission ?? cached.permission,
+    time: {
+      ...file.time,
+      compacting: file.time.compacting ?? cached.time.compacting,
+    },
+  }
+}
+
 function getForkedTitle(title: string): string {
   const match = title.match(/^(.+) \(fork #(\d+)\)$/)
   if (match) {
@@ -588,22 +603,32 @@ export const layer: Layer.Layer<
       return result
     })
 
+    const syncFileSessionCache = Effect.fn("Session.syncFileSessionCache")(function* (fileSession: Info) {
+      const row = toRow(fileSession)
+      yield* db
+        .insert(SessionTable)
+        .values(row)
+        .onConflictDoUpdate({ target: SessionTable.id, set: row })
+        .run()
+        .pipe(Effect.orDie)
+    })
+
     const get = Effect.fn("Session.get")(function* (id: SessionID) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
-      if (!row) {
-        const directory = yield* InstanceState.directory.pipe(
-          Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-        )
-        if (directory) {
-          const fileSession = yield* Effect.promise(() => readSessionStore(directory, id))
-          if (fileSession) {
-            yield* db.insert(SessionTable).values(toRow(fileSession)).onConflictDoNothing().run().pipe(Effect.orDie)
-            return fileSession
-          }
+      const cached = row ? fromRow(row) : undefined
+      const directory = yield* InstanceState.directory.pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(directory, id))
+        if (fileSession) {
+          const merged = mergeFileSession(cached, fileSession)
+          yield* syncFileSessionCache(merged)
+          return merged
         }
-        return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
       }
-      return fromRow(row)
+      if (!cached) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+      return cached
     })
 
     const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (

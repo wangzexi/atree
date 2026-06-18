@@ -235,13 +235,25 @@ describe("Session", () => {
       expect(loaded.metadata).toEqual({ icon: "🧭" })
 
       yield* Effect.promise(() =>
-        appendSessionJsonl(loaded, {
+        writeSessionStore({
+          ...loaded,
+          title: "File backed updated",
+          metadata: { icon: "🦊" },
+          time: { ...loaded.time, updated: 25 },
+        } as any),
+      )
+      const reloaded = yield* session.get(id)
+      expect(reloaded.title).toBe("File backed updated")
+      expect(reloaded.metadata).toEqual({ icon: "🦊" })
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(reloaded, {
           type: "message.updated",
           message: { id: "msg_file", sessionID: id, role: "user", time: { created: 30 } },
         }),
       )
       yield* Effect.promise(() =>
-        appendSessionJsonl(loaded, {
+        appendSessionJsonl(reloaded, {
           type: "message.part.updated",
           part: { id: "prt_file", sessionID: id, messageID: "msg_file", type: "text", text: "from file" },
         }),
