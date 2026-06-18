@@ -1,4 +1,6 @@
 import { describe, expect } from "bun:test"
+import fs from "fs/promises"
+import path from "path"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -247,6 +249,43 @@ describe("Session", () => {
       expect(messages).toHaveLength(1)
       expect(messages[0]?.info).toMatchObject({ id: "msg_file", role: "user" })
       expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_file", type: "text", text: "from file" })
+    }),
+  )
+
+  it.instance("materializes data-url file parts into the session assets directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* session.create({ title: "asset-session" })
+      const messageID = MessageID.ascending()
+
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: PartID.ascending(),
+        messageID,
+        sessionID: info.id,
+        type: "file",
+        mime: "image/png",
+        filename: "asset.png",
+        url: "data:image/png;base64,YXNzZXQ=",
+      })
+
+      const assetRoot = path.join(instance.directory, ".agents", "atree", "sessions", info.id, "assets")
+      const assets = yield* Effect.promise(() => fs.readdir(assetRoot))
+      expect(assets).toHaveLength(1)
+      const asset = yield* Effect.promise(() => fs.readFile(path.join(assetRoot, assets[0]!)))
+      expect(asset.toString("utf8")).toBe("asset")
+
+      yield* session.remove(info.id)
     }),
   )
 

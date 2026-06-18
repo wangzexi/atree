@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
+import { createHash } from "crypto"
 import type { SessionID } from "@/session/schema"
 import type { Session } from "@/session/session"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -66,6 +67,15 @@ async function writeIfMissing(target: string, content: string) {
   }
 }
 
+async function writeBufferIfMissing(target: string, content: Buffer) {
+  try {
+    await fs.writeFile(target, content, { flag: "wx" })
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") return
+    throw error
+  }
+}
+
 function sessionRoot(info: SessionInfo) {
   return path.join(info.directory, ".agents", "atree", "sessions", info.id)
 }
@@ -87,12 +97,107 @@ export async function ensureSessionPayloadFiles(info: SessionInfo) {
   await writeIfMissing(path.join(root, "session.jsonl"), "")
 }
 
+type SessionAsset = {
+  partID?: string
+  messageID?: string
+  filename?: string
+  mime: string
+  path: string
+  sha256: string
+  size: number
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function decodeDataURL(url: string) {
+  const match = url.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/)
+  if (!match) return
+  const mime = match[1] || "application/octet-stream"
+  const payload = match[3] ?? ""
+  try {
+    const buffer = match[2] ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload))
+    return { mime, buffer }
+  } catch {
+    return
+  }
+}
+
+function extensionFor(mime: string, filename: string | undefined) {
+  const parsed = filename ? path.extname(filename) : ""
+  if (parsed) return parsed
+  switch (mime) {
+    case "image/png":
+      return ".png"
+    case "image/jpeg":
+      return ".jpg"
+    case "image/gif":
+      return ".gif"
+    case "image/webp":
+      return ".webp"
+    case "application/pdf":
+      return ".pdf"
+    case "text/plain":
+      return ".txt"
+    default:
+      return ".bin"
+  }
+}
+
+function safeAssetStem(value: string | undefined) {
+  return (value ?? "asset").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "asset"
+}
+
+function collectFileRecords(value: unknown, output: Record<string, unknown>[] = []) {
+  if (Array.isArray(value)) {
+    for (const item of value) collectFileRecords(item, output)
+    return output
+  }
+  if (!isRecord(value)) return output
+  if (value.type === "file" && typeof value.url === "string" && value.url.startsWith("data:")) output.push(value)
+  for (const item of Object.values(value)) collectFileRecords(item, output)
+  return output
+}
+
+async function materializeDataURLAssets(info: SessionInfo, entry: Record<string, unknown>) {
+  const root = sessionRoot(info)
+  const assetsRoot = path.join(root, "assets")
+  const assets: SessionAsset[] = []
+  for (const file of collectFileRecords(entry)) {
+    const decoded = decodeDataURL(file.url as string)
+    if (!decoded) continue
+    const mime = typeof file.mime === "string" ? file.mime : decoded.mime
+    const filename = typeof file.filename === "string" ? file.filename : undefined
+    const partID = typeof file.id === "string" ? file.id : undefined
+    const messageID = typeof file.messageID === "string" ? file.messageID : undefined
+    const sha256 = createHash("sha256").update(decoded.buffer).digest("hex")
+    const stem = safeAssetStem(partID ?? filename)
+    const relative = path.join("assets", `${stem}-${sha256.slice(0, 16)}${extensionFor(mime, filename)}`)
+    const target = path.join(root, relative)
+    await fs.mkdir(assetsRoot, { recursive: true })
+    await writeBufferIfMissing(target, decoded.buffer)
+    assets.push({
+      partID,
+      messageID,
+      filename,
+      mime,
+      path: relative.split(path.sep).join("/"),
+      sha256,
+      size: decoded.buffer.byteLength,
+    })
+  }
+  return assets
+}
+
 export async function appendSessionJsonl(info: SessionInfo, entry: Record<string, unknown>) {
   await ensureSessionPayloadFiles(info)
+  const assets = await materializeDataURLAssets(info, entry)
   const line = JSON.stringify({
     version: 1,
     at: Date.now(),
     ...entry,
+    ...(assets.length > 0 ? { assets } : {}),
   })
   await fs.appendFile(path.join(sessionRoot(info), "session.jsonl"), `${line}\n`)
 }

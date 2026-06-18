@@ -138,6 +138,55 @@ describe("atree session store", () => {
     expect(lines[1]).toMatchObject({ version: 1, type: "part.updated", part: { id: "prt_one" } })
   })
 
+  test("materializes data-url file parts into session assets", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_asset",
+      slug: "ses-asset",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Asset",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      part: {
+        id: "prt_asset",
+        sessionID: "ses_asset",
+        messageID: "msg_asset",
+        type: "file",
+        mime: "image/png",
+        filename: "image.png",
+        url: "data:image/png;base64,Zm9v",
+      },
+    })
+
+    const raw = await fs.readFile(
+      path.join(directory, ".agents", "atree", "sessions", "ses_asset", "session.jsonl"),
+      "utf8",
+    )
+    const line = JSON.parse(raw.trim())
+    expect(line.assets).toHaveLength(1)
+    expect(line.assets[0]).toMatchObject({
+      partID: "prt_asset",
+      messageID: "msg_asset",
+      filename: "image.png",
+      mime: "image/png",
+      size: 3,
+    })
+    expect(line.assets[0].path).toStartWith("assets/prt_asset-")
+
+    const asset = await fs.readFile(
+      path.join(directory, ".agents", "atree", "sessions", "ses_asset", line.assets[0].path),
+    )
+    expect(asset.toString("utf8")).toBe("foo")
+  })
+
   test("replays session.jsonl into messages with parts", async () => {
     const directory = await tempdir()
     const session = {
