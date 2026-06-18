@@ -15,7 +15,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { GlobalBus } from "@/bus/global"
-import { writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, writeSessionStore } from "@/atree/session-store"
 
 const it = testEffect(
   Layer.mergeAll(
@@ -229,6 +229,24 @@ describe("Session", () => {
       expect(loaded.directory).toBe(instance.directory)
       expect(loaded.title).toBe("File backed")
       expect(loaded.metadata).toEqual({ icon: "🧭" })
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(loaded, {
+          type: "message.updated",
+          message: { id: "msg_file", sessionID: id, role: "user", time: { created: 30 } },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(loaded, {
+          type: "message.part.updated",
+          part: { id: "prt_file", sessionID: id, messageID: "msg_file", type: "text", text: "from file" },
+        }),
+      )
+
+      const messages = yield* session.messages({ sessionID: id, limit: 10 })
+      expect(messages).toHaveLength(1)
+      expect(messages[0]?.info).toMatchObject({ id: "msg_file", role: "user" })
+      expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_file", type: "text", text: "from file" })
     }),
   )
 

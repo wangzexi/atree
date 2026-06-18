@@ -40,6 +40,7 @@ import {
 import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 import { buildScheduleCreateInput } from "@/session/schedule-input"
+import { NotFoundError as StorageNotFoundError } from "@/storage/storage"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -154,13 +155,20 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         return yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
       }
 
-      const page = yield* SessionError.mapStorageNotFound(
-        MessageV2.page({
-          sessionID: ctx.params.sessionID,
-          limit: ctx.query.limit,
-          before: ctx.query.before,
-        }),
+      const page = yield* MessageV2.page({
+        sessionID: ctx.params.sessionID,
+        limit: ctx.query.limit,
+        before: ctx.query.before,
+      }).pipe(
+        Effect.catchIf(StorageNotFoundError.isInstance, () =>
+          Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
+        ),
       )
+      if (page.items.length === 0 && !ctx.query.before) {
+        return yield* SessionError.mapStorageNotFound(
+          session.messages({ sessionID: ctx.params.sessionID, limit: ctx.query.limit }),
+        )
+      }
       if (!page.cursor) return page.items
 
       const request = yield* HttpServerRequest.HttpServerRequest

@@ -908,9 +908,16 @@ export const layer: Layer.Layer<
 
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
       if (input.limit) {
-        return (yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
+        const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
           Effect.provideService(Database.Service, database),
-        )).items
+          Effect.catchIf(NotFoundError.isInstance, () =>
+            Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
+          ),
+        )
+        if (page.items.length > 0) return page.items
+        const session = yield* get(input.sessionID)
+        const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session))
+        return fileMessages.slice(-input.limit)
       }
 
       const size = 50
