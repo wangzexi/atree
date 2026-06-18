@@ -90,6 +90,7 @@ Start from:
 - `docs/acceptance/atree-mvp-bdd.md` - BDD acceptance scenarios
 - `docs/atree-opencode-pruning.md` - OpenCode pruning notes
 - `docs/v2-storage-plan.md` - second-version storage plan
+- `docs/next-implementation-plan.md` - next-stage implementation plan
 
 ## License
 

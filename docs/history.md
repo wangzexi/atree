@@ -8,6 +8,7 @@
 - `docs/atree-opencode-pruning.md`：基于 OpenCode 的裁剪策略
 - `docs/acceptance/atree-mvp-bdd.md`：MVP 行为验收（Given/When/Then）
 - `docs/v2-storage-plan.md`：第二版目录内会话存储计划
+- `docs/next-implementation-plan.md`：下一阶段实施计划（服务端 root、atree facade、Pi core、Playwright 护栏）
 - `docs/assets/codex-ui-reference.png`：参考 UI 示例图
 
 ## 里程碑（本分支主线）
