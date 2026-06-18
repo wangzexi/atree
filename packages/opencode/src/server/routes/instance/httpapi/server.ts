@@ -49,6 +49,7 @@ import { ToolRegistry } from "@/tool/registry"
 import { Truncate } from "@/tool/truncate"
 import { Worktree } from "@/worktree"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { readTree, readWorkspaceState, writeWorkspaceRoot } from "@/atree/state"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { Database } from "@opencode-ai/core/database/database"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -181,6 +182,48 @@ const docRoute = HttpRouter.use((router) => router.add("GET", "/doc", () => Effe
   Layer.provide(authOnlyRouterLayer),
 )
 
+const badRequest = (message: string) => HttpServerResponse.jsonUnsafe({ error: message }, { status: 400 })
+
+const atreeRoute = HttpRouter.use((router) =>
+  Effect.gen(function* () {
+    yield* router.add("GET", "/api/workspace", () =>
+      Effect.promise(() => readWorkspaceState()).pipe(Effect.map((state) => HttpServerResponse.jsonUnsafe(state))),
+    )
+    yield* router.add("PUT", "/api/workspace/root", (request) =>
+      Effect.gen(function* () {
+        const body = yield* Effect.orDie(request.text)
+        let parsed: unknown
+        try {
+          parsed = body.trim() ? JSON.parse(body) : {}
+        } catch {
+          return badRequest("Invalid JSON body")
+        }
+        const directory =
+          parsed && typeof parsed === "object" && "rootDirectory" in parsed
+            ? (parsed as { rootDirectory?: unknown }).rootDirectory
+            : undefined
+        if (typeof directory !== "string" || directory.trim().length === 0) {
+          return badRequest("rootDirectory is required")
+        }
+        return yield* Effect.promise(() => writeWorkspaceRoot(directory)).pipe(
+          Effect.map((state) => HttpServerResponse.jsonUnsafe(state)),
+          Effect.catch((error: unknown) =>
+            Effect.succeed(badRequest(error instanceof Error ? error.message : "Failed to update root directory")),
+          ),
+        )
+      }),
+    )
+    yield* router.add("GET", "/api/tree", () =>
+      Effect.promise(() => readTree()).pipe(
+        Effect.map((tree) => HttpServerResponse.jsonUnsafe(tree)),
+        Effect.catch((error: unknown) =>
+          Effect.succeed(badRequest(error instanceof Error ? error.message : "Failed to read tree")),
+        ),
+      ),
+    )
+  }),
+).pipe(Layer.provide(authOnlyRouterLayer))
+
 const uiRoute = HttpRouter.use((router) =>
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
@@ -268,6 +311,7 @@ export function createRoutes(
     instanceRoutes,
     serverRoutes,
     docRoute,
+    atreeRoute,
     uiRoute,
   ).pipe(
     Layer.provide([

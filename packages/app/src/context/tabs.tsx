@@ -27,10 +27,14 @@ export type DraftTab = {
 
 export type Tab = SessionTab | DraftTab
 
-export const draftHref = (draftID: string) => `/new-session?draftId=${encodeURIComponent(draftID)}`
+export const draftHref = (draftID: string, directory?: string) => {
+  const query = new URLSearchParams({ draftId: draftID })
+  if (directory) query.set("dir", base64Encode(directory))
+  return `/new-session?${query.toString()}`
+}
 
 export const tabHref = (tab: Tab) =>
-  tab.type === "draft" ? draftHref(tab.draftID) : `/${tab.dirBase64}/session/${tab.sessionId}`
+  tab.type === "draft" ? draftHref(tab.draftID, tab.directory) : `/${tab.dirBase64}/session/${tab.sessionId}`
 
 export const tabKey = (tab: Tab) => (tab.type === "draft" ? `draft:${tab.draftID}` : `${tab.server}\n${tabHref(tab)}`)
 
@@ -135,7 +139,8 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
             tabs.push({ type: "draft", draftID, ...draft })
           }),
         )
-        navigate(prompt ? `${draftHref(draftID)}&prompt=${encodeURIComponent(prompt)}` : draftHref(draftID))
+        const href = draftHref(draftID, draft.directory)
+        navigate(prompt ? `${href}&prompt=${encodeURIComponent(prompt)}` : href)
       },
       updateDraft(draftID: string, draft: Partial<Omit<DraftTab, "type" | "draftID">>) {
         setStore(

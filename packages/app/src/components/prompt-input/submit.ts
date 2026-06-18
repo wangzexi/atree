@@ -23,6 +23,7 @@ import { formatServerError } from "@/utils/server-errors"
 import { ScopedKey } from "@/utils/server-scope"
 import { nextSessionMetadata, randomSessionEmoji, sessionEmoji } from "@/pages/layout/helpers"
 import { pathKey } from "@/utils/path-key"
+import { decodeDirectory64 } from "@/utils/base64"
 
 type PendingPrompt = {
   abort: AbortController
@@ -217,7 +218,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
   const layout = useLayout()
   const language = useLanguage()
   const params = useParams()
-  const [search] = useSearchParams<{ draftId?: string }>()
+  const [search] = useSearchParams<{ draftId?: string; dir?: string }>()
   const server = useServer()
   const tabs = useTabs()
   const pendingKey = (sessionID: string) => ScopedKey.from(sdk.scope, sessionID)
@@ -294,6 +295,17 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     return openSessionIDs
   }
 
+  const draftDirectory = () => {
+    const draftID = search.draftId
+    const routeDirectory = decodeDirectory64(search.dir)
+    if (!draftID) return routeDirectory
+    try {
+      return tabs.draft(draftID).directory
+    } catch {
+      return routeDirectory
+    }
+  }
+
   const openNewSessionTab = (session: Session, sessionDirectory: string) => {
     const tab = {
       server: server.key,
@@ -352,13 +364,19 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     input.addToHistory(currentPrompt, mode)
     input.resetHistoryNavigation()
 
-    const projectDirectory = sdk.directory
+    const projectDirectory = draftDirectory() ?? sdk.directory
     const isNewSession = !params.id
     const shouldAutoAccept = isNewSession && input.autoAccept()
     const worktreeSelection = input.newSessionWorktree?.() || "main"
 
     let sessionDirectory = projectDirectory
-    let client = sdk.client
+    let client =
+      pathKey(projectDirectory) === pathKey(sdk.directory)
+        ? sdk.client
+        : sdk.createClient({
+            directory: projectDirectory,
+            throwOnError: true,
+          })
 
     if (isNewSession) {
       if (worktreeSelection === "create") {

@@ -14,6 +14,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { ensureSessionStore } from "@/atree/session-store"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -574,6 +575,7 @@ export const layer: Layer.Layer<
       }
       yield* Effect.logInfo("created", result)
 
+      yield* Effect.promise(() => ensureSessionStore(result))
       yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
 
       return result

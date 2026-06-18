@@ -911,6 +911,8 @@ function TabNavItem(props: {
   return (
     <div
       ref={props.ref}
+      data-atree-session-tab
+      data-session-id={props.sessionId}
       class="group relative flex h-7 w-9 shrink-0 flex-row items-center justify-start overflow-hidden whitespace-nowrap rounded-[6px] bg-[var(--tab-bg)] px-1.5 transition-[width,background-color] duration-150 ease-out [--tab-bg:var(--v2-background-bg-deep)] hover:w-[52px] hover:[--tab-bg:var(--v2-background-bg-layer-02)] data-[active='true']:[--tab-bg:var(--v2-background-bg-layer-02)] focus-within:w-[52px] motion-reduce:transition-none"
       data-active={props.active}
       onMouseDown={(event) => {

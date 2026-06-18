@@ -61,6 +61,7 @@ import { setNavigate } from "@/utils/notification-click"
 import { Worktree as WorktreeState } from "@/utils/worktree"
 import { setSessionHandoff } from "@/pages/session/handoff"
 import { SessionRouteKey, SessionStateKey } from "@/utils/server-scope"
+import { getAtreeWorkspace, setAtreeWorkspaceRoot } from "@/utils/atree-workspace"
 
 import { useDialog } from "@opencode-ai/ui/context/dialog"
 import { useTheme, type ColorScheme } from "@opencode-ai/ui/theme/context"
@@ -1413,6 +1414,33 @@ export default function Layout(props: ParentProps) {
     if (navigate) return navigateToProject(directory)
   }
 
+  function activateAtreeRoot(directory: string, navigateFromHome = false) {
+    for (const project of layout.projects.list()) {
+      if (pathKey(project.worktree) !== pathKey(directory)) layout.projects.close(project.worktree)
+    }
+    layout.projects.open(directory)
+    server.projects.touch(directory)
+    if (navigateFromHome) navigateWithSidebarReset(`/${base64Encode(directory)}/session`)
+  }
+
+  let serverRootLoadRun = 0
+  createEffect(() => {
+    const conn = server.current
+    if (!pageReady() || !layoutReady() || !conn) return
+    const run = ++serverRootLoadRun
+    void getAtreeWorkspace(conn)
+      .then((workspace) => {
+        if (run !== serverRootLoadRun) return
+        const root = workspace.rootDirectory
+        if (!root) return
+        untrack(() => {
+          const home = layout.route().type === "home"
+          activateAtreeRoot(root, home)
+        })
+      })
+      .catch(() => {})
+  })
+
   const handleDeepLinks = (urls: string[]) => {
     if (!server.isLocal()) return
 
@@ -1512,13 +1540,20 @@ export default function Layout(props: ParentProps) {
   function chooseProject() {
     const conn = server.current
     if (!conn) return
-    function resolve(result: string | string[] | null) {
+    async function resolve(result: string | string[] | null) {
       const directory = Array.isArray(result) ? result[0] : result
       if (directory) {
-        for (const project of layout.projects.list()) {
-          if (pathKey(project.worktree) !== pathKey(directory)) layout.projects.close(project.worktree)
+        try {
+          const workspace = await setAtreeWorkspaceRoot(conn, directory)
+          activateAtreeRoot(workspace.rootDirectory ?? directory, false)
+          void openProject(workspace.rootDirectory ?? directory)
+        } catch (error) {
+          showToast({
+            variant: "error",
+            title: "根目录设置失败",
+            description: errorMessage(error, directory),
+          })
         }
-        void openProject(directory)
       }
     }
 
@@ -2496,7 +2531,12 @@ export default function Layout(props: ParentProps) {
       })
     const ensureDirectory = (directory: string, expanded = false) => {
       const key = directoryKey(directory)
-      if (tree.directory[key]) return
+      if (tree.directory[key]) {
+        if (expanded && !tree.directory[key]?.expanded) {
+          setTree("directory", key, (prev) => ({ ...prev, expanded: true }))
+        }
+        return
+      }
       setTree("directory", key, { expanded })
     }
     const toDirectoryNodes = (nodes: { type: string; name: string; path: string; absolute: string }[] | undefined) =>
@@ -2659,7 +2699,7 @@ export default function Layout(props: ParentProps) {
       )
       server.projects.touch(root)
       if (existing?.type === "draft") {
-        navigateWithSidebarReset(draftHref(existing.draftID))
+        navigateWithSidebarReset(draftHref(existing.draftID, existing.directory))
         focusSessionPrompt()
         return
       }
@@ -2702,6 +2742,21 @@ export default function Layout(props: ParentProps) {
         if (session) return session
       }
     }
+    let routeDirectoryGroupRun = 0
+    createEffect(() => {
+      const run = ++routeDirectoryGroupRun
+      const root = rootProject()?.worktree
+      const directory = currentDir()
+      const sessionID = params.id
+      if (!root || !directory || !sessionID) return
+      const group = sessionTabs.directoryGroup()
+      if (group?.server === server.key && pathKey(group.directory) === pathKey(directory)) return
+
+      void loadDirectory(root, directory, { probeChildren: true }).then(() => {
+        if (run !== routeDirectoryGroupRun) return
+        sessionTabs.replaceDirectorySessions(server.key, directory, directorySessions(directory, Date.now()))
+      })
+    })
 
     const stopScheduleEvents = serverSDK.event.listen((event) => {
       const sessionID = extractSessionScheduleEventSessionID(event.details)
@@ -2748,6 +2803,7 @@ export default function Layout(props: ParentProps) {
       return (
         <div class="min-w-0">
           <div
+            data-atree-directory={props.directory}
             data-active={active() ? "true" : undefined}
             classList={{
               "group/node relative flex h-8 min-w-0 cursor-pointer items-center gap-1 rounded-md pr-1.5 text-v2-text-text-muted transition-[background-color,box-shadow,color,opacity]": true,
@@ -2757,8 +2813,17 @@ export default function Layout(props: ParentProps) {
             }}
             style={{ "padding-left": `${6 + props.depth * 14}px` }}
             title={shortPath(props.directory)}
-            onClick={() => void openDirectorySessions(props.root, props.directory)}
-            onPointerUp={() => focusSessionPrompt()}
+            on:mousedown={(event) => {
+              if (event.button !== 0) return
+              const target = event.target
+              if (target instanceof HTMLElement && target.closest("button,a")) return
+              event.stopPropagation()
+              void openDirectorySessions(props.root, props.directory)
+            }}
+            on:pointerup={(event) => {
+              event.stopPropagation()
+              focusSessionPrompt()
+            }}
           >
             <div class="min-w-0 flex items-center gap-1.5 text-left">
               <span class="flex size-4 shrink-0 items-center justify-center text-v2-icon-icon-muted">
@@ -2806,6 +2871,7 @@ export default function Layout(props: ParentProps) {
             <div class="min-w-0 flex-1" />
             <button
               type="button"
+              data-atree-new-session={props.directory}
               class="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded text-v2-text-text-muted opacity-0 transition-[opacity,transform] group-hover/node:translate-x-0 group-hover/node:opacity-100 hover:bg-v2-overlay-simple-overlay-hover hover:text-v2-text-text-base"
               title="新会话"
               onClick={(event) => {
