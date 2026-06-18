@@ -45,7 +45,10 @@ describe("atree schedule store", () => {
     await writeSessionScheduleState(directory, "ses_two", [{ ...schedule, id: "sch_two", sessionID: "ses_two" }])
     await writeSessionScheduleState(directory, "ses_one", [])
 
+    const meta = await fs.readFile(path.join(directory, ".agents", "atree", "meta.yaml"), "utf8")
     const state = await readState(directory)
+    expect(meta).toContain("version: 1")
+    expect(meta).toContain('source: "atree"')
     expect(state.version).toBe(1)
     expect(state.sessions.ses_one).toBeUndefined()
     expect(state.sessions.ses_two).toHaveLength(1)

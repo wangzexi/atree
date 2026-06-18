@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
+import { ensureAtreeDirectoryStore } from "./directory-store"
 
 export type StoredSchedule = {
   id: string
@@ -49,6 +50,7 @@ async function writeAtomic(target: string, value: ScheduleState) {
 }
 
 export async function writeSessionScheduleState(directory: string, sessionID: string, schedules: StoredSchedule[]) {
+  await ensureAtreeDirectoryStore(directory)
   const target = statePath(directory)
   const state = await readState(target)
   state.updatedAt = Date.now()

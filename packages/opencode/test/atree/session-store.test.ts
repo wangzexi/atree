@@ -47,7 +47,11 @@ describe("atree session store", () => {
     } as any)
 
     const root = path.join(directory, ".agents", "atree", "sessions", "ses_test")
+    const directoryMeta = await fs.readFile(path.join(directory, ".agents", "atree", "meta.yaml"), "utf8")
     const meta = await fs.readFile(path.join(root, "meta.yaml"), "utf8")
+    expect(directoryMeta).toContain("version: 1")
+    expect(directoryMeta).toContain('source: "atree"')
+    expect(directoryMeta).not.toContain("ses_test")
     expect(meta).toContain('title: "Second title"')
     expect(meta).toContain("updatedAt: 3")
     expect(meta).toContain("archivedAt: 4")
@@ -85,6 +89,29 @@ describe("atree session store", () => {
     expect(sessions[0]?.metadata).toEqual({ icon: "🧭" })
     expect(sessions[0]?.time.archived).toBe(4)
     expect(sessions[1]?.title).toBe("Old")
+  })
+
+  test("keeps existing directory meta when writing sessions", async () => {
+    const directory = await tempdir()
+    await fs.mkdir(path.join(directory, ".agents", "atree"), { recursive: true })
+    await fs.writeFile(path.join(directory, ".agents", "atree", "meta.yaml"), 'version: 1\ntitle: "Content Ops"\n')
+
+    await writeSessionStore({
+      id: "ses_keep_meta",
+      slug: "keep-meta",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      title: "Session",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any)
+
+    expect(await fs.readFile(path.join(directory, ".agents", "atree", "meta.yaml"), "utf8")).toBe(
+      'version: 1\ntitle: "Content Ops"\n',
+    )
   })
 
   test("reads one session metadata by id from a directory", async () => {

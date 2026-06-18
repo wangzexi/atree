@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { createHash } from "crypto"
+import { ensureAtreeDirectoryStore } from "./directory-store"
 import type { SessionID } from "@/session/schema"
 import type { Session } from "@/session/session"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -81,6 +82,7 @@ function sessionRoot(info: SessionInfo) {
 }
 
 export async function writeSessionStore(info: SessionInfo) {
+  await ensureAtreeDirectoryStore(info.directory)
   const root = sessionRoot(info)
   await fs.mkdir(path.join(root, "assets"), { recursive: true })
   await writeIfMissing(path.join(root, "session.jsonl"), "")
@@ -92,6 +94,7 @@ export async function ensureSessionStore(info: SessionInfo) {
 }
 
 export async function ensureSessionPayloadFiles(info: SessionInfo) {
+  await ensureAtreeDirectoryStore(info.directory)
   const root = sessionRoot(info)
   await fs.mkdir(path.join(root, "assets"), { recursive: true })
   await writeIfMissing(path.join(root, "session.jsonl"), "")
