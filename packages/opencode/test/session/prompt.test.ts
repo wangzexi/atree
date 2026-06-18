@@ -56,6 +56,8 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { appendSessionJsonl, writeSessionStore } from "@/atree/session-store"
+import { InstanceState } from "@/effect/instance-state"
 
 const summary = Layer.succeed(
   SessionSummary.Service,
@@ -503,6 +505,76 @@ it.instance("loop calls LLM and returns assistant message", () =>
     const parts = result.parts.filter((p) => p.type === "text")
     expect(parts.some((p) => p.type === "text" && p.text === "world")).toBe(true)
     expect(yield* llm.hits).toHaveLength(1)
+  }),
+)
+
+it.instance("loop includes file-backed session history when database cache is missing", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const ctx = yield* InstanceState.context
+    const sessionID = SessionID.descending()
+    const historyMessageID = MessageID.ascending()
+    const historyPartID = PartID.ascending()
+    const info = {
+      id: sessionID,
+      slug: "file-backed-prompt",
+      version: "test",
+      projectID: ctx.project.id,
+      directory: dir,
+      path: ".",
+      title: "File backed prompt",
+      agent: "build",
+      model: { providerID: ref.providerID, id: ref.modelID },
+      metadata: { icon: "🧭" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 10, updated: 20 },
+    } as any
+
+    yield* Effect.promise(() => writeSessionStore(info))
+    yield* Effect.promise(() =>
+      appendSessionJsonl(info, {
+        type: "message.updated",
+        message: {
+          id: historyMessageID,
+          sessionID,
+          role: "user",
+          agent: "build",
+          model: ref,
+          tools: {},
+          mode: "",
+          time: { created: 30 },
+        },
+      }),
+    )
+    yield* Effect.promise(() =>
+      appendSessionJsonl(info, {
+        type: "message.part.updated",
+        part: {
+          id: historyPartID,
+          sessionID,
+          messageID: historyMessageID,
+          type: "text",
+          text: "history from session.jsonl",
+        },
+      }),
+    )
+
+    yield* prompt.prompt({
+      sessionID,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "new prompt" }],
+    })
+    yield* llm.text("world")
+
+    const result = yield* prompt.loop({ sessionID })
+    const payload = JSON.stringify((yield* llm.inputs).at(-1)?.messages)
+
+    expect(result.info.role).toBe("assistant")
+    expect(payload).toContain("history from session.jsonl")
+    expect(payload).toContain("new prompt")
   }),
 )
 

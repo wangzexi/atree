@@ -18,6 +18,7 @@ import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { GlobalBus } from "@/bus/global"
 import { appendSessionJsonl, writeSessionStore } from "@/atree/session-store"
+import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(
   Layer.mergeAll(
@@ -208,6 +209,7 @@ describe("Session", () => {
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const instance = yield* TestInstance
+      const ctx = yield* InstanceState.context
       const id = "ses_file_backed" as SessionID
 
       yield* Effect.promise(() =>
@@ -215,7 +217,7 @@ describe("Session", () => {
           id,
           slug: "file-backed",
           version: "test",
-          projectID: "proj_file",
+          projectID: ctx.project.id,
           directory: instance.directory,
           path: ".",
           title: "File backed",

@@ -39,6 +39,7 @@ import { disposeAllInstances, provideInstanceEffect, TestInstance, tmpdirScoped 
 import { TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
 import { testEffect } from "../lib/effect"
+import { InstanceState } from "@/effect/instance-state"
 
 const originalWorkspaces = Flag.OPENCODE_EXPERIMENTAL_WORKSPACES
 const workspaceLayer = Workspace.defaultLayer.pipe(
@@ -405,6 +406,7 @@ describe("session HttpApi", () => {
     () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
         const headers = { "x-opencode-directory": test.directory }
         const sessionID = SessionID.descending()
         const messageID = MessageID.ascending()
@@ -413,7 +415,7 @@ describe("session HttpApi", () => {
           id: sessionID,
           slug: "file-backed-http",
           version: "test",
-          projectID: "proj_file",
+          projectID: ctx.project.id,
           directory: test.directory,
           path: ".",
           title: "File backed HTTP",

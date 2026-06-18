@@ -596,7 +596,10 @@ export const layer: Layer.Layer<
         )
         if (directory) {
           const fileSession = yield* Effect.promise(() => readSessionStore(directory, id))
-          if (fileSession) return fileSession
+          if (fileSession) {
+            yield* db.insert(SessionTable).values(toRow(fileSession)).onConflictDoNothing().run().pipe(Effect.orDie)
+            return fileSession
+          }
         }
         return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
       }
@@ -916,6 +919,10 @@ export const layer: Layer.Layer<
     })
 
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
+      const session = yield* get(input.sessionID)
+      const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session))
+      if (fileMessages.length > 0) return input.limit ? fileMessages.slice(-input.limit) : fileMessages
+
       if (input.limit) {
         const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
           Effect.provideService(Database.Service, database),
@@ -923,10 +930,7 @@ export const layer: Layer.Layer<
             Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
           ),
         )
-        if (page.items.length > 0) return page.items
-        const session = yield* get(input.sessionID)
-        const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session))
-        return fileMessages.slice(-input.limit)
+        return page.items
       }
 
       const size = 50
@@ -946,8 +950,7 @@ export const layer: Layer.Layer<
       }
       const items = result.reverse()
       if (items.length > 0) return items
-      const session = yield* get(input.sessionID)
-      return yield* Effect.promise(() => readSessionJsonlMessages(session))
+      return []
     })
 
     const removeMessage = Effect.fn("Session.removeMessage")(function* (input: {
