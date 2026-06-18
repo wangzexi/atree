@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { writeSessionStore } from "../../src/atree/session-store"
+import { readSessionStores, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -49,5 +49,35 @@ describe("atree session store", () => {
     expect(meta).not.toContain("First title")
     expect((await fs.stat(path.join(root, "session.jsonl"))).isFile()).toBe(true)
     expect((await fs.stat(path.join(root, "assets"))).isDirectory()).toBe(true)
+  })
+
+  test("reads session metadata from directory index sorted by updated time", async () => {
+    const directory = await tempdir()
+    const base = {
+      slug: "session",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+
+    await writeSessionStore({ ...base, id: "ses_old", title: "Old", metadata: { icon: "🦊" } } as any)
+    await writeSessionStore({
+      ...base,
+      id: "ses_new",
+      title: "New",
+      metadata: { icon: "🧭" },
+      time: { created: 2, updated: 3, archived: 4 },
+    } as any)
+
+    const sessions = await readSessionStores(directory)
+    expect(sessions.map((session) => String(session.id))).toEqual(["ses_new", "ses_old"])
+    expect(sessions[0]?.title).toBe("New")
+    expect(sessions[0]?.metadata).toEqual({ icon: "🧭" })
+    expect(sessions[0]?.time.archived).toBe(4)
+    expect(sessions[1]?.title).toBe("Old")
   })
 })

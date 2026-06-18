@@ -24,6 +24,8 @@ function metaYaml(info: SessionInfo) {
   return [
     "version: 1",
     `id: ${yamlString(info.id)}`,
+    `slug: ${yamlString(info.slug)}`,
+    `sessionVersion: ${yamlString(info.version)}`,
     `directory: ${yamlString(info.directory)}`,
     `path: ${yamlString(info.path)}`,
     `projectID: ${yamlString(info.projectID)}`,
@@ -41,7 +43,7 @@ function metaYaml(info: SessionInfo) {
     `share: ${yamlValue(info.share)}`,
     `summary: ${yamlValue(info.summary)}`,
     `revert: ${yamlValue(info.revert)}`,
-    "source: opencode",
+    `source: ${yamlValue("opencode")}`,
     yamlMetadata(info.metadata).trimEnd(),
     "",
   ].join("\n")
@@ -79,7 +81,82 @@ export async function ensureSessionStore(info: SessionInfo) {
 }
 
 export async function ensureSessionPayloadFiles(info: SessionInfo) {
-  const root = path.join(info.directory, ".agents", "atree", "sessions", info.id)
+  const root = sessionRoot(info)
   await fs.mkdir(path.join(root, "assets"), { recursive: true })
   await writeIfMissing(path.join(root, "session.jsonl"), "")
+}
+
+function parseValue(value: string) {
+  const trimmed = value.trim()
+  if (trimmed === "") return undefined
+  try {
+    return JSON.parse(trimmed)
+  } catch {
+    return trimmed
+  }
+}
+
+function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefined {
+  const data: Record<string, unknown> = {}
+  for (const line of raw.split(/\r?\n/)) {
+    const match = line.match(/^([A-Za-z][A-Za-z0-9]*):\s*(.*)$/)
+    if (!match) continue
+    data[match[1]] = parseValue(match[2] ?? "")
+  }
+
+  if (typeof data.id !== "string") return
+  const directory = typeof data.directory === "string" ? data.directory : fallbackDirectory
+  const created = typeof data.createdAt === "number" ? data.createdAt : 0
+  const updated = typeof data.updatedAt === "number" ? data.updatedAt : created
+  const archived = typeof data.archivedAt === "number" ? data.archivedAt : undefined
+  return {
+    id: data.id as SessionID,
+    slug: typeof data.slug === "string" ? data.slug : data.id,
+    version: typeof data.sessionVersion === "string" ? data.sessionVersion : "atree",
+    projectID: (typeof data.projectID === "string" ? data.projectID : "global") as SessionInfo["projectID"],
+    directory,
+    path: typeof data.path === "string" ? data.path : undefined,
+    workspaceID:
+      typeof data.workspaceID === "string" ? (data.workspaceID as SessionInfo["workspaceID"]) : undefined,
+    parentID: typeof data.parentID === "string" ? (data.parentID as SessionID) : undefined,
+    title: typeof data.title === "string" ? data.title : data.id,
+    agent: typeof data.agent === "string" ? data.agent : undefined,
+    model: data.model && typeof data.model === "object" ? (data.model as SessionInfo["model"]) : undefined,
+    metadata: data.metadata && typeof data.metadata === "object" ? (data.metadata as SessionInfo["metadata"]) : undefined,
+    permission: Array.isArray(data.permission) ? (data.permission as SessionInfo["permission"]) : undefined,
+    share: data.share && typeof data.share === "object" ? (data.share as SessionInfo["share"]) : undefined,
+    summary: data.summary && typeof data.summary === "object" ? (data.summary as SessionInfo["summary"]) : undefined,
+    revert: data.revert && typeof data.revert === "object" ? (data.revert as SessionInfo["revert"]) : undefined,
+    cost: typeof data.cost === "number" ? data.cost : 0,
+    tokens:
+      data.tokens && typeof data.tokens === "object"
+        ? (data.tokens as SessionInfo["tokens"])
+        : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: {
+      created,
+      updated,
+      ...(archived !== undefined ? { archived } : {}),
+    },
+  }
+}
+
+export async function readSessionStores(directory: string) {
+  const root = path.join(directory, ".agents", "atree", "sessions")
+  const entries = await fs.readdir(root, { withFileTypes: true }).catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return []
+    throw error
+  })
+  const sessions: SessionInfo[] = []
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    const raw = await fs.readFile(path.join(root, entry.name, "meta.yaml"), "utf8").catch((error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+      throw error
+    })
+    if (!raw) continue
+    const parsed = parseMeta(raw, directory)
+    if (parsed) sessions.push(parsed)
+  }
+  sessions.sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+  return sessions
 }
