@@ -10,6 +10,8 @@ import { Context, Effect, Layer, Schema } from "effect"
 import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { writeSessionScheduleState } from "@/atree/schedule-store"
 
 export const MAX_PER_SESSION = 1
 export const MIN_INTERVAL_MS = 60_000
@@ -212,6 +214,7 @@ export const layer = Layer.effect(
           )
           .pipe(Effect.orDie)
         yield* events.publish(Event.Ran, { scheduleID, sessionID, status: runStatus, ranAt })
+        yield* syncScheduleState(sessionID)
       },
     )
 
@@ -221,6 +224,7 @@ export const layer = Layer.effect(
       timers.delete(scheduleID)
       yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
       yield* events.publish(Event.Deleted, { scheduleID, sessionID })
+      yield* syncScheduleState(sessionID)
     })
 
     const getLastRun = Effect.fn("Schedule.getLastRun")(function* (scheduleID: ID) {
@@ -235,6 +239,65 @@ export const layer = Layer.effect(
         .limit(1)
         .get()
         .pipe(Effect.orDie)
+    })
+
+    const sessionDirectory = Effect.fn("Schedule.sessionDirectory")(function* (sessionID: SessionID) {
+      const row = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      return row?.directory
+    })
+
+    const activeSchedules = Effect.fn("Schedule.activeSchedules")(function* (sessionID: SessionID) {
+      const rows = yield* db
+        .select({
+          id: ScheduleTable.id,
+          session_id: ScheduleTable.session_id,
+          kind: ScheduleTable.kind,
+          expression: ScheduleTable.expression,
+          run_at: ScheduleTable.run_at,
+          message: ScheduleTable.message,
+          created_at: ScheduleTable.created_at,
+        })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+
+      return yield* Effect.all(
+        rows.map((row) =>
+          Effect.gen(function* () {
+            const id = row.id as ID
+            const kind = (row.kind ?? "recurring") as Kind
+            const lastRun = yield* getLastRun(id)
+            const timer = timers.get(id)
+            const nextRun =
+              timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
+            return {
+              id,
+              sessionID: row.session_id as SessionID,
+              kind,
+              expression: row.expression,
+              runAt: row.run_at ?? null,
+              message: row.message,
+              createdAt: row.created_at,
+              lastRanAt: lastRun?.ran_at ?? null,
+              lastRunStatus: (lastRun?.status as RunStatus | undefined) ?? null,
+              nextRun,
+            } satisfies Info
+          }),
+        ),
+      )
+    })
+
+    const syncScheduleState = Effect.fn("Schedule.syncScheduleState")(function* (sessionID: SessionID) {
+      const directory = yield* sessionDirectory(sessionID)
+      if (!directory) return
+      const schedules = yield* activeSchedules(sessionID)
+      yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, schedules))
     })
 
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
@@ -401,34 +464,16 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.session_id, sessionID))
         .all()
         .pipe(Effect.orDie)
-      const items = yield* Effect.all(
-        rows.map((row) =>
-          Effect.gen(function* () {
-            const kind = (row.kind ?? "recurring") as Kind
-            const lastRun = yield* getLastRun(row.id as ID)
-            if (kind === "once" && lastRun) {
-              yield* completeOnce(row.id as ID, row.session_id as SessionID)
-              return undefined
-            }
-            const timer = timers.get(row.id as ID)
-            const nextRun =
-              timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
-            return {
-              id: row.id as ID,
-              sessionID: row.session_id as SessionID,
-              kind,
-              expression: row.expression,
-              runAt: row.run_at ?? null,
-              message: row.message,
-              createdAt: row.created_at,
-              lastRanAt: lastRun?.ran_at ?? null,
-              lastRunStatus: (lastRun?.status as RunStatus | undefined) ?? null,
-              nextRun,
-            }
-          }),
-        ),
-      )
-      return items.filter((item): item is Info => !!item)
+      for (const row of rows) {
+        const kind = (row.kind ?? "recurring") as Kind
+        const lastRun = yield* getLastRun(row.id as ID)
+        if (kind === "once" && lastRun) {
+          yield* completeOnce(row.id as ID, row.session_id as SessionID)
+        }
+      }
+      const items = yield* activeSchedules(sessionID)
+      yield* syncScheduleState(sessionID)
+      return items
     })
 
     const create: Interface["create"] = Effect.fn("Schedule.create")(function* (input: {
@@ -478,6 +523,7 @@ export const layer = Layer.effect(
       const bridge = yield* EffectBridge.make()
       startTimer(id, input.sessionID, kind, expression || "", runAt, bridge)
       yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID })
+      yield* syncScheduleState(input.sessionID)
       const createdTimer = timers.get(id)
       return {
         id,
@@ -516,6 +562,7 @@ export const layer = Layer.effect(
         scheduleID,
         sessionID: row.session_id as SessionID,
       })
+      yield* syncScheduleState(row.session_id as SessionID)
     })
 
     return Service.of({
