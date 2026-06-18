@@ -14,6 +14,7 @@ import { ScheduleTable } from "../../src/session/schedule.sql"
 import type { SessionID } from "../../src/session/schema"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(Layer.mergeAll(Schedule.defaultLayer, Database.defaultLayer))
 
@@ -372,6 +373,83 @@ describe("atree schedule restore", () => {
       const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
       expect(schedules).toEqual([])
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+    }),
+  )
+
+  it.instance(
+    "prefers archived file metadata over stale database cache when restoring schedules",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const ctx = yield* InstanceState.context
+      const { db } = yield* Database.Service
+      const sessionID = "ses_file_archived_over_cache" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-archived-over-cache",
+          version: "test",
+          projectID: ctx.project.id,
+          directory: instance.directory,
+          path: ".",
+          title: "File archive wins",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now, archived: now },
+        } as any),
+      )
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: ctx.project.id,
+          slug: "stale-active-cache",
+          directory: instance.directory,
+          path: ".",
+          title: "Stale active cache",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+          time_archived: null,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: "sch_stale_cache",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "should be cleared by file archive",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      expect(schedules).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+
+      const row = yield* db
+        .select({ title: SessionTable.title, archived: SessionTable.time_archived })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.title).toBe("File archive wins")
+      expect(row?.archived).toBe(now)
     }),
   )
 })

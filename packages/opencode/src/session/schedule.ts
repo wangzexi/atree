@@ -41,6 +41,8 @@ export const Info = Schema.Struct({
 }).annotate({ identifier: "Schedule" })
 export type Info = Schema.Schema.Type<typeof Info>
 
+type FileSession = NonNullable<Awaited<ReturnType<typeof readSessionStore>>>
+
 export const Event = {
   Created: EventV2.define({
     type: "schedule.created",
@@ -270,6 +272,48 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
+    const upsertFileSessionCache = Effect.fn("Schedule.upsertFileSessionCache")(function* (session: FileSession) {
+      const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+      const row = {
+        id: session.id,
+        project_id: ctx?.project.id ?? session.projectID,
+        workspace_id: session.workspaceID ?? null,
+        parent_id: session.parentID ?? null,
+        slug: session.slug,
+        directory: session.directory,
+        path: session.path ?? null,
+        title: session.title,
+        agent: session.agent ?? null,
+        model: session.model ?? null,
+        version: session.version,
+        share_url: session.share?.url ?? null,
+        summary_additions: session.summary?.additions ?? null,
+        summary_deletions: session.summary?.deletions ?? null,
+        summary_files: session.summary?.files ?? null,
+        summary_diffs: session.summary?.diffs ?? null,
+        revert: session.revert ?? null,
+        metadata: session.metadata ?? null,
+        permission: session.permission ?? null,
+        cost: session.cost,
+        tokens_input: tokens.input,
+        tokens_output: tokens.output,
+        tokens_reasoning: tokens.reasoning,
+        tokens_cache_read: tokens.cache.read,
+        tokens_cache_write: tokens.cache.write,
+        time_created: session.time.created,
+        time_updated: session.time.updated,
+        time_compacting: session.time.compacting ?? null,
+        time_archived: session.time.archived ?? null,
+      } as typeof SessionTable.$inferInsert
+      yield* db
+        .insert(SessionTable)
+        .values(row)
+        .onConflictDoUpdate({ target: SessionTable.id, set: row })
+        .run()
+        .pipe(Effect.orDie)
+    })
+
     const sessionDirectory = Effect.fn("Schedule.sessionDirectory")(function* (sessionID: SessionID) {
       const row = yield* db
         .select({ directory: SessionTable.directory })
@@ -277,7 +321,14 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      if (row?.directory) return row.directory
+      if (row?.directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(row.directory, sessionID))
+        if (fileSession) {
+          yield* upsertFileSessionCache(fileSession)
+          return fileSession.directory
+        }
+        return row.directory
+      }
 
       const directory = yield* InstanceState.directory.pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
@@ -285,43 +336,7 @@ export const layer = Layer.effect(
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
-      const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
-      yield* db
-        .insert(SessionTable)
-        .values({
-          id: session.id,
-          project_id: ctx?.project.id ?? session.projectID,
-          workspace_id: session.workspaceID,
-          parent_id: session.parentID,
-          slug: session.slug,
-          directory: session.directory,
-          path: session.path,
-          title: session.title,
-          agent: session.agent,
-          model: session.model,
-          version: session.version,
-          share_url: session.share?.url,
-          summary_additions: session.summary?.additions,
-          summary_deletions: session.summary?.deletions,
-          summary_files: session.summary?.files,
-          summary_diffs: session.summary?.diffs,
-          revert: session.revert,
-          metadata: session.metadata,
-          permission: session.permission,
-          cost: session.cost,
-          tokens_input: tokens.input,
-          tokens_output: tokens.output,
-          tokens_reasoning: tokens.reasoning,
-          tokens_cache_read: tokens.cache.read,
-          tokens_cache_write: tokens.cache.write,
-          time_created: session.time.created,
-          time_updated: session.time.updated,
-          time_compacting: session.time.compacting,
-          time_archived: session.time.archived,
-        } as typeof SessionTable.$inferInsert)
-        .run()
-        .pipe(Effect.orDie)
+      yield* upsertFileSessionCache(session)
       return session?.directory
     })
 
@@ -332,7 +347,14 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      if (row?.directory) return { directory: row.directory, archived: row.archived !== null }
+      if (row?.directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(row.directory, sessionID))
+        if (fileSession) {
+          yield* upsertFileSessionCache(fileSession)
+          return { directory: fileSession.directory, archived: fileSession.time.archived !== undefined }
+        }
+        return { directory: row.directory, archived: row.archived !== null }
+      }
 
       const directory = yield* InstanceState.directory.pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
