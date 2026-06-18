@@ -19,7 +19,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { GlobalBus } from "@/bus/global"
-import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionJsonlMessages, readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(
@@ -350,6 +350,71 @@ describe("Session", () => {
       expect(asset.toString("utf8")).toBe("asset")
 
       yield* session.remove(info.id)
+    }),
+  )
+
+  it.instance("forks a file-backed session history into a new directory-backed session", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const ctx = yield* InstanceState.context
+      const sourceID = "ses_file_fork_source" as SessionID
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+      const source = {
+        id: sourceID,
+        slug: "file-fork-source",
+        version: "test",
+        projectID: ctx.project.id,
+        directory: instance.directory,
+        path: ".",
+        title: "File fork source",
+        metadata: { icon: "🧭" },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 10, updated: 20 },
+      } as any
+
+      yield* Effect.promise(() => writeSessionStore(source))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, {
+          type: "message.updated",
+          message: {
+            id: messageID,
+            sessionID: sourceID,
+            role: "user",
+            agent: "build",
+            model: { providerID: "test", modelID: "test" },
+            tools: {},
+            mode: "",
+            time: { created: 30 },
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, {
+          type: "message.part.updated",
+          part: {
+            id: partID,
+            sessionID: sourceID,
+            messageID,
+            type: "text",
+            text: "copy me from jsonl",
+          },
+        }),
+      )
+
+      const fork = yield* Effect.acquireRelease(session.fork({ sessionID: sourceID }), (info) =>
+        session.remove(info.id).pipe(Effect.ignore),
+      )
+      const forkMessages = yield* Effect.promise(() => readSessionJsonlMessages(fork as any))
+      const forkText = JSON.stringify(forkMessages)
+
+      expect(fork.directory).toBe(instance.directory)
+      expect(fork.metadata).toEqual({ icon: "🧭" })
+      expect(forkText).toContain("copy me from jsonl")
+      expect(forkText).toContain(String(fork.id))
+      expect(forkText).not.toContain(String(sourceID))
     }),
   )
 
