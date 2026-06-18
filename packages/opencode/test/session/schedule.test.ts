@@ -39,16 +39,9 @@ const events = EventV2Bridge.defaultLayer
 const status = SessionStatus.layer.pipe(Layer.provideMerge(events))
 const schedule = Schedule.layer.pipe(Layer.provideMerge(events))
 
-const testLayer = Layer.mergeAll(
-  promptLayer,
-  events,
-  status,
-  schedule,
-).pipe(Layer.provideMerge(Database.defaultLayer))
+const testLayer = Layer.mergeAll(promptLayer, events, status, schedule).pipe(Layer.provideMerge(Database.defaultLayer))
 
-const it = testEffect(
-  testLayer,
-)
+const it = testEffect(testLayer)
 
 const takePrompt = (queue: Queue.Queue<SessionPrompt.PromptInput>) =>
   Effect.race(
@@ -66,9 +59,7 @@ const waitForRunStatus = (schedules: Schedule.Interface, sessionID: SessionID, s
   )
 
 const scheduleEventTypes = (events: GlobalEvent[], sessionID: SessionID) =>
-  events
-    .filter((event) => event.payload?.properties?.sessionID === sessionID)
-    .map((event) => event.payload?.type)
+  events.filter((event) => event.payload?.properties?.sessionID === sessionID).map((event) => event.payload?.type)
 
 const initScheduleTables = Effect.gen(function* () {
   const { db } = yield* Database.Service
@@ -192,6 +183,12 @@ it.instance("runs a one-time scheduled task once", () =>
     yield* initScheduleTables
 
     const session = yield* createFixtureSession("schedule once test")
+    const events: GlobalEvent[] = []
+    const onEvent = (event: GlobalEvent) => {
+      events.push(event)
+    }
+    GlobalBus.on("event", onEvent)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onEvent)))
     const runAt = Date.now() + 60_000
     const created = yield* schedules.create({
       sessionID: session.id,
@@ -214,9 +211,48 @@ it.instance("runs a one-time scheduled task once", () =>
       },
     ])
 
-    const ran = yield* waitForRunStatus(schedules, session.id, "ran")
-    expect(ran.lastRanAt).toBeNumber()
-    expect(ran.nextRun).toBeNull()
+    expect(yield* schedules.list(session.id)).toEqual([])
+    expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
+    expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
+
+    const next = yield* schedules.create({
+      sessionID: session.id,
+      kind: "once",
+      runAt: Date.now() + 120_000,
+      message: "scheduled once again",
+    })
+    expect(next.kind).toBe("once")
+  }),
+)
+
+it.instance("clears a one-time scheduled task when the session is busy", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    const status = yield* SessionStatus.Service
+    promptQueue = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+    yield* initScheduleTables
+
+    const session = yield* createFixtureSession("schedule once busy test")
+    yield* status.set(session.id, { type: "busy" })
+    const events: GlobalEvent[] = []
+    const onEvent = (event: GlobalEvent) => {
+      events.push(event)
+    }
+    GlobalBus.on("event", onEvent)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onEvent)))
+
+    const created = yield* schedules.create({
+      sessionID: session.id,
+      kind: "once",
+      runAt: Date.now() + 60_000,
+      message: "scheduled once while busy",
+    })
+
+    yield* schedules.tick(created.id)
+
+    expect(yield* schedules.list(session.id)).toEqual([])
+    expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
+    expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
   }),
 )
 

@@ -167,7 +167,13 @@ function validateRunAt(runAt: number | undefined): Effect.Effect<number, Invalid
 
 type Timer =
   | { kind: "recurring"; cron: Cron; sessionID: SessionID; bridge: EffectBridge.Shape }
-  | { kind: "once"; timeout: ReturnType<typeof setTimeout>; sessionID: SessionID; runAt: number; bridge: EffectBridge.Shape }
+  | {
+      kind: "once"
+      timeout: ReturnType<typeof setTimeout>
+      sessionID: SessionID
+      runAt: number
+      bridge: EffectBridge.Shape
+    }
 
 function stopTimer(timer: Timer) {
   if (timer.kind === "recurring") timer.cron.stop()
@@ -209,8 +215,57 @@ export const layer = Layer.effect(
       },
     )
 
+    const completeOnce = Effect.fn("Schedule.completeOnce")(function* (scheduleID: ID, sessionID: SessionID) {
+      const timer = timers.get(scheduleID)
+      if (timer) stopTimer(timer)
+      timers.delete(scheduleID)
+      yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
+      yield* events.publish(Event.Deleted, { scheduleID, sessionID })
+    })
+
+    const getLastRun = Effect.fn("Schedule.getLastRun")(function* (scheduleID: ID) {
+      return yield* db
+        .select({
+          ran_at: ScheduleRunTable.ran_at,
+          status: ScheduleRunTable.status,
+        })
+        .from(ScheduleRunTable)
+        .where(eq(ScheduleRunTable.schedule_id, scheduleID))
+        .orderBy(desc(ScheduleRunTable.ran_at))
+        .limit(1)
+        .get()
+        .pipe(Effect.orDie)
+    })
+
+    const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
+      sessionID: SessionID,
+    ) {
+      const rows = yield* db
+        .select({
+          id: ScheduleTable.id,
+          session_id: ScheduleTable.session_id,
+          kind: ScheduleTable.kind,
+        })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      for (const row of rows) {
+        if ((row.kind ?? "recurring") !== "once") continue
+        const lastRun = yield* getLastRun(row.id as ID)
+        if (lastRun) {
+          yield* completeOnce(row.id as ID, row.session_id as SessionID)
+        }
+      }
+    })
+
     const process = Effect.fn("Schedule.process")(function* (scheduleID: ID) {
-      const row = yield* db.select().from(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).get().pipe(Effect.orDie)
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
       if (!row) return
       const sessionID = row.session_id as SessionID
       const kind = (row.kind ?? "recurring") as Kind
@@ -226,9 +281,7 @@ export const layer = Layer.effect(
       if (sessionStatus.type === "busy") {
         yield* recordRun(scheduleID, sessionID, "skipped", ranAt)
         if (kind === "once") {
-          const timer = timers.get(scheduleID)
-          if (timer) stopTimer(timer)
-          timers.delete(scheduleID)
+          yield* completeOnce(scheduleID, sessionID)
         }
         return
       }
@@ -257,9 +310,7 @@ export const layer = Layer.effect(
         )
       yield* recordRun(scheduleID, sessionID, "ran", ranAt)
       if (kind === "once") {
-        const timer = timers.get(scheduleID)
-        if (timer) stopTimer(timer)
-        timers.delete(scheduleID)
+        yield* completeOnce(scheduleID, sessionID)
       }
     })
 
@@ -275,14 +326,17 @@ export const layer = Layer.effect(
       if (existing) stopTimer(existing)
       if (kind === "once") {
         if (!runAt) return
-        const timeout = setTimeout(() => {
-          bridge.promise(process(scheduleID)).catch((e) =>
-            console.error("schedule timer error", {
-              scheduleID,
-              error: e instanceof Error ? e.message : String(e),
-            }),
-          )
-        }, Math.max(0, runAt - Date.now()))
+        const timeout = setTimeout(
+          () => {
+            bridge.promise(process(scheduleID)).catch((e) =>
+              console.error("schedule timer error", {
+                scheduleID,
+                error: e instanceof Error ? e.message : String(e),
+              }),
+            )
+          },
+          Math.max(0, runAt - Date.now()),
+        )
         timers.set(scheduleID, { kind, timeout, sessionID, runAt, bridge })
         return
       }
@@ -303,7 +357,12 @@ export const layer = Layer.effect(
         yield* Effect.promise(() => timer.bridge.promise(process(scheduleID)))
         return
       }
-      const row = yield* db.select().from(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).get().pipe(Effect.orDie)
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
       if (!row) return
       yield* events.publish(Event.Triggered, {
         scheduleID,
@@ -318,14 +377,11 @@ export const layer = Layer.effect(
       const id = row.id as ID
       const kind = (row.kind ?? "recurring") as Kind
       if (kind === "once") {
-        const lastRun = yield* db
-          .select({ ran_at: ScheduleRunTable.ran_at })
-          .from(ScheduleRunTable)
-          .where(eq(ScheduleRunTable.schedule_id, id))
-          .limit(1)
-          .get()
-          .pipe(Effect.orDie)
-        if (lastRun) continue
+        const lastRun = yield* getLastRun(id)
+        if (lastRun) {
+          yield* completeOnce(id, row.session_id as SessionID)
+          continue
+        }
       }
       startTimer(id, row.session_id as SessionID, kind, row.expression, row.run_at ?? null, serviceBridge)
     }
@@ -345,37 +401,34 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.session_id, sessionID))
         .all()
         .pipe(Effect.orDie)
-      return yield* Effect.all(
+      const items = yield* Effect.all(
         rows.map((row) =>
           Effect.gen(function* () {
-            const lastRun = yield* db
-              .select({
-                ran_at: ScheduleRunTable.ran_at,
-                status: ScheduleRunTable.status,
-              })
-              .from(ScheduleRunTable)
-              .where(eq(ScheduleRunTable.schedule_id, row.id))
-              .orderBy(desc(ScheduleRunTable.ran_at))
-              .limit(1)
-              .get()
-              .pipe(Effect.orDie)
-        const timer = timers.get(row.id as ID)
-        const nextRun = timer?.kind === "recurring" ? timer.cron.nextRun()?.getTime() ?? null : timer?.runAt ?? null
-        return {
-          id: row.id as ID,
-          sessionID: row.session_id as SessionID,
-          kind: (row.kind ?? "recurring") as Kind,
-          expression: row.expression,
-          runAt: row.run_at ?? null,
-          message: row.message,
-          createdAt: row.created_at,
-          lastRanAt: lastRun?.ran_at ?? null,
-          lastRunStatus: (lastRun?.status as RunStatus | undefined) ?? null,
-          nextRun,
-        }
+            const kind = (row.kind ?? "recurring") as Kind
+            const lastRun = yield* getLastRun(row.id as ID)
+            if (kind === "once" && lastRun) {
+              yield* completeOnce(row.id as ID, row.session_id as SessionID)
+              return undefined
+            }
+            const timer = timers.get(row.id as ID)
+            const nextRun =
+              timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
+            return {
+              id: row.id as ID,
+              sessionID: row.session_id as SessionID,
+              kind,
+              expression: row.expression,
+              runAt: row.run_at ?? null,
+              message: row.message,
+              createdAt: row.created_at,
+              lastRanAt: lastRun?.ran_at ?? null,
+              lastRunStatus: (lastRun?.status as RunStatus | undefined) ?? null,
+              nextRun,
+            }
           }),
         ),
       )
+      return items.filter((item): item is Info => !!item)
     })
 
     const create: Interface["create"] = Effect.fn("Schedule.create")(function* (input: {
@@ -386,7 +439,7 @@ export const layer = Layer.effect(
       message: string
     }) {
       const kind = input.kind ?? "recurring"
-      const expression = kind === "recurring" ? input.expression?.trim() : (input.expression?.trim() || "")
+      const expression = kind === "recurring" ? input.expression?.trim() : input.expression?.trim() || ""
       const runAt = kind === "once" ? yield* validateRunAt(input.runAt) : null
       if (kind === "recurring") {
         if (!expression) {
@@ -394,6 +447,7 @@ export const layer = Layer.effect(
         }
         yield* validateExpression(expression)
       }
+      yield* cleanupCompletedOnceForSession(input.sessionID)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })
         .from(ScheduleTable)
@@ -439,13 +493,18 @@ export const layer = Layer.effect(
           kind === "once"
             ? runAt
             : createdTimer?.kind === "recurring"
-              ? createdTimer.cron.nextRun()?.getTime() ?? null
+              ? (createdTimer.cron.nextRun()?.getTime() ?? null)
               : null,
       } satisfies Info
     })
 
     const deleteSchedule: Interface["delete"] = Effect.fn("Schedule.delete")(function* (scheduleID: ID) {
-      const row = yield* db.select().from(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).get().pipe(Effect.orDie)
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
       if (!row) return yield* Effect.fail(new NotFound({ scheduleID }))
       yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
       const timer = timers.get(scheduleID)
@@ -469,10 +528,7 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(
-  Layer.provide(Database.defaultLayer),
-  Layer.provide(EventV2Bridge.defaultLayer),
-)
+export const defaultLayer = layer.pipe(Layer.provide(Database.defaultLayer), Layer.provide(EventV2Bridge.defaultLayer))
 
 export const node = LayerNode.make(layer, [Database.node, EventV2Bridge.node])
 
