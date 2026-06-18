@@ -4,9 +4,12 @@ import { Effect, Layer, Context, Schema } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { eq } from "drizzle-orm"
 import { asc } from "drizzle-orm"
-import { TodoTable } from "@opencode-ai/core/session/sql"
+import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { readSessionStore } from "@/atree/session-store"
+import { readSessionTodoProjection, writeSessionTodoState } from "@/atree/todo-store"
+import { InstanceRef } from "@/effect/instance-ref"
 
 export const Info = Schema.Struct({
   content: Schema.String.annotate({ description: "Brief description of the task" }),
@@ -40,6 +43,21 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const { db } = yield* Database.Service
 
+    const sessionDirectory = Effect.fn("Todo.sessionDirectory")(function* (sessionID: SessionID) {
+      const row = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (row?.directory) return row.directory
+
+      const instance = yield* InstanceRef
+      if (!instance) return
+      const fileSession = yield* Effect.promise(() => readSessionStore(instance.directory, sessionID))
+      return fileSession ? instance.directory : undefined
+    })
+
     const update = Effect.fn("Todo.update")(function* (input: { sessionID: SessionID; todos: Info[] }) {
       yield* db
         .transaction((tx) =>
@@ -61,10 +79,18 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(Effect.orDie)
+      const directory = yield* sessionDirectory(input.sessionID)
+      if (directory) yield* Effect.promise(() => writeSessionTodoState(directory, input.sessionID, input.todos))
       yield* events.publish(Event.Updated, input)
     })
 
     const get = Effect.fn("Todo.get")(function* (sessionID: SessionID) {
+      const directory = yield* sessionDirectory(sessionID)
+      if (directory) {
+        const projection = yield* Effect.promise(() => readSessionTodoProjection(directory, sessionID))
+        if (projection.hasState) return projection.todos
+      }
+
       const rows = yield* db
         .select()
         .from(TodoTable)
