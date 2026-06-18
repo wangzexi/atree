@@ -79,12 +79,13 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     if (path === "/session" && route.request().method() === "GET") {
       const directory = requestDirectory()
       const roots = url.searchParams.get("roots") === "true"
+      const includeArchived = url.searchParams.get("archived") === "true"
       return json(
         route,
         sessions.filter((session) => {
           if (directory && session.directory !== directory) return false
           if (roots && session.parentID) return false
-          if ((session.time as { archived?: number } | undefined)?.archived !== undefined) return false
+          if (!includeArchived && (session.time as { archived?: number } | undefined)?.archived !== undefined) return false
           return true
         }),
       )
