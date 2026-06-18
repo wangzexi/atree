@@ -112,6 +112,8 @@ export interface Interface {
   readonly tick: (scheduleID: ID) => Effect.Effect<void>
   /** Record that a fire was processed by the runner. */
   readonly recordRun: (scheduleID: ID, sessionID: SessionID, status: RunStatus, ranAt: number) => Effect.Effect<void>
+  /** Remove every scheduled message for a session. */
+  readonly clear: (sessionID: SessionID) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/Schedule") {}
@@ -686,10 +688,33 @@ export const layer = Layer.effect(
       yield* syncScheduleState(row.session_id as SessionID)
     })
 
+    const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (sessionID: SessionID) {
+      const rows = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      if (rows.length > 0) {
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
+      }
+      for (const row of rows) {
+        const id = row.id as ID
+        const timer = timers.get(id)
+        if (timer) {
+          stopTimer(timer)
+          timers.delete(id)
+        }
+        yield* events.publish(Event.Deleted, { scheduleID: id, sessionID })
+      }
+      yield* syncScheduleState(sessionID)
+    })
+
     return Service.of({
       list,
       create,
       delete: deleteSchedule,
+      clear,
       tick,
       recordRun,
     })

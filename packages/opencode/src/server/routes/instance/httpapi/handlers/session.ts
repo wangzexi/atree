@@ -240,6 +240,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         })
       }
       if (ctx.payload.time?.archived !== undefined) {
+        if (ctx.payload.time.archived !== null) {
+          yield* scheduleSvc.clear(ctx.params.sessionID)
+        }
         yield* session.setArchived({ sessionID: ctx.params.sessionID, time: ctx.payload.time.archived })
       }
       return yield* requireSession(ctx.params.sessionID)

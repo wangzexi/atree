@@ -22,8 +22,10 @@ import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import * as HttpSessionError from "../../src/server/routes/instance/httpapi/handlers/session-errors"
 import { SessionPaths } from "../../src/server/routes/instance/httpapi/groups/session"
 import { Session } from "@/session/session"
+import { Schedule } from "@/session/schedule"
 import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
+import { readSessionScheduleState } from "../../src/atree/schedule-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -781,6 +783,44 @@ describe("session HttpApi", () => {
             headers,
           }),
         ).toBe(true)
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
+    "clears schedules and directory schedule state when archiving through the API",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+
+        const created = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ title: "scheduled archive" }),
+        })
+        const schedule = yield* requestJson<Schedule.Info>(
+          pathFor(SessionPaths.createSchedule, { sessionID: created.id }),
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ type: "cron", cron: "* * * * *", message: "archive cleanup" }),
+          },
+        )
+        expect(schedule.id).toBeTruthy()
+        expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, created.id))).toHaveLength(1)
+
+        const archived = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: 1 } }),
+        })
+
+        expect(archived.time.archived).toBe(1)
+        expect(
+          yield* requestJson<Schedule.Info[]>(pathFor(SessionPaths.schedules, { sessionID: created.id }), { headers }),
+        ).toEqual([])
+        expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, created.id))).toEqual([])
       }),
     { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )

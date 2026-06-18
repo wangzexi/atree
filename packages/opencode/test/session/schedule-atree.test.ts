@@ -7,7 +7,7 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Effect, Layer } from "effect"
 import { eq } from "drizzle-orm"
-import { writeSessionScheduleState } from "../../src/atree/schedule-store"
+import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { writeSessionStore } from "../../src/atree/session-store"
 import { Schedule } from "../../src/session/schedule"
 import { ScheduleTable } from "../../src/session/schedule.sql"
@@ -137,6 +137,49 @@ describe("atree schedule restore", () => {
       const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
       expect(schedules).toHaveLength(1)
       expect(schedules[0]).toMatchObject({ id: "sch_file", sessionID, message: "file-backed schedule" })
+    }),
+  )
+
+  it.instance(
+    "clears stale directory schedule state without a DB schedule row",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const sessionID = "ses_file_stale_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-stale-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File stale schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: "sch_stale",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "stale schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.clear(sessionID))
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
     }),
   )
 })

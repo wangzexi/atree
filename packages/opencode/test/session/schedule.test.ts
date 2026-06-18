@@ -9,6 +9,7 @@ import { SessionPrompt } from "../../src/session/prompt"
 import { Schedule } from "../../src/session/schedule"
 import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
+import { readSessionScheduleState } from "../../src/atree/schedule-store"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 let promptQueue: Queue.Queue<SessionPrompt.PromptInput> | undefined
@@ -172,6 +173,35 @@ it.instance("creates, lists, triggers, records, and deletes a scheduled task", (
     yield* schedules.delete(created.id)
     expect(yield* schedules.list(session.id)).toEqual([])
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
+  }),
+)
+
+it.instance("clears scheduled tasks and directory schedule state for a session", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    yield* initScheduleTables
+
+    const session = yield* createFixtureSession("schedule clear test")
+    const events: GlobalEvent[] = []
+    const onEvent = (event: GlobalEvent) => {
+      events.push(event)
+    }
+    GlobalBus.on("event", onEvent)
+    yield* Effect.addFinalizer(() => Effect.sync(() => GlobalBus.off("event", onEvent)))
+
+    const created = yield* schedules.create({
+      sessionID: session.id,
+      expression: "* * * * *",
+      message: "clear me",
+    })
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(1)
+
+    yield* schedules.clear(session.id)
+    expect(yield* schedules.list(session.id)).toEqual([])
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
+    expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
+    expect(scheduleEventTypes(events, session.id).filter((event) => event === "schedule.deleted")).toHaveLength(1)
+    expect(created.id).toBeTruthy()
   }),
 )
 
