@@ -86,6 +86,16 @@ export async function ensureSessionPayloadFiles(info: SessionInfo) {
   await writeIfMissing(path.join(root, "session.jsonl"), "")
 }
 
+export async function appendSessionJsonl(info: SessionInfo, entry: Record<string, unknown>) {
+  await ensureSessionPayloadFiles(info)
+  const line = JSON.stringify({
+    version: 1,
+    at: Date.now(),
+    ...entry,
+  })
+  await fs.appendFile(path.join(sessionRoot(info), "session.jsonl"), `${line}\n`)
+}
+
 function parseValue(value: string) {
   const trimmed = value.trim()
   if (trimmed === "") return undefined

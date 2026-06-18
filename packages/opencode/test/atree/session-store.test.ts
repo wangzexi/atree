@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { readSessionStores, writeSessionStore } from "../../src/atree/session-store"
+import { appendSessionJsonl, readSessionStores, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -79,5 +79,34 @@ describe("atree session store", () => {
     expect(sessions[0]?.metadata).toEqual({ icon: "🧭" })
     expect(sessions[0]?.time.archived).toBe(4)
     expect(sessions[1]?.title).toBe("Old")
+  })
+
+  test("appends raw session events to session.jsonl", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_log",
+      slug: "ses-log",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Log",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, { type: "message.updated", message: { id: "msg_one" } })
+    await appendSessionJsonl(session, { type: "part.updated", part: { id: "prt_one" } })
+
+    const lines = (
+      await fs.readFile(path.join(directory, ".agents", "atree", "sessions", "ses_log", "session.jsonl"), "utf8")
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(lines).toHaveLength(2)
+    expect(lines[0]).toMatchObject({ version: 1, type: "message.updated", message: { id: "msg_one" } })
+    expect(lines[1]).toMatchObject({ version: 1, type: "part.updated", part: { id: "prt_one" } })
   })
 })

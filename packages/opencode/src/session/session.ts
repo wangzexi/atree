@@ -14,7 +14,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
-import { ensureSessionStore, readSessionStores, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, ensureSessionStore, readSessionStores, writeSessionStore } from "@/atree/session-store"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -587,6 +587,14 @@ export const layer: Layer.Layer<
       return fromRow(row)
     })
 
+    const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (
+      sessionID: SessionID,
+      entry: Record<string, unknown>,
+    ) {
+      const session = yield* get(sessionID).pipe(Effect.orDie)
+      yield* Effect.promise(() => appendSessionJsonl(session, entry)).pipe(Effect.orDie)
+    })
+
     const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (
       items: Info[],
       input?: ListInput,
@@ -693,12 +701,14 @@ export const layer: Layer.Layer<
 
     const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg })
         yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends SessionV1.Part>(part: T): Effect.Effect<T> =>
       Effect.gen(function* () {
+        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part })
         yield* events.publish(SessionV1.Event.PartUpdated, {
           sessionID: part.sessionID,
           part: structuredClone(part),
@@ -909,6 +919,7 @@ export const layer: Layer.Layer<
       sessionID: SessionID
       messageID: MessageID
     }) {
+      yield* appendSessionEvent(input.sessionID, { type: "message.removed", messageID: input.messageID })
       yield* events.publish(SessionV1.Event.MessageRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
@@ -921,6 +932,11 @@ export const layer: Layer.Layer<
       messageID: MessageID
       partID: PartID
     }) {
+      yield* appendSessionEvent(input.sessionID, {
+        type: "message.part.removed",
+        messageID: input.messageID,
+        partID: input.partID,
+      })
       yield* events.publish(SessionV1.Event.PartRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
@@ -936,6 +952,7 @@ export const layer: Layer.Layer<
       field: string
       delta: string
     }) {
+      yield* appendSessionEvent(input.sessionID, { type: "message.part.delta", ...input })
       yield* events.publish(MessageV2.Event.PartDelta, input)
     })
 
