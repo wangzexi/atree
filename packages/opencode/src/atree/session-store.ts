@@ -2,6 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import type { SessionID } from "@/session/schema"
 import type { Session } from "@/session/session"
+import type { SessionV1 } from "@opencode-ai/core/v1/session"
 
 type SessionInfo = Session.Info & {
   id: SessionID
@@ -94,6 +95,99 @@ export async function appendSessionJsonl(info: SessionInfo, entry: Record<string
     ...entry,
   })
   await fs.appendFile(path.join(sessionRoot(info), "session.jsonl"), `${line}\n`)
+}
+
+function upsertPart(parts: SessionV1.Part[], part: SessionV1.Part) {
+  const index = parts.findIndex((item) => item.id === part.id)
+  if (index === -1) {
+    parts.push(part)
+    parts.sort((a, b) => a.id.localeCompare(b.id))
+    return
+  }
+  parts[index] = part
+}
+
+function appendPartDelta(part: SessionV1.Part, field: string, delta: string) {
+  const record = part as unknown as Record<string, unknown>
+  const current = record[field]
+  record[field] = typeof current === "string" ? current + delta : delta
+}
+
+export async function readSessionJsonlMessages(info: SessionInfo) {
+  const target = path.join(sessionRoot(info), "session.jsonl")
+  const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  const messages = new Map<string, SessionV1.WithParts>()
+  const orphanParts = new Map<string, SessionV1.Part[]>()
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+
+    if (entry.type === "message.updated" && entry.message && typeof entry.message === "object") {
+      const message = entry.message as SessionV1.Info
+      const existing = messages.get(message.id)
+      const parts = existing?.parts ?? orphanParts.get(message.id) ?? []
+      messages.set(message.id, { info: message, parts })
+      orphanParts.delete(message.id)
+      continue
+    }
+
+    if (entry.type === "message.part.updated" && entry.part && typeof entry.part === "object") {
+      const part = entry.part as SessionV1.Part
+      const message = messages.get(part.messageID)
+      if (message) {
+        upsertPart(message.parts, part)
+        continue
+      }
+      const parts = orphanParts.get(part.messageID) ?? []
+      upsertPart(parts, part)
+      orphanParts.set(part.messageID, parts)
+      continue
+    }
+
+    if (entry.type === "message.part.delta") {
+      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
+      const partID = typeof entry.partID === "string" ? entry.partID : undefined
+      const field = typeof entry.field === "string" ? entry.field : undefined
+      const delta = typeof entry.delta === "string" ? entry.delta : undefined
+      if (!messageID || !partID || !field || delta === undefined) continue
+      const part =
+        messages.get(messageID)?.parts.find((item) => item.id === partID) ??
+        orphanParts.get(messageID)?.find((item) => item.id === partID)
+      if (part) appendPartDelta(part, field, delta)
+      continue
+    }
+
+    if (entry.type === "message.removed") {
+      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
+      if (!messageID) continue
+      messages.delete(messageID)
+      orphanParts.delete(messageID)
+      continue
+    }
+
+    if (entry.type === "message.part.removed") {
+      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
+      const partID = typeof entry.partID === "string" ? entry.partID : undefined
+      if (!messageID || !partID) continue
+      const message = messages.get(messageID)
+      if (message) message.parts = message.parts.filter((part) => part.id !== partID)
+      const parts = orphanParts.get(messageID)
+      if (parts) orphanParts.set(messageID, parts.filter((part) => part.id !== partID))
+    }
+  }
+
+  return [...messages.values()].sort(
+    (a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id),
+  )
 }
 
 function parseValue(value: string) {

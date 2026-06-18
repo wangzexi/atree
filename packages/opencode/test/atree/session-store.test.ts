@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { appendSessionJsonl, readSessionStores, writeSessionStore } from "../../src/atree/session-store"
+import { appendSessionJsonl, readSessionJsonlMessages, readSessionStores, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -108,5 +108,54 @@ describe("atree session store", () => {
     expect(lines).toHaveLength(2)
     expect(lines[0]).toMatchObject({ version: 1, type: "message.updated", message: { id: "msg_one" } })
     expect(lines[1]).toMatchObject({ version: 1, type: "part.updated", part: { id: "prt_one" } })
+  })
+
+  test("replays session.jsonl into messages with parts", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_replay",
+      slug: "ses-replay",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Replay",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "message.updated",
+      message: { id: "msg_one", sessionID: "ses_replay", role: "user", time: { created: 1 } },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      part: { id: "prt_one", sessionID: "ses_replay", messageID: "msg_one", type: "text", text: "hello" },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.delta",
+      sessionID: "ses_replay",
+      messageID: "msg_one",
+      partID: "prt_one",
+      field: "text",
+      delta: " world",
+    })
+    await appendSessionJsonl(session, {
+      type: "message.updated",
+      message: { id: "msg_two", sessionID: "ses_replay", role: "assistant", time: { created: 2 } },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      part: { id: "prt_two", sessionID: "ses_replay", messageID: "msg_two", type: "text", text: "removed" },
+    })
+    await appendSessionJsonl(session, { type: "message.part.removed", messageID: "msg_two", partID: "prt_two" })
+    await appendSessionJsonl(session, { type: "message.removed", messageID: "msg_two" })
+
+    const messages = await readSessionJsonlMessages(session)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.info).toMatchObject({ id: "msg_one", role: "user" })
+    expect(messages[0]?.parts).toHaveLength(1)
+    expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_one", type: "text", text: "hello world" })
   })
 })

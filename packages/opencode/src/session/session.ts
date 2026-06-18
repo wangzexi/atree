@@ -14,7 +14,13 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
-import { appendSessionJsonl, ensureSessionStore, readSessionStores, writeSessionStore } from "@/atree/session-store"
+import {
+  appendSessionJsonl,
+  ensureSessionStore,
+  readSessionJsonlMessages,
+  readSessionStores,
+  writeSessionStore,
+} from "@/atree/session-store"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -912,7 +918,10 @@ export const layer: Layer.Layer<
         if (!page.more || !page.cursor) break
         before = page.cursor
       }
-      return result.reverse()
+      const items = result.reverse()
+      if (items.length > 0) return items
+      const session = yield* get(input.sessionID)
+      return yield* Effect.promise(() => readSessionJsonlMessages(session))
     })
 
     const removeMessage = Effect.fn("Session.removeMessage")(function* (input: {
