@@ -17,6 +17,7 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import {
   appendSessionJsonl,
   ensureSessionStore,
+  readSessionJsonlProjection,
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
@@ -984,8 +985,10 @@ export const layer: Layer.Layer<
 
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
       const session = yield* get(input.sessionID)
-      const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session))
-      if (fileMessages.length > 0) return input.limit ? fileMessages.slice(-input.limit) : fileMessages
+      const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
+      if (fileProjection.hasEvents) {
+        return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
+      }
 
       if (input.limit) {
         const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
@@ -1060,6 +1063,16 @@ export const layer: Layer.Layer<
 
     /** Finds the first message matching the predicate, searching newest-first. */
     const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (sessionID, predicate) {
+      const session = yield* get(sessionID)
+      const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
+      if (fileProjection.hasEvents) {
+        for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
+          const item = fileProjection.messages[i]
+          if (item && predicate(item)) return Option.some(item)
+        }
+        return Option.none<SessionV1.WithParts>()
+      }
+
       const size = 50
       let before: string | undefined
       while (true) {
@@ -1076,12 +1089,6 @@ export const layer: Layer.Layer<
         }
         if (!page.more || !page.cursor) break
         before = page.cursor
-      }
-      const session = yield* get(sessionID)
-      const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session))
-      for (let i = fileMessages.length - 1; i >= 0; i--) {
-        const item = fileMessages[i]
-        if (item && predicate(item)) return Option.some(item)
       }
       return Option.none<SessionV1.WithParts>()
     })

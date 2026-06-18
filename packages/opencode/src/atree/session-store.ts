@@ -221,12 +221,13 @@ function appendPartDelta(part: SessionV1.Part, field: string, delta: string) {
   record[field] = typeof current === "string" ? current + delta : delta
 }
 
-export async function readSessionJsonlMessages(info: SessionInfo) {
+export async function readSessionJsonlProjection(info: SessionInfo) {
   const target = path.join(sessionRoot(info), "session.jsonl")
   const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
     throw error
   })
+  let hasEvents = false
   const messages = new Map<string, SessionV1.WithParts>()
   const orphanParts = new Map<string, SessionV1.Part[]>()
 
@@ -238,6 +239,7 @@ export async function readSessionJsonlMessages(info: SessionInfo) {
     } catch {
       continue
     }
+    hasEvents = true
 
     if (entry.type === "message.updated" && entry.message && typeof entry.message === "object") {
       const message = entry.message as SessionV1.Info
@@ -293,9 +295,16 @@ export async function readSessionJsonlMessages(info: SessionInfo) {
     }
   }
 
-  return [...messages.values()].sort(
-    (a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id),
-  )
+  return {
+    hasEvents,
+    messages: [...messages.values()].sort(
+      (a, b) => a.info.time.created - b.info.time.created || a.info.id.localeCompare(b.info.id),
+    ),
+  }
+}
+
+export async function readSessionJsonlMessages(info: SessionInfo) {
+  return (await readSessionJsonlProjection(info)).messages
 }
 
 export async function readSessionStore(directory: string, sessionID: SessionID) {

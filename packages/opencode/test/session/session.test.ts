@@ -283,6 +283,42 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const info = yield* Effect.acquireRelease(session.create({ title: "jsonl-removal-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: partID,
+        messageID,
+        sessionID: info.id,
+        type: "text",
+        text: "cached only",
+      })
+      yield* Effect.promise(() => appendSessionJsonl(info, { type: "message.removed", messageID }))
+
+      const messages = yield* session.messages({ sessionID: info.id, limit: 10 })
+      expect(messages.some((message) => message.info.id === messageID)).toBe(false)
+
+      const found = yield* session.findMessage(info.id, (message) => message.info.id === messageID)
+      expect(Option.isNone(found)).toBe(true)
+    }),
+  )
+
   it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
