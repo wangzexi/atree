@@ -690,7 +690,23 @@ export const layer: Layer.Layer<
         .limit(input?.limit ?? 100)
         .all()
         .pipe(Effect.orDie)
-      const ids = [...new Set(rows.map((row) => row.project_id))]
+      const byID = new Map<string, Info>()
+      for (const row of rows) byID.set(row.id, fromRow(row))
+      if (input?.directory) {
+        const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
+        for (const item of fileSessions) {
+          if (input.roots && item.parentID) continue
+          if (input.start && item.time.updated < input.start) continue
+          if (input.cursor && item.time.updated >= input.cursor) continue
+          if (input.search && !item.title.includes(input.search)) continue
+          if (!input.archived && item.time.archived !== undefined) continue
+          byID.set(item.id, item)
+        }
+      }
+      const sessions = [...byID.values()]
+        .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+        .slice(0, input?.limit ?? 100)
+      const ids = [...new Set(sessions.map((row) => row.projectID))]
       const projects = new Map<string, ProjectInfo>()
       if (ids.length > 0) {
         const items = yield* db
@@ -707,7 +723,7 @@ export const layer: Layer.Layer<
           })
         }
       }
-      return rows.map((row) => ({ ...fromRow(row), project: projects.get(row.project_id) ?? null }))
+      return sessions.map((session) => ({ ...session, project: projects.get(session.projectID) ?? null }))
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID) {

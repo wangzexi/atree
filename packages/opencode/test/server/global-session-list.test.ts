@@ -5,6 +5,8 @@ import { Session as SessionNs } from "@/session/session"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
+import { writeSessionStore } from "@/atree/session-store"
+import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Project.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
@@ -64,6 +66,60 @@ describe("session.listGlobal", () => {
         const allIds = allSessions.map((session) => session.id)
 
         expect(allIds).toContain(archived.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "includes file-backed sessions when listing a directory globally",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_global_file_active",
+            slug: "global-file-active",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "Global file active",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 10, updated: 20 },
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_global_file_archived",
+            slug: "global-file-archived",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "Global file archived",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 11, updated: 21, archived: 22 },
+          } as any),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) =>
+          session.listGlobal({ directory: test.directory, limit: 200 }),
+        )
+        const ids = sessions.map((session) => String(session.id))
+        expect(ids).toContain("ses_global_file_active")
+        expect(ids).not.toContain("ses_global_file_archived")
+        expect(sessions.find((session) => String(session.id) === "ses_global_file_active")?.project?.id).toBe(
+          ctx.project.id,
+        )
+
+        const archived = yield* SessionNs.Service.use((session) =>
+          session.listGlobal({ directory: test.directory, archived: true, limit: 200 }),
+        )
+        expect(archived.map((session) => String(session.id))).toContain("ses_global_file_archived")
       }),
     { git: true },
   )
