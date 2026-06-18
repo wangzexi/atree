@@ -5,6 +5,8 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { eq } from "drizzle-orm"
 import { Deferred, Effect, Exit, Layer, Option } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
@@ -17,11 +19,12 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { GlobalBus } from "@/bus/global"
-import { appendSessionJsonl, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(
   Layer.mergeAll(
+    Database.defaultLayer,
     SessionNs.layer.pipe(
       Layer.provide(Storage.defaultLayer),
       Layer.provide(Database.defaultLayer),
@@ -277,6 +280,39 @@ describe("Session", () => {
         type: "text",
         text: "from file",
       })
+    }),
+  )
+
+  it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const instance = yield* TestInstance
+      const info = yield* Effect.acquireRelease(session.create({ title: "patch-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* session.setTitle({ sessionID: info.id, title: "Patched title" })
+      yield* session.setMetadata({ sessionID: info.id, metadata: { icon: "🧭" } })
+      yield* session.setArchived({ sessionID: info.id, time: 1234 })
+
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
+      expect(stored?.title).toBe("Patched title")
+      expect(stored?.metadata).toEqual({ icon: "🧭" })
+      expect(stored?.time.archived).toBe(1234)
+
+      let row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
+      expect(row?.title).toBe("Patched title")
+      expect(row?.metadata).toEqual({ icon: "🧭" })
+      expect(row?.time_archived).toBe(1234)
+
+      yield* session.setArchived({ sessionID: info.id, time: null })
+
+      const unarchived = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
+      expect(unarchived?.time.archived).toBeUndefined()
+
+      row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
+      expect(row?.time_archived).toBeNull()
     }),
   )
 

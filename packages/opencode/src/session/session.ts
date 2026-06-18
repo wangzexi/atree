@@ -125,21 +125,21 @@ export function toRow(info: Info) {
   return {
     id: info.id,
     project_id: info.projectID,
-    workspace_id: info.workspaceID,
-    parent_id: info.parentID,
+    workspace_id: info.workspaceID ?? null,
+    parent_id: info.parentID ?? null,
     slug: info.slug,
     directory: info.directory,
-    path: info.path,
+    path: info.path ?? null,
     title: info.title,
-    agent: info.agent,
-    model: info.model,
+    agent: info.agent ?? null,
+    model: info.model ?? null,
     version: info.version,
-    share_url: info.share?.url,
-    summary_additions: info.summary?.additions,
-    summary_deletions: info.summary?.deletions,
-    summary_files: info.summary?.files,
-    summary_diffs: info.summary?.diffs,
-    metadata: info.metadata,
+    share_url: info.share?.url ?? null,
+    summary_additions: info.summary?.additions ?? null,
+    summary_deletions: info.summary?.deletions ?? null,
+    summary_files: info.summary?.files ?? null,
+    summary_diffs: info.summary?.diffs ?? null,
+    metadata: info.metadata ?? null,
     cost: info.cost ?? 0,
     tokens_input: (info.tokens ?? EmptyTokens).input,
     tokens_output: (info.tokens ?? EmptyTokens).output,
@@ -147,11 +147,11 @@ export function toRow(info: Info) {
     tokens_cache_read: (info.tokens ?? EmptyTokens).cache.read,
     tokens_cache_write: (info.tokens ?? EmptyTokens).cache.write,
     revert: info.revert ?? null,
-    permission: info.permission,
+    permission: info.permission ?? null,
     time_created: info.time.created,
     time_updated: info.time.updated,
-    time_compacting: info.time.compacting,
-    time_archived: info.time.archived,
+    time_compacting: info.time.compacting ?? null,
+    time_archived: info.time.archived ?? null,
   }
 }
 
@@ -907,6 +907,7 @@ export const layer: Layer.Layer<
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
         yield* Effect.promise(() => writeSessionStore(next))
+        yield* syncFileSessionCache(next)
         yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
       })
 
