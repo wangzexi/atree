@@ -189,9 +189,13 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const message = Effect.fn("SessionHttpApi.message")(function* (ctx: {
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
-      return yield* SessionError.mapStorageNotFound(
-        MessageV2.get({ sessionID: ctx.params.sessionID, messageID: ctx.params.messageID }),
+      const result = yield* SessionError.mapStorageNotFound(
+        session.findMessage(ctx.params.sessionID, (item) => item.info.id === ctx.params.messageID),
       )
+      if (Option.isNone(result)) {
+        return yield* Effect.fail(notFound(`Message not found: ${ctx.params.messageID}`))
+      }
+      return result.value
     })
 
     const create = Effect.fn("SessionHttpApi.create")(function* (ctx: { payload?: Session.CreateInput }) {

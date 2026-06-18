@@ -998,6 +998,9 @@ export const layer: Layer.Layer<
       while (true) {
         const page = yield* MessageV2.page({ sessionID, limit: size, before }).pipe(
           Effect.provideService(Database.Service, database),
+          Effect.catchIf(NotFoundError.isInstance, () =>
+            Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
+          ),
         )
         if (page.items.length === 0) break
         for (let i = page.items.length - 1; i >= 0; i--) {
@@ -1006,6 +1009,12 @@ export const layer: Layer.Layer<
         }
         if (!page.more || !page.cursor) break
         before = page.cursor
+      }
+      const session = yield* get(sessionID)
+      const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session))
+      for (let i = fileMessages.length - 1; i >= 0; i--) {
+        const item = fileMessages[i]
+        if (item && predicate(item)) return Option.some(item)
       }
       return Option.none<SessionV1.WithParts>()
     })

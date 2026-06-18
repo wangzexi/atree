@@ -5,7 +5,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Deferred, Effect, Exit, Layer } from "effect"
+import { Deferred, Effect, Exit, Layer, Option } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -256,6 +256,13 @@ describe("Session", () => {
         partID: "prt_file" as PartID,
       })
       expect(part).toMatchObject({ id: "prt_file", type: "text", text: "from file" })
+
+      const found = yield* session.findMessage(id, (message) => message.info.id === "msg_file")
+      expect(Option.isSome(found) ? found.value.parts[0] : undefined).toMatchObject({
+        id: "prt_file",
+        type: "text",
+        text: "from file",
+      })
     }),
   )
 

@@ -26,6 +26,7 @@ import { Schedule } from "@/session/schedule"
 import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { readSessionScheduleState } from "../../src/atree/schedule-store"
+import { appendSessionJsonl, writeSessionStore } from "../../src/atree/session-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -395,6 +396,65 @@ describe("session HttpApi", () => {
             headers,
           })).data,
         ).toMatchObject([{ type: "assistant" }])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "serves file-backed message read routes when database cache is missing",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory }
+        const sessionID = SessionID.descending()
+        const messageID = MessageID.ascending()
+        const partID = PartID.ascending()
+        const info = {
+          id: sessionID,
+          slug: "file-backed-http",
+          version: "test",
+          projectID: "proj_file",
+          directory: test.directory,
+          path: ".",
+          title: "File backed HTTP",
+          metadata: { icon: "🧭" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 10, updated: 20 },
+        } as any
+
+        yield* Effect.promise(() => writeSessionStore(info))
+        yield* Effect.promise(() =>
+          appendSessionJsonl(info, {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              sessionID,
+              role: "user",
+              agent: "build",
+              model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+              tools: {},
+              mode: "",
+              time: { created: 30 },
+            },
+          }),
+        )
+        yield* Effect.promise(() =>
+          appendSessionJsonl(info, {
+            type: "message.part.updated",
+            part: { id: partID, sessionID, messageID, type: "text", text: "from file-backed route" },
+          }),
+        )
+
+        expect(
+          yield* requestJson<SessionV1.WithParts>(
+            pathFor(SessionPaths.message, { sessionID, messageID }),
+            { headers },
+          ),
+        ).toMatchObject({
+          info: { id: messageID, role: "user" },
+          parts: [{ id: partID, type: "text", text: "from file-backed route" }],
+        })
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
