@@ -535,6 +535,7 @@ export const layer = Layer.effect(
         return [] as Info[]
       }
       const directory = archiveState.directory
+      yield* sessionDirectory(sessionID)
       const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
       if (stored.length === 0) return [] as Info[]
 
@@ -663,6 +664,7 @@ export const layer = Layer.effect(
         }
         yield* validateExpression(expression)
       }
+      yield* restoreStoredSchedules(input.sessionID)
       yield* cleanupCompletedOnceForSession(input.sessionID)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })

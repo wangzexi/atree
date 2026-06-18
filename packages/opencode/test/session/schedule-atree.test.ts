@@ -141,6 +141,101 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
+    "creates a schedule for a file-backed session without a DB session row",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const sessionID = "ses_file_create_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-create-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File create schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          kind: "once",
+          runAt: now + 60_000,
+          message: "created from file-backed session",
+        }),
+      )
+
+      expect(created).toMatchObject({ sessionID, message: "created from file-backed session" })
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toHaveLength(1)
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+      )
+      expect(row?.directory).toBe(instance.directory)
+    }),
+  )
+
+  it.instance(
+    "rejects a second schedule when a file-backed session already has directory schedule state",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const sessionID = "ses_file_duplicate_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-duplicate-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File duplicate schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: "sch_duplicate_file",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "existing file-backed schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      const error = yield* Schedule.Service.use((schedule) =>
+        schedule
+          .create({
+            sessionID,
+            kind: "once",
+            runAt: now + 120_000,
+            message: "second file-backed schedule",
+          })
+          .pipe(Effect.flip),
+      )
+
+      expect(error._tag).toBe("ScheduleLimitExceeded")
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toHaveLength(1)
+    }),
+  )
+
+  it.instance(
     "clears stale directory schedule state without a DB schedule row",
     Effect.gen(function* () {
       const instance = yield* TestInstance
