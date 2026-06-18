@@ -148,6 +148,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; scheduleID: Schedule.ID }
     }) {
       yield* requireSession(ctx.params.sessionID)
+      yield* scheduleSvc.list(ctx.params.sessionID)
       return yield* scheduleSvc.delete(ctx.params.scheduleID).pipe(
         Effect.map(() => true),
         Effect.catchTag("ScheduleNotFound", () => Effect.fail(notFound("Schedule not found"))),

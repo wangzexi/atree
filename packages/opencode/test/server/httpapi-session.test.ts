@@ -1030,6 +1030,57 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "deletes file-backed schedule state through the API when the database cache is missing",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+        const info = {
+          id: sessionID,
+          slug: "file-backed-delete-schedule",
+          version: "test",
+          projectID: ctx.project.id,
+          directory: test.directory,
+          path: ".",
+          title: "File backed delete schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any
+
+        yield* Effect.promise(() => writeSessionStore(info))
+        yield* Effect.promise(() =>
+          writeSessionScheduleState(test.directory, sessionID, [
+            {
+              id: "sch_file_delete",
+              sessionID,
+              kind: "once",
+              expression: "",
+              runAt: now + 60_000,
+              message: "delete me",
+              createdAt: now,
+              lastRanAt: null,
+              lastRunStatus: null,
+              nextRun: now + 60_000,
+            },
+          ]),
+        )
+
+        expect(
+          yield* requestJson<boolean>(
+            pathFor(SessionPaths.deleteSchedule, { sessionID, scheduleID: "sch_file_delete" }),
+            { method: "DELETE", headers },
+          ),
+        ).toBe(true)
+        expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual([])
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
     "persists selected workspace id when creating a session",
     () =>
       Effect.gen(function* () {
