@@ -8,13 +8,14 @@ import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
-import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
+import { provideInstance, TestInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { Storage } from "@/storage/storage"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { GlobalBus } from "@/bus/global"
+import { writeSessionStore } from "@/atree/session-store"
 
 const it = testEffect(
   Layer.mergeAll(
@@ -201,6 +202,36 @@ describe("step-finish token propagation via event", () => {
 })
 
 describe("Session", () => {
+  it.instance("loads session metadata from .agents when the database cache is missing", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const id = "ses_file_backed" as SessionID
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id,
+          slug: "file-backed",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File backed",
+          metadata: { icon: "🧭" },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 10, updated: 20 },
+        } as any),
+      )
+
+      const loaded = yield* session.get(id)
+      expect(loaded.id).toBe(id)
+      expect(loaded.directory).toBe(instance.directory)
+      expect(loaded.title).toBe("File backed")
+      expect(loaded.metadata).toEqual({ icon: "🧭" })
+    }),
+  )
+
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

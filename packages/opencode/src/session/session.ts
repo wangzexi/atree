@@ -18,6 +18,7 @@ import {
   appendSessionJsonl,
   ensureSessionStore,
   readSessionJsonlMessages,
+  readSessionStore,
   readSessionStores,
   writeSessionStore,
 } from "@/atree/session-store"
@@ -589,7 +590,16 @@ export const layer: Layer.Layer<
 
     const get = Effect.fn("Session.get")(function* (id: SessionID) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
-      if (!row) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+      if (!row) {
+        const directory = yield* InstanceState.directory.pipe(
+          Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+        )
+        if (directory) {
+          const fileSession = yield* Effect.promise(() => readSessionStore(directory, id))
+          if (fileSession) return fileSession
+        }
+        return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+      }
       return fromRow(row)
     })
 

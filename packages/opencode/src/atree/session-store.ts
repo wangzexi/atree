@@ -190,6 +190,16 @@ export async function readSessionJsonlMessages(info: SessionInfo) {
   )
 }
 
+export async function readSessionStore(directory: string, sessionID: SessionID) {
+  const target = path.join(directory, ".agents", "atree", "sessions", sessionID, "meta.yaml")
+  const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+    throw error
+  })
+  if (!raw) return
+  return parseMeta(raw, directory)
+}
+
 function parseValue(value: string) {
   const trimmed = value.trim()
   if (trimmed === "") return undefined

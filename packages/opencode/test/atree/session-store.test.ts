@@ -2,7 +2,13 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { appendSessionJsonl, readSessionJsonlMessages, readSessionStores, writeSessionStore } from "../../src/atree/session-store"
+import {
+  appendSessionJsonl,
+  readSessionJsonlMessages,
+  readSessionStore,
+  readSessionStores,
+  writeSessionStore,
+} from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -79,6 +85,28 @@ describe("atree session store", () => {
     expect(sessions[0]?.metadata).toEqual({ icon: "🧭" })
     expect(sessions[0]?.time.archived).toBe(4)
     expect(sessions[1]?.title).toBe("Old")
+  })
+
+  test("reads one session metadata by id from a directory", async () => {
+    const directory = await tempdir()
+    const base = {
+      slug: "session",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+
+    await writeSessionStore({ ...base, id: "ses_lookup", title: "Lookup", metadata: { icon: "🧭" } } as any)
+
+    const session = await readSessionStore(directory, "ses_lookup" as any)
+    expect(String(session?.id)).toBe("ses_lookup")
+    expect(session?.title).toBe("Lookup")
+    expect(session?.metadata).toEqual({ icon: "🧭" })
+    expect(await readSessionStore(directory, "ses_missing" as any)).toBeUndefined()
   })
 
   test("appends raw session events to session.jsonl", async () => {
