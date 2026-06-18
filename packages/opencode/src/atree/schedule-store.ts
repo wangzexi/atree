@@ -56,3 +56,9 @@ export async function writeSessionScheduleState(directory: string, sessionID: st
   else state.sessions[sessionID] = schedules
   await writeAtomic(target, state)
 }
+
+export async function readSessionScheduleState(directory: string, sessionID: string) {
+  const state = await readState(statePath(directory))
+  const schedules = state.sessions[sessionID]
+  return Array.isArray(schedules) ? schedules : []
+}

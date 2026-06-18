@@ -11,7 +11,7 @@ import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
-import { writeSessionScheduleState } from "@/atree/schedule-store"
+import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
 
 export const MAX_PER_SESSION = 1
 export const MIN_INTERVAL_MS = 60_000
@@ -472,8 +472,18 @@ export const layer = Layer.effect(
         }
       }
       const items = yield* activeSchedules(sessionID)
-      yield* syncScheduleState(sessionID)
-      return items
+      if (items.length > 0 || rows.length > 0) {
+        yield* syncScheduleState(sessionID)
+        return items
+      }
+      const directory = yield* sessionDirectory(sessionID)
+      if (!directory) return items
+      const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
+      return stored.map((schedule) => ({
+        ...schedule,
+        id: schedule.id as ID,
+        sessionID: schedule.sessionID as SessionID,
+      }))
     })
 
     const create: Interface["create"] = Effect.fn("Schedule.create")(function* (input: {
