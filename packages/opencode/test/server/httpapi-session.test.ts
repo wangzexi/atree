@@ -25,7 +25,7 @@ import { Session } from "@/session/session"
 import { Schedule } from "@/session/schedule"
 import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
-import { readSessionScheduleState } from "../../src/atree/schedule-store"
+import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { appendSessionJsonl, writeSessionStore } from "../../src/atree/session-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
@@ -973,6 +973,58 @@ describe("session HttpApi", () => {
           yield* requestJson<Schedule.Info[]>(pathFor(SessionPaths.schedules, { sessionID: created.id }), { headers }),
         ).toEqual([])
         expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, created.id))).toEqual([])
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
+    "clears file-backed schedule state when archiving a file-backed session through the API",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+        const info = {
+          id: sessionID,
+          slug: "file-backed-archive",
+          version: "test",
+          projectID: ctx.project.id,
+          directory: test.directory,
+          path: ".",
+          title: "File backed archive",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any
+
+        yield* Effect.promise(() => writeSessionStore(info))
+        yield* Effect.promise(() =>
+          writeSessionScheduleState(test.directory, sessionID, [
+            {
+              id: "sch_file_archive",
+              sessionID,
+              kind: "once",
+              expression: "",
+              runAt: now + 60_000,
+              message: "clear me",
+              createdAt: now,
+              lastRanAt: null,
+              lastRunStatus: null,
+              nextRun: now + 60_000,
+            },
+          ]),
+        )
+
+        const archived = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID }), {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: 1 } }),
+        })
+
+        expect(archived.time.archived).toBe(1)
+        expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual([])
       }),
     { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )
