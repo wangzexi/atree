@@ -56,7 +56,7 @@ import { reply, TestLLMServer } from "../lib/llm-server"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
-import { appendSessionJsonl, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionJsonlMessages, writeSessionStore } from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
 
 const summary = Layer.succeed(
@@ -571,10 +571,15 @@ it.instance("loop includes file-backed session history when database cache is mi
 
     const result = yield* prompt.loop({ sessionID })
     const payload = JSON.stringify((yield* llm.inputs).at(-1)?.messages)
+    const stored = yield* Effect.promise(() => readSessionJsonlMessages(info))
+    const storedText = JSON.stringify(stored)
 
     expect(result.info.role).toBe("assistant")
     expect(payload).toContain("history from session.jsonl")
     expect(payload).toContain("new prompt")
+    expect(storedText).toContain("history from session.jsonl")
+    expect(storedText).toContain("new prompt")
+    expect(storedText).toContain("world")
   }),
 )
 
