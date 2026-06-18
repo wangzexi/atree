@@ -588,12 +588,14 @@ export const createDirSyncContext = (
       },
       fetch: async (count = 10) => {
         const [store, setStore] = serverSync.child(directory)
-        setStore("limit", (x) => x + count)
-        await client.session.list().then((x) => {
+        const limit = store.limit + count
+        setStore("limit", limit)
+        await client.session.list({ directory, roots: true, limit }).then((x) => {
           const sessions = (x.data ?? [])
             .filter((s) => !!s?.id)
+            .filter((s) => !s.parentID && !s.time?.archived)
             .sort((a, b) => cmp(a.id, b.id))
-            .slice(0, store.limit)
+            .slice(0, limit)
           setStore("session", reconcile(sessions, { key: "id" }))
         })
       },
