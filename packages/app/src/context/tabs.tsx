@@ -4,7 +4,7 @@ import { base64Encode } from "@opencode-ai/core/util/encode"
 import { createStore, produce, reconcile } from "solid-js/store"
 import { Persist, persisted, removePersisted, draftPersistedKeys } from "@/utils/persist"
 import { ServerConnection, useServer } from "./server"
-import { createEffect, startTransition } from "solid-js"
+import { createEffect, createSignal, startTransition } from "solid-js"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { usePlatform } from "./platform"
 import { uuid } from "@/utils/uuid"
@@ -66,6 +66,10 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
     const params = useParams()
     const navigate = useNavigate()
     const location = useLocation()
+    const [directoryGroup, setDirectoryGroup] = createSignal<{
+      server: ServerConnection.Key
+      directory: string
+    }>()
 
     const closing = new Set<string>()
 
@@ -104,6 +108,7 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
         )
       },
       replaceDirectorySessions: (targetServer: ServerConnection.Key, directory: string, sessions: Session[]) => {
+        setDirectoryGroup({ server: targetServer, directory })
         setStore(
           reconcile([
             ...sessions.map((session) => ({
@@ -226,6 +231,6 @@ export const { use: useTabs, provider: TabsProvider } = createSimpleContext({
       },
     }
 
-    return { ...actions, store, ready }
+    return { ...actions, store, ready, directoryGroup }
   },
 })

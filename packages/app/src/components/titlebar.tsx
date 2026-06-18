@@ -12,7 +12,7 @@ import {
   Switch,
   untrack,
 } from "solid-js"
-import { createStore } from "solid-js/store"
+import { createStore, produce } from "solid-js/store"
 import { useLocation, useNavigate, useParams } from "@solidjs/router"
 import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Icon } from "@opencode-ai/ui/icon"
@@ -34,7 +34,11 @@ import { useServerSync } from "@/context/server-sync"
 import { base64Encode } from "@opencode-ai/core/util/encode"
 import { nextSessionMetadata, sessionEmoji, sessionEmojiOptions } from "@/pages/layout/helpers"
 import { makeEventListener } from "@solid-primitives/event-listener"
-import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/components/titlebar-session-events"
+import {
+  notifySessionTabsRemoved,
+  readSessionTabsRemovedDetail,
+  SESSION_TABS_REMOVED_EVENT,
+} from "@/components/titlebar-session-events"
 import { useGlobal } from "@/context/global"
 import { decodeDirectory64, decode64 } from "@/utils/base64"
 import { ServerConnection, useServer } from "@/context/server"
@@ -296,8 +300,10 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                 navigate(href)
               })
             }
-            const closeTab = (tab: Tab | undefined, index: number) => {
+            const closeTab = (tab: Tab | undefined) => {
               if (!tab) return
+              const index = tabsStore.findIndex((item) => tabKey(item) === tabKey(tab))
+              if (index === -1) return
               if (tab.type === "draft") {
                 tabsStoreActions.removeTab(index)
                 return
@@ -328,8 +334,16 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   schedules,
                   updateSession: (payload) => serverCtx.sdk.client.session.update(payload),
                 })
+                const [, setDirectoryStore] = serverCtx.sync.child(directory)
+                setDirectoryStore(
+                  produce((draft) => {
+                    const index = draft.session.findIndex((session) => session.id === tab.sessionId)
+                    if (index !== -1) draft.session.splice(index, 1)
+                  }),
+                )
                 refreshArchivedSessions()
                 tabsStoreActions.removeTab(index)
+                notifySessionTabsRemoved({ directory, sessionIDs: [tab.sessionId] })
               })()
             }
 
@@ -362,12 +376,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               return tab ? tabKey(tab) : undefined
             }
             const isCurrentTab = (tab: Tab) => currentTabKey() === tabKey(tab)
-            const currentTabIndex = () => {
-              const key = currentTabKey()
-              if (!key) return -1
-              return tabsStore.findIndex((tab) => tabKey(tab) === key)
-            }
-
             createEffect(() => {
               const route = layout.route()
               if (!tabs.ready()) return
@@ -394,6 +402,49 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               tabsStoreActions.removeSessions(detail)
             })
 
+            const currentDirectory = createMemo(() => {
+              if (params.dir) return decodeDirectory64(params.dir)
+              const current = currentTab()
+              if (current?.type === "draft") return current.directory
+              if (current?.type === "session") return decode64(current.dirBase64)
+            })
+            const currentServerKey = createMemo(() => {
+              const route = layout.route()
+              if (route.type !== "home") return route.server ?? server.key
+              return currentTab()?.server
+            })
+            const tabDirectory = (tab: Tab) =>
+              tab.type === "draft" ? tab.directory : (decode64(tab.dirBase64) ?? undefined)
+            const visibleTabs = createMemo(() => {
+              const directory = currentDirectory()
+              const currentServer = currentServerKey()
+              if (!directory || !currentServer) return [] as Tab[]
+              const group = tabs.directoryGroup()
+              const groupActive =
+                group?.server === currentServer && pathKey(group.directory) === pathKey(directory)
+              if (groupActive) {
+                return tabsStore.filter(
+                  (tab) => tab.server === currentServer && pathKey(tabDirectory(tab) ?? "") === pathKey(directory),
+                )
+              }
+              const current = currentTab()
+              return current &&
+                current.server === currentServer &&
+                pathKey(tabDirectory(current) ?? "") === pathKey(directory)
+                ? [current]
+                : []
+            })
+            const currentDirectoryDraft = createMemo(() => {
+              const directory = currentDirectory()
+              const currentServer = currentServerKey()
+              if (!directory) return
+              if (!currentServer) return
+              return tabsStore.find(
+                (tab) =>
+                  tab.type === "draft" && tab.server === currentServer && pathKey(tab.directory) === pathKey(directory),
+              )
+            })
+
             const openNewTab = () => navigate(newSessionHref())
 
             command.register("tabs", () => {
@@ -414,10 +465,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   title: language.t("command.tab.close"),
                   keybind: "mod+w",
                   hidden: true,
-                  onSelect: () => {
-                    const index = currentTabIndex()
-                    closeTab(current, index)
-                  },
+                  onSelect: () => closeTab(current),
                 },
                 {
                   id: `tab.prev`,
@@ -426,13 +474,15 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   keybind: `mod+option+ArrowLeft`,
                   hidden: true,
                   onSelect: () => {
-                    let index = currentTabIndex()
+                    const groupTabs = visibleTabs()
+                    const currentKey = currentTabKey()
+                    let index = currentKey ? groupTabs.findIndex((tab) => tabKey(tab) === currentKey) : -1
                     if (index === -1) return
 
                     index -= 1
-                    if (index === -1) index = tabsStore.length - 1
+                    if (index === -1) index = groupTabs.length - 1
 
-                    const next = tabsStore[index]
+                    const next = groupTabs[index]
                     if (next) navigateTab(next)
                   },
                 },
@@ -443,13 +493,15 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   keybind: `mod+option+ArrowRight`,
                   hidden: true,
                   onSelect: () => {
-                    let index = currentTabIndex()
+                    const groupTabs = visibleTabs()
+                    const currentKey = currentTabKey()
+                    let index = currentKey ? groupTabs.findIndex((tab) => tabKey(tab) === currentKey) : -1
                     if (index === -1) return
 
                     index += 1
-                    if (index === tabsStore.length) index = 0
+                    if (index === groupTabs.length) index = 0
 
-                    const next = tabsStore[index]
+                    const next = groupTabs[index]
                     if (next) navigateTab(next)
                   },
                 },
@@ -461,10 +513,10 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     category: "tab",
                     title: "",
                     keybind: `mod+${number}`,
-                    disabled: layout.projects.list().length <= index,
+                    disabled: visibleTabs().length <= index,
                     hidden: true,
                     onSelect: () => {
-                      const tab = tabsStore[index]
+                      const tab = visibleTabs()[index]
                       if (tab) navigateTab(tab)
                     },
                   }
@@ -475,20 +527,6 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const [tabsAreOverflowing, setTabsAreOverflowing] = createSignal(false)
             let tabScrollRef!: HTMLDivElement
 
-            const currentDirectory = createMemo(() => {
-              if (params.dir) return decodeDirectory64(params.dir)
-              const current = currentTab()
-              if (current?.type === "draft") return current.directory
-              if (current?.type === "session") return decode64(current.dirBase64)
-            })
-            const currentDirectoryDraft = createMemo(() => {
-              const directory = currentDirectory()
-              if (!directory) return
-              return tabsStore.find(
-                (tab) =>
-                  tab.type === "draft" && tab.server === server.key && pathKey(tab.directory) === pathKey(directory),
-              )
-            })
             const openCurrentDirectoryDraft = () => {
               const directory = currentDirectory()
               if (!directory) return
@@ -523,7 +561,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   ref={tabScrollRef}
                 >
                   <div class="flex min-w-0 flex-row items-center gap-1.5">
-                    <For each={tabsStore}>
+                    <For each={visibleTabs()}>
                       {(tab, i) => {
                         let ref!: HTMLDivElement
 
@@ -568,7 +606,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
 
                                 ref.scrollIntoView({ behavior: "instant" })
                               }}
-                              onClose={() => closeTab(tab, i())}
+                              onClose={() => closeTab(tab)}
                               active={isCurrentTab(tab)}
                               archiveConfirm={archiveConfirmKey() === tabKey(tab)}
                               forceTruncate={tabsAreOverflowing()}
@@ -579,7 +617,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     </For>
                     <Show when={currentDirectory() && !currentDirectoryDraft()}>
                       <>
-                        <Show when={tabsStore.length > 0}>
+                        <Show when={visibleTabs().length > 0}>
                           <div class="w-[1.5px] h-3 shrink-0 rounded-full bg-[var(--v2-background-bg-layer-02)]" />
                         </Show>
                         <DraftTabItem

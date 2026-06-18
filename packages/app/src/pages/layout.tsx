@@ -19,7 +19,7 @@ import { useLayout, LocalProject } from "@/context/layout"
 import { useServerSync } from "@/context/server-sync"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { decodeDirectory64, decode64 } from "@/utils/base64"
+import { decodeDirectory64 } from "@/utils/base64"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -68,6 +68,7 @@ import { useCommand, type CommandOption } from "@/context/command"
 import { ConstrainDragXAxis, getDraggableId } from "@/utils/solid-dnd"
 import { HelpButton } from "@/components/help-button"
 import { SquarePenIcon, Titlebar, type TitlebarUpdate } from "@/components/titlebar"
+import { readSessionTabsRemovedDetail, SESSION_TABS_REMOVED_EVENT } from "@/components/titlebar-session-events"
 import { useDirectoryPicker } from "@/components/directory-picker"
 import { ServerConnection, useServer } from "@/context/server"
 import { useLanguage, type Locale } from "@/context/language"
@@ -2711,22 +2712,21 @@ export default function Layout(props: ParentProps) {
     })
     onCleanup(stopScheduleEvents)
 
-    createEffect(() => {
-      const directory = activeDirectory()
-      if (!directory) return
-      if (!directoryState(directory)?.loaded) return
-      const sessions = directorySessions(directory, Date.now())
-      const sessionIDs = sessions.map((session) => session.id).join("\n")
-      const tabIDs = sessionTabs.store
-        .flatMap((tab) => {
-          if (tab.type !== "session") return []
-          if (tab.server !== server.key) return []
-          if (pathKey(decode64(tab.dirBase64) ?? "") !== pathKey(directory)) return []
-          return [tab.sessionId]
-        })
-        .join("\n")
-      if (sessionIDs === tabIDs) return
-      sessionTabs.replaceDirectorySessions(server.key, directory, sessions)
+    makeEventListener(window, SESSION_TABS_REMOVED_EVENT, (event) => {
+      const detail = readSessionTabsRemovedDetail(event)
+      if (!detail) return
+      const key = directoryKey(detail.directory)
+      const removed = new Set(detail.sessionIDs)
+      setTree("directory", key, (prev) => ({
+        ...prev,
+        sessions: (prev?.sessions ?? []).filter((session) => !removed.has(session.id)),
+      }))
+      setTree(
+        "schedule",
+        produce((draft) => {
+          for (const id of removed) delete draft[id]
+        }),
+      )
     })
 
     createEffect(() => {
