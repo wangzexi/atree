@@ -14,7 +14,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
-import { ensureSessionStore } from "@/atree/session-store"
+import { ensureSessionStore, writeSessionStore } from "@/atree/session-store"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -789,6 +789,7 @@ export const layer: Layer.Layer<
           revert: info.revert === null ? undefined : (info.revert ?? current.revert),
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
+        yield* Effect.promise(() => writeSessionStore(next))
         yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
       })
 
