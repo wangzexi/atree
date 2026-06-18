@@ -2558,6 +2558,7 @@ export default function Layout(props: ParentProps) {
         }),
       )
     }
+    const directoryReadErrorAt = new Map<string, number>()
     const loadDirectory = async (
       root: string,
       directory: string,
@@ -2600,10 +2601,25 @@ export default function Layout(props: ParentProps) {
         setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
       } catch (error) {
         setTree("directory", key, (prev) => ({ ...prev, loading: false }))
+        const message = errorMessage(error, directory)
+
+        const dedupeKey = `${pathKey(root)}|${pathKey(directory)}`
+        const now = Date.now()
+        const last = directoryReadErrorAt.get(dedupeKey) ?? 0
+        if (now - last < 250) {
+          return
+        }
+        directoryReadErrorAt.set(dedupeKey, now)
+
+        if (pathKey(directory) === pathKey(root)) {
+          layout.projects.close(root)
+          navigateWithSidebarReset("/")
+        }
+
         showToast({
           variant: "error",
           title: "目录读取失败",
-          description: errorMessage(error, directory),
+          description: message,
         })
       }
     }
