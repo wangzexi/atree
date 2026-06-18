@@ -26,7 +26,7 @@ import { Schedule } from "@/session/schedule"
 import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from "../../src/session/schema"
 import { MessageV2 } from "../../src/session/message-v2"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
-import { appendSessionJsonl, writeSessionStore } from "../../src/atree/session-store"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -1139,6 +1139,46 @@ describe("session HttpApi", () => {
         })
         expect(response.status).toBe(200)
         expect((yield* json<Session.Info>(response)).time.archived).toBe(-1)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "restores an archived file-backed session through the API",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "file-backed-restore",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "File backed restore",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: now, updated: now, archived: now },
+          } as any),
+        )
+
+        const restored = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID }), {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: null } }),
+        })
+        const stored = yield* Effect.promise(() => readSessionStore(test.directory, sessionID))
+        const listed = yield* requestJson<Session.Info[]>(`${SessionPaths.list}?roots=true`, { headers })
+
+        expect(restored.time.archived).toBeUndefined()
+        expect(stored?.time.archived).toBeUndefined()
+        expect(listed.map((item) => item.id)).toContain(sessionID)
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
