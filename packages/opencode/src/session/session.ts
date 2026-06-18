@@ -14,7 +14,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
-import { ensureSessionStore, writeSessionStore } from "@/atree/session-store"
+import { ensureSessionStore, readSessionStores, writeSessionStore } from "@/atree/session-store"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -587,13 +587,34 @@ export const layer: Layer.Layer<
       return fromRow(row)
     })
 
+    const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (
+      items: Info[],
+      input?: ListInput,
+    ) {
+      if (!input?.directory) return items
+      const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
+      const byID = new Map<string, Info>()
+      for (const item of items) byID.set(item.id, item)
+      for (const item of fileSessions) {
+        if (item.time.archived !== undefined) continue
+        if (input.roots && item.parentID) continue
+        if (input.start && item.time.updated < input.start) continue
+        if (input.search && !item.title.includes(input.search)) continue
+        byID.set(item.id, item)
+      }
+      return [...byID.values()]
+        .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+        .slice(0, input.limit ?? 100)
+    })
+
     const list = Effect.fn("Session.list")(function* (input?: ListInput) {
       const ctx = yield* InstanceState.context
-      return yield* listByProject(db, {
+      const items = yield* listByProject(db, {
         projectID: ctx.project.id,
         experimentalWorkspaces: flags.experimentalWorkspaces,
         ...input,
       })
+      return yield* mergeAtreeDirectoryIndex(items, input)
     })
 
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {
