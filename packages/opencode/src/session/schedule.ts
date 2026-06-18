@@ -182,6 +182,21 @@ function stopTimer(timer: Timer) {
   else clearTimeout(timer.timeout)
 }
 
+function canRestoreStoredSchedule(schedule: {
+  kind: Kind
+  expression: string
+  runAt: number | null
+  lastRanAt: number | null
+}) {
+  if (schedule.kind === "once") return typeof schedule.runAt === "number" && schedule.lastRanAt === null
+  try {
+    new Cron(schedule.expression, { paused: true })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -435,6 +450,49 @@ export const layer = Layer.effect(
     })
 
     const serviceBridge = yield* EffectBridge.make()
+    const restoreStoredSchedules = Effect.fn("Schedule.restoreStoredSchedules")(function* (sessionID: SessionID) {
+      const directory = yield* sessionDirectory(sessionID)
+      if (!directory) return [] as Info[]
+      const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
+      if (stored.length === 0) return [] as Info[]
+
+      const existing = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      const existingIDs = new Set(existing.map((row) => row.id))
+      const sorted = [...stored].sort((a, b) => (a.nextRun ?? Number.MAX_SAFE_INTEGER) - (b.nextRun ?? Number.MAX_SAFE_INTEGER))
+
+      for (const schedule of sorted.slice(0, MAX_PER_SESSION)) {
+        if (existingIDs.has(schedule.id)) continue
+        if (!canRestoreStoredSchedule(schedule)) continue
+        const id = schedule.id as ID
+        yield* db
+          .transaction((tx) =>
+            tx
+              .insert(ScheduleTable)
+              .values({
+                id,
+                session_id: sessionID,
+                kind: schedule.kind,
+                expression: schedule.expression,
+                run_at: schedule.runAt,
+                message: schedule.message,
+                created_at: schedule.createdAt,
+              })
+              .run(),
+          )
+          .pipe(Effect.orDie)
+        startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge)
+      }
+
+      const schedules = yield* activeSchedules(sessionID)
+      if (schedules.length > 0) yield* syncScheduleState(sessionID)
+      return schedules
+    })
+
     const hydrated = yield* db.select().from(ScheduleTable).all().pipe(Effect.orDie)
     for (const row of hydrated) {
       const id = row.id as ID
@@ -447,6 +505,10 @@ export const layer = Layer.effect(
         }
       }
       startTimer(id, row.session_id as SessionID, kind, row.expression, row.run_at ?? null, serviceBridge)
+    }
+    const sessions = yield* db.select({ id: SessionTable.id }).from(SessionTable).all().pipe(Effect.orDie)
+    for (const session of sessions) {
+      yield* restoreStoredSchedules(session.id as SessionID)
     }
 
     const list: Interface["list"] = Effect.fn("Schedule.list")(function* (sessionID: SessionID) {
@@ -478,8 +540,10 @@ export const layer = Layer.effect(
       }
       const directory = yield* sessionDirectory(sessionID)
       if (!directory) return items
+      const restored = yield* restoreStoredSchedules(sessionID)
+      if (restored.length > 0) return restored
       const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
-      return stored.map((schedule) => ({
+      return stored.filter(canRestoreStoredSchedule).map((schedule) => ({
         ...schedule,
         id: schedule.id as ID,
         sessionID: schedule.sessionID as SessionID,
