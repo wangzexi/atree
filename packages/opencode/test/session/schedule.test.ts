@@ -263,6 +263,7 @@ it.instance("runs a one-time scheduled task once", () =>
     ])
 
     expect(yield* schedules.list(session.id)).toEqual([])
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
 
@@ -302,6 +303,7 @@ it.instance("clears a one-time scheduled task when the session is busy", () =>
     yield* schedules.tick(created.id)
 
     expect(yield* schedules.list(session.id)).toEqual([])
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
   }),
