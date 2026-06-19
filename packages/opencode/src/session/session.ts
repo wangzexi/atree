@@ -763,13 +763,18 @@ export const layer: Layer.Layer<
         byID.set(item.id, item)
       }
 
+      const ctx = yield* InstanceState.context.pipe(
+        Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
+      )
       const parent = yield* get(parentID).pipe(Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)))
       const directory =
         parent?.directory ??
+        ctx?.directory ??
         (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
       if (directory) {
         const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
-        for (const item of fileSessions) {
+        for (const fileSession of fileSessions) {
+          const item = localizeFileSession(fileSession, ctx)
           byID.delete(item.id)
           if (item.parentID !== parentID) continue
           if (item.time.archived !== undefined) continue

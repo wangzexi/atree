@@ -307,6 +307,27 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("localizes copied file-backed child sessions to the target directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* tmpdirScoped({ git: true })
+      const target = yield* tmpdirScoped({ git: true })
+
+      const parent = yield* provideInstance(source)(session.create({ title: "copied-parent" }))
+      const child = yield* provideInstance(source)(
+        session.create({ parentID: parent.id, title: "copied-child", metadata: { icon: "🧭" } }),
+      )
+      yield* Effect.promise(() => fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+      const targetCtx = yield* provideInstance(target)(InstanceState.context)
+
+      const children = yield* provideInstance(target)(session.children(parent.id))
+      const copied = children.find((item) => item.id === child.id)
+      expect(copied?.directory).toBe(target)
+      expect(copied?.projectID).toBe(targetCtx.project.id)
+      expect(copied?.metadata).toEqual({ icon: "🧭" })
+    }),
+  )
+
   it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
