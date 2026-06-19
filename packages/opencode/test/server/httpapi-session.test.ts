@@ -681,33 +681,70 @@ describe("session HttpApi", () => {
         const headers = { "x-opencode-directory": test.directory }
         yield* Effect.promise(() => mkdir(directory, { recursive: true }))
         yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+        const info = {
+          id: sessionID,
+          slug: "v2-file-backed",
+          version: "test",
+          projectID: ctx.project.id,
+          directory,
+          path: "inbox",
+          title: "V2 file backed",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 10, updated: 20 },
+        } as any
+        yield* Effect.promise(() => writeSessionStore(info))
         yield* Effect.promise(() =>
-          writeSessionStore({
-            id: sessionID,
-            slug: "v2-file-backed",
-            version: "test",
-            projectID: ctx.project.id,
-            directory,
-            path: "inbox",
-            title: "V2 file backed",
-            cost: 0,
-            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-            time: { created: 10, updated: 20 },
-          } as any),
+          appendSessionJsonl(
+            info,
+            {
+              type: "message.updated",
+              message: {
+                id: "msg_v2_file_backed",
+                sessionID,
+                role: "user",
+                agent: "build",
+                model: { providerID: ProviderV2.ID.make("test"), modelID: ModelV2.ID.make("test") },
+                tools: {},
+                mode: "",
+                time: { created: 30 },
+              },
+            },
+          ),
+        )
+        yield* Effect.promise(() =>
+          appendSessionJsonl(
+            info,
+            {
+              type: "message.part.updated",
+              part: {
+                id: "prt_v2_file_backed",
+                sessionID,
+                messageID: "msg_v2_file_backed",
+                type: "text",
+                text: "hello from v2 file-backed session",
+              },
+            },
+          ),
         )
 
         const loaded = yield* requestJson<{ data: { id: string; title: string; location: { directory: string } } }>(
           `/api/session/${sessionID}`,
           { headers },
         )
-        const messages = yield* requestJson<{ data: unknown[] }>(`/api/session/${sessionID}/message`, { headers })
+        const messages = yield* requestJson<{ data: Array<{ id: string; type: string; text?: string }> }>(
+          `/api/session/${sessionID}/message`,
+          { headers },
+        )
 
         expect(loaded.data).toMatchObject({
           id: sessionID,
           title: "V2 file backed",
           location: { directory },
         })
-        expect(messages.data).toEqual([])
+        expect(messages.data).toMatchObject([
+          { id: "msg_v2_file_backed", type: "user", text: "hello from v2 file-backed session" },
+        ])
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

@@ -29,7 +29,7 @@ import { logFailure } from "./session/logging"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
-import { readSessionStores } from "./atree/session-store"
+import { readSessionJsonlMessages, readSessionStores } from "./atree/session-store"
 
 // get project -> project.locations
 //
@@ -220,6 +220,28 @@ export const layer = Layer.effect(
       return true
     }
 
+    function pageFileMessages(
+      messages: SessionMessage.Message[],
+      input: {
+        limit?: number
+        order?: "asc" | "desc"
+        cursor?: { id: SessionMessage.ID; direction: "previous" | "next" }
+      },
+    ) {
+      const requestedOrder = input.order ?? "desc"
+      const direction = input.cursor?.direction ?? "next"
+      const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
+      const sorted = messages.toSorted((a, b) => {
+        const diff =
+          DateTime.toEpochMillis(a.time.created) - DateTime.toEpochMillis(b.time.created) || a.id.localeCompare(b.id)
+        return order === "asc" ? diff : -diff
+      })
+      const anchor = input.cursor ? sorted.findIndex((message) => message.id === input.cursor!.id) : -1
+      const afterAnchor = anchor >= 0 ? sorted.slice(anchor + 1) : sorted
+      const limited = input.limit === undefined ? afterAnchor : afterAnchor.slice(0, input.limit)
+      return direction === "previous" ? limited.toReversed() : limited
+    }
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
@@ -335,7 +357,11 @@ export const layer = Layer.effect(
         return direction === "previous" ? limited.toReversed() : limited
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
-        yield* result.get(input.sessionID)
+        const session = yield* result.get(input.sessionID)
+        const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+        )
+        if (fileMessages.length > 0) return pageFileMessages(fileMessages, input)
         const direction = input.cursor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
         const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
@@ -369,11 +395,25 @@ export const layer = Layer.effect(
         return yield* Effect.forEach(direction === "previous" ? rows.toReversed() : rows, decode)
       }),
       message: Effect.fn("V2Session.message")(function* (input) {
+        const session = yield* result
+          .get(input.sessionID)
+          .pipe(Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined)))
+        if (session) {
+          const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
+            Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+          )
+          const message = fileMessages.find((item) => item.id === input.messageID)
+          if (message) return message
+        }
         const stored = yield* store.message(input.messageID)
         return stored?.sessionID === input.sessionID ? stored.message : undefined
       }),
       context: Effect.fn("V2Session.context")(function* (sessionID) {
-        yield* result.get(sessionID)
+        const session = yield* result.get(sessionID)
+        const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+        )
+        if (fileMessages.length > 0) return fileMessages
         return yield* store.context(sessionID)
       }),
       events: (input) =>

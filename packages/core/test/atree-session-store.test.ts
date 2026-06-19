@@ -67,6 +67,13 @@ async function writeAtreeSession(input: {
   )
 }
 
+async function appendSessionJsonl(directory: string, sessionID: string, entries: Record<string, unknown>[]) {
+  await writeFile(
+    path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"),
+    entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+  )
+}
+
 describe("atree file-backed SessionV2 discovery", () => {
   it.effect("loads a file-backed session from the persisted atree root when SQLite has no row", () =>
     Effect.gen(function* () {
@@ -137,6 +144,58 @@ describe("atree file-backed SessionV2 discovery", () => {
         SessionV2.ID.make("ses_core_list_a"),
       ])
       expect(listed.map((session) => session.title)).toEqual(["Core list B", "Core list A"])
+    }),
+  )
+
+  it.effect("reads file-backed session.jsonl messages through v2 APIs", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_messages",
+          title: "Core messages",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_messages", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_user",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_user",
+              messageID: "msg_core_user",
+              type: "text",
+              text: "hello from session.jsonl",
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_messages")
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+      const context = yield* sessions.context(sessionID)
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({ id: "msg_core_user", type: "user", text: "hello from session.jsonl" })
+      expect(context.map((message) => message.id)).toEqual([messages[0]!.id])
     }),
   )
 })

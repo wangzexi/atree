@@ -8,6 +8,7 @@ import { ModelV2 } from "../model"
 import { ProjectV2 } from "../project"
 import { ProviderV2 } from "../provider"
 import { AbsolutePath, RelativePath } from "../schema"
+import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { WorkspaceV2 } from "../workspace"
 
@@ -155,4 +156,120 @@ export async function findSessionStore(rootDirectory: string, sessionID: Session
   }
 
   return walk(root, 0)
+}
+
+type V1Message = {
+  id: string
+  role: "user" | "assistant"
+  agent?: string
+  model?: { providerID?: string; modelID?: string; id?: string; variant?: string }
+  time?: { created?: number; completed?: number }
+}
+
+type V1Part = {
+  id: string
+  messageID: string
+  type: string
+  text?: string
+}
+
+function sessionRoot(info: SessionSchema.Info) {
+  return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
+}
+
+function messageCreated(message: V1Message, fallback: number) {
+  return typeof message.time?.created === "number" ? message.time.created : fallback
+}
+
+function textParts(parts: V1Part[]) {
+  const result: string[] = []
+  for (const part of parts) {
+    if (part.type === "text" && typeof part.text === "string") result.push(part.text)
+  }
+  return result
+}
+
+function toV2Message(message: V1Message, parts: V1Part[]): SessionMessage.Message | undefined {
+  const id = SessionMessage.ID.make(message.id)
+  const created = DateTime.makeUnsafe(messageCreated(message, 0))
+  if (message.role === "user") {
+    return new SessionMessage.User({
+      id,
+      type: "user",
+      text: textParts(parts).join("\n"),
+      time: { created },
+    })
+  }
+  if (message.role === "assistant") {
+    return new SessionMessage.Assistant({
+      id,
+      type: "assistant",
+      agent: message.agent ?? "build",
+      model: {
+        providerID: ProviderV2.ID.make(message.model?.providerID ?? "unknown"),
+        id: ModelV2.ID.make(message.model?.modelID ?? message.model?.id ?? "unknown"),
+        variant: ModelV2.VariantID.make(message.model?.variant ?? "default"),
+      },
+      content: textParts(parts).map((text, index) => ({
+        type: "text" as const,
+        id: `${id}-text-${index}`,
+        text,
+      })),
+      time: {
+        created,
+        completed:
+          typeof message.time?.completed === "number" ? DateTime.makeUnsafe(message.time.completed) : undefined,
+      },
+    })
+  }
+}
+
+export async function readSessionJsonlMessages(info: SessionSchema.Info) {
+  const target = path.join(sessionRoot(info), "session.jsonl")
+  const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  const messages = new Map<string, { info: V1Message; parts: V1Part[] }>()
+  const removed = new Set<string>()
+  let index = 0
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    index++
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(trimmed) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (entry.type === "message.updated" && entry.message && typeof entry.message === "object") {
+      const message = entry.message as V1Message
+      if (typeof message.id !== "string" || (message.role !== "user" && message.role !== "assistant")) continue
+      const existing = messages.get(message.id)
+      messages.set(message.id, { info: message, parts: existing?.parts ?? [] })
+      removed.delete(message.id)
+    }
+    if (entry.type === "message.part.updated" && entry.part && typeof entry.part === "object") {
+      const part = entry.part as V1Part
+      if (typeof part.id !== "string" || typeof part.messageID !== "string") continue
+      const message = messages.get(part.messageID)
+      if (!message) continue
+      const next = message.parts.filter((item) => item.id !== part.id)
+      next.push(part)
+      messages.set(part.messageID, { info: message.info, parts: next })
+    }
+    if (entry.type === "message.removed" && typeof entry.messageID === "string") {
+      removed.add(entry.messageID)
+      messages.delete(entry.messageID)
+    }
+  }
+
+  return [...messages.values()]
+    .filter((message) => !removed.has(message.info.id))
+    .sort((a, b) => messageCreated(a.info, index) - messageCreated(b.info, index) || a.info.id.localeCompare(b.info.id))
+    .flatMap((message) => {
+      const converted = toV2Message(message.info, message.parts)
+      return converted ? [converted] : []
+    })
 }
