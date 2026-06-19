@@ -117,7 +117,13 @@ export interface Interface {
   /** Manually fire the tick for a schedule (publishes Triggered). */
   readonly tick: (scheduleID: ID) => Effect.Effect<void>
   /** Record that a fire was processed by the runner. */
-  readonly recordRun: (scheduleID: ID, sessionID: SessionID, status: RunStatus, ranAt: number) => Effect.Effect<void>
+  readonly recordRun: (
+    scheduleID: ID,
+    sessionID: SessionID,
+    status: RunStatus,
+    ranAt: number,
+    options?: { directory?: string },
+  ) => Effect.Effect<void>
   /** Remove every scheduled message for a session. */
   readonly clear: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void>
   /** Restore scheduled messages for every file-backed session in a directory. */
@@ -180,13 +186,14 @@ function validateRunAt(runAt: number | undefined): Effect.Effect<number, Invalid
 }
 
 type Timer =
-  | { kind: "recurring"; cron: Cron; sessionID: SessionID; bridge: EffectBridge.Shape }
+  | { kind: "recurring"; cron: Cron; sessionID: SessionID; bridge: EffectBridge.Shape; directory?: string }
   | {
       kind: "once"
       timeout: ReturnType<typeof setTimeout>
       sessionID: SessionID
       runAt: number
       bridge: EffectBridge.Shape
+      directory?: string
     }
 
 function stopTimer(timer: Timer) {
@@ -266,7 +273,7 @@ export const layer = Layer.effect(
     yield* Effect.addFinalizer(() => unsubscribeUpdated)
 
     const recordRun: Interface["recordRun"] = Effect.fn("Schedule.recordRun")(
-      function* (scheduleID, sessionID, runStatus, ranAt) {
+      function* (scheduleID, sessionID, runStatus, ranAt, options) {
         yield* db
           .transaction((tx) =>
             tx
@@ -281,17 +288,21 @@ export const layer = Layer.effect(
           )
           .pipe(Effect.orDie)
         yield* events.publish(Event.Ran, { scheduleID, sessionID, status: runStatus, ranAt })
-        yield* syncScheduleState(sessionID)
+        yield* syncScheduleState(sessionID, options?.directory)
       },
     )
 
-    const completeOnce = Effect.fn("Schedule.completeOnce")(function* (scheduleID: ID, sessionID: SessionID) {
+    const completeOnce = Effect.fn("Schedule.completeOnce")(function* (
+      scheduleID: ID,
+      sessionID: SessionID,
+      directoryHint?: string,
+    ) {
       const timer = timers.get(scheduleID)
       if (timer) stopTimer(timer)
       timers.delete(scheduleID)
       yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
       yield* events.publish(Event.Deleted, { scheduleID, sessionID })
-      yield* syncScheduleState(sessionID)
+      yield* syncScheduleState(sessionID, directoryHint)
     })
 
     const getLastRun = Effect.fn("Schedule.getLastRun")(function* (scheduleID: ID) {
@@ -428,8 +439,9 @@ export const layer = Layer.effect(
         return row.directory
       }
 
-      const directory =
-        yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)))
+      const directory = yield* InstanceState.directory.pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
@@ -464,8 +476,9 @@ export const layer = Layer.effect(
         return { directory: row.directory, archived: row.archived !== null }
       }
 
-      const directory =
-        yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)))
+      const directory = yield* InstanceState.directory.pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
@@ -526,6 +539,7 @@ export const layer = Layer.effect(
 
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
       sessionID: SessionID,
+      directoryHint?: string,
     ) {
       const rows = yield* db
         .select({
@@ -541,7 +555,7 @@ export const layer = Layer.effect(
         if ((row.kind ?? "recurring") !== "once") continue
         const lastRun = yield* getLastRun(row.id as ID)
         if (lastRun) {
-          yield* completeOnce(row.id as ID, row.session_id as SessionID)
+          yield* completeOnce(row.id as ID, row.session_id as SessionID, directoryHint)
         }
       }
     })
@@ -557,6 +571,16 @@ export const layer = Layer.effect(
       const sessionID = row.session_id as SessionID
       const kind = (row.kind ?? "recurring") as Kind
       const message = row.message
+      const timerDirectory = timers.get(scheduleID)?.directory
+      const archiveState = yield* sessionArchiveState(sessionID, timerDirectory)
+      const directoryHint = archiveState?.directory ?? timerDirectory
+      if (archiveState?.archived) {
+        yield* recordRun(scheduleID, sessionID, "skipped", Date.now(), { directory: directoryHint })
+        if (kind === "once") {
+          yield* completeOnce(scheduleID, sessionID, directoryHint)
+        }
+        return
+      }
       yield* events.publish(Event.Triggered, {
         scheduleID,
         sessionID,
@@ -566,9 +590,9 @@ export const layer = Layer.effect(
       const sessionStatus = yield* status.get(sessionID)
       const ranAt = Date.now()
       if (sessionStatus.type === "busy") {
-        yield* recordRun(scheduleID, sessionID, "skipped", ranAt)
+        yield* recordRun(scheduleID, sessionID, "skipped", ranAt, { directory: directoryHint })
         if (kind === "once") {
-          yield* completeOnce(scheduleID, sessionID)
+          yield* completeOnce(scheduleID, sessionID, directoryHint)
         }
         return
       }
@@ -595,9 +619,9 @@ export const layer = Layer.effect(
             ),
           ),
         )
-      yield* recordRun(scheduleID, sessionID, "ran", ranAt)
+      yield* recordRun(scheduleID, sessionID, "ran", ranAt, { directory: directoryHint })
       if (kind === "once") {
-        yield* completeOnce(scheduleID, sessionID)
+        yield* completeOnce(scheduleID, sessionID, directoryHint)
       }
     })
 
@@ -608,6 +632,7 @@ export const layer = Layer.effect(
       expression: string,
       runAt: number | null,
       bridge: EffectBridge.Shape,
+      directory?: string,
     ) {
       const existing = timers.get(scheduleID)
       if (existing) stopTimer(existing)
@@ -624,7 +649,7 @@ export const layer = Layer.effect(
           },
           Math.max(0, runAt - Date.now()),
         )
-        timers.set(scheduleID, { kind, timeout, sessionID, runAt, bridge })
+        timers.set(scheduleID, { kind, timeout, sessionID, runAt, bridge, directory })
         return
       }
       const cron = new Cron(expression, {}, () => {
@@ -635,7 +660,7 @@ export const layer = Layer.effect(
           }),
         )
       })
-      timers.set(scheduleID, { kind, cron, sessionID, bridge })
+      timers.set(scheduleID, { kind, cron, sessionID, bridge, directory })
     }
 
     const tick: Interface["tick"] = Effect.fn("Schedule.tick")(function* (scheduleID) {
@@ -683,7 +708,9 @@ export const layer = Layer.effect(
         .all()
         .pipe(Effect.orDie)
       const existingIDs = new Set(existing.map((row) => row.id))
-      const sorted = [...stored].sort((a, b) => (a.nextRun ?? Number.MAX_SAFE_INTEGER) - (b.nextRun ?? Number.MAX_SAFE_INTEGER))
+      const sorted = [...stored].sort(
+        (a, b) => (a.nextRun ?? Number.MAX_SAFE_INTEGER) - (b.nextRun ?? Number.MAX_SAFE_INTEGER),
+      )
 
       for (const schedule of sorted.slice(0, MAX_PER_SESSION)) {
         if (!canRestoreStoredSchedule(schedule)) continue
@@ -705,7 +732,7 @@ export const layer = Layer.effect(
                 .run(),
             )
             .pipe(Effect.orDie)
-          startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge)
+          startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge, directory)
         }
         yield* restoreStoredRun(schedule)
       }
@@ -730,28 +757,30 @@ export const layer = Layer.effect(
       if (kind === "once") {
         const lastRun = yield* getLastRun(id)
         if (lastRun) {
-          yield* completeOnce(id, sessionID)
+          yield* completeOnce(id, sessionID, archiveState?.directory)
           continue
         }
       }
-      startTimer(id, sessionID, kind, row.expression, row.run_at ?? null, serviceBridge)
+      startTimer(id, sessionID, kind, row.expression, row.run_at ?? null, serviceBridge, archiveState?.directory)
     }
     const sessions = yield* db.select({ id: SessionTable.id }).from(SessionTable).all().pipe(Effect.orDie)
     for (const session of sessions) {
       yield* restoreStoredSchedules(session.id as SessionID)
     }
 
-    const restoreDirectory: Interface["restoreDirectory"] = Effect.fn("Schedule.restoreDirectory")(function* (directory) {
-      const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
-      yield* Effect.forEach(
-        fileSessions,
-        (session) =>
-          restoreStoredSchedules(session.id, directory).pipe(
-            Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
-          ),
-        { concurrency: "unbounded", discard: true },
-      )
-    })
+    const restoreDirectory: Interface["restoreDirectory"] = Effect.fn("Schedule.restoreDirectory")(
+      function* (directory) {
+        const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
+        yield* Effect.forEach(
+          fileSessions,
+          (session) =>
+            restoreStoredSchedules(session.id, directory).pipe(
+              Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
+            ),
+          { concurrency: "unbounded", discard: true },
+        )
+      },
+    )
 
     const list: Interface["list"] = Effect.fn("Schedule.list")(function* (
       sessionID: SessionID,
@@ -783,7 +812,7 @@ export const layer = Layer.effect(
         const kind = (row.kind ?? "recurring") as Kind
         const lastRun = yield* getLastRun(row.id as ID)
         if (kind === "once" && lastRun) {
-          yield* completeOnce(row.id as ID, row.session_id as SessionID)
+          yield* completeOnce(row.id as ID, row.session_id as SessionID, directoryHint)
         }
       }
       const items = yield* activeSchedules(sessionID)
@@ -821,7 +850,7 @@ export const layer = Layer.effect(
         yield* validateExpression(expression)
       }
       yield* restoreStoredSchedules(input.sessionID, input.directory)
-      yield* cleanupCompletedOnceForSession(input.sessionID)
+      yield* cleanupCompletedOnceForSession(input.sessionID, input.directory)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })
         .from(ScheduleTable)
@@ -831,6 +860,7 @@ export const layer = Layer.effect(
       if ((count?.c ?? 0) >= MAX_PER_SESSION) {
         return yield* Effect.fail(new LimitExceeded({ sessionID: input.sessionID, limit: MAX_PER_SESSION }))
       }
+      const directory = yield* sessionDirectory(input.sessionID, input.directory)
       const id = Identifier.create("sch", "ascending") as ID
       const createdAt = Date.now()
       yield* db
@@ -850,7 +880,7 @@ export const layer = Layer.effect(
         )
         .pipe(Effect.orDie)
       const bridge = yield* EffectBridge.make()
-      startTimer(id, input.sessionID, kind, expression || "", runAt, bridge)
+      startTimer(id, input.sessionID, kind, expression || "", runAt, bridge, directory)
       yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID })
       yield* syncScheduleState(input.sessionID, input.directory)
       const createdTimer = timers.get(id)

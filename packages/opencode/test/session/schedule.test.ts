@@ -1,4 +1,7 @@
 import { expect } from "bun:test"
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { sql } from "drizzle-orm"
@@ -10,6 +13,7 @@ import { Schedule } from "../../src/session/schedule"
 import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { readSessionScheduleState } from "../../src/atree/schedule-store"
+import { writeSessionStore } from "../../src/atree/session-store"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 let promptQueue: Queue.Queue<SessionPrompt.PromptInput> | undefined
@@ -200,7 +204,9 @@ it.instance("clears scheduled tasks and directory schedule state for a session",
       expression: "* * * * *",
       message: "clear me",
     })
-    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(1)
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(
+      1,
+    )
 
     yield* schedules.clear(session.id)
     expect(yield* schedules.list(session.id)).toEqual([])
@@ -223,7 +229,9 @@ it.instance("does not list scheduled tasks for archived sessions", () =>
       expression: "* * * * *",
       message: "do not list after archive",
     })
-    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(1)
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(
+      1,
+    )
 
     yield* db.run(sql`UPDATE session SET time_archived = ${Date.now()} WHERE id = ${session.id}`).pipe(Effect.orDie)
 
@@ -312,6 +320,59 @@ it.instance("clears a one-time scheduled task when the session is busy", () =>
     expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
+  }),
+)
+
+it.instance("clears a one-time scheduled task in the file-backed directory that created its timer", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    const queue = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+    promptQueue = queue
+    const { db } = yield* Database.Service
+    yield* initScheduleTables
+
+    const target = yield* Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-target-")))
+    const stale = yield* Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-stale-")))
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(() => fs.rm(target, { recursive: true, force: true })).pipe(Effect.ignore),
+    )
+    yield* Effect.addFinalizer(() =>
+      Effect.promise(() => fs.rm(stale, { recursive: true, force: true })).pipe(Effect.ignore),
+    )
+
+    const now = Date.now()
+    const sessionID = SessionID.descending()
+    yield* Effect.promise(() =>
+      writeSessionStore({
+        id: sessionID,
+        slug: "file-backed-once",
+        version: "test",
+        projectID: "proj_file_backed_once",
+        directory: target,
+        path: ".",
+        title: "File backed once",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: now, updated: now },
+      } as any),
+    )
+
+    const created = yield* schedules.create({
+      sessionID,
+      directory: target,
+      kind: "once",
+      runAt: now + 60_000,
+      message: "run in target directory",
+    })
+    expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toHaveLength(1)
+
+    yield* db.run(sql`UPDATE session SET directory = ${stale} WHERE id = ${sessionID}`).pipe(Effect.orDie)
+
+    yield* schedules.tick(created.id)
+    const prompt = yield* takePrompt(queue)
+    expect(prompt.sessionID).toBe(sessionID)
+    expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
+    expect(yield* Effect.promise(() => readSessionScheduleState(stale, sessionID))).toEqual([])
   }),
 )
 
