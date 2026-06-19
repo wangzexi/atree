@@ -4,393 +4,275 @@
 
 MVP 只验证一个闭环：
 
-> 用户选择根目录，系统展示其中被 atree 管理的目录；用户在目录里创建和继续会话；会话保存为本地 JSONL；会话可以设置 schedule，并按周期在同一会话里继续执行。
+> 用户选择一个根目录，系统展示根目录里的目录树；用户在某个目录里创建和继续会话；会话记录、附件、归档状态和自动化消息逐步回到该目录自己的 `.agents/atree/` 下；会话可以设置一次性或周期性自动化消息，并在同一会话里继续执行。
 
-不要在 MVP 中实现完整知识库、文件预览、复杂 Agent 平台或多平台自动发布。
+不要在 MVP 中实现完整知识库、复杂 Agent 平台、多平台发布、同步系统或权限沙箱。
 
 ## 当前实现状态
 
-已实现一个可运行纵切：
+当前 `main` 是基于 OpenCode 的 spike，不是从零自研后端。
 
-- Bun HTTP API。
-- React + Vite 网页 UI。
-- 左侧只展示 `.agents/atree.yaml` 目录树。
-- 右侧显示会话标题、会话 icon、聊天流和输入框。
-- 初始化 atree 目录。
-- 创建会话并写入 `.agents/atree.yaml`。
-- 创建 `.agents/sessions/<session-id>.jsonl`。
-- 通过 Pi Coding Agent TypeScript SDK 发送消息。
-- SSE 转发 Pi 原始事件。
-- 读取 Pi JSONL 并渲染用户/助手文本消息。
-- 修改会话 title/icon/schedule。
-- CRON schedule 写入 `.agents/atree.yaml` 并计算 `next_run_at`。
-- 附件上传到 `.agents/attachments/<session-id>/`。
-- 简单周期调度器会按 `next_run_at` 唤醒同一会话。
+已跑通的主线：
 
-本地验证结果：
+- Bun + TypeScript 本地 HTTP 服务。
+- Web UI 基于 OpenCode app 改造。
+- 用户视角只打开一个根目录。
+- 左侧是 atree 目录树；普通目录可以浏览，带会话/自动化的目录优先展示。
+- 选中目录后，右侧 tab 只展示该目录自身的会话，不混入子目录会话。
+- 会话可以创建、继续、归档、从归档恢复。
+- 会话 emoji 可设置；未归档 tab 和归档列表互斥。
+- 自动化消息支持 `at` 一次性时间和 `cron` 周期时间。
+- 一个会话最多一条自动化消息；重复设置必须先删除旧任务。
+- 自动化触发后会追加到同一会话，并刷新输入框上方的自动化消息状态。
+- 有自动化的会话在 tab 中排在前面，并按下次触发时间从近到远排序。
+- 有自动化的目录在左侧节点上外露即将执行会话的 emoji。
+- data URL 文件 part 会落盘到会话目录的 `assets/`，JSONL 中保存相对路径引用。
 
-- `bun run typecheck` 通过。
-- `bun run build` 通过。
-- Agent Browser 打开 `http://127.0.0.1:5173/` 验证通过。
-- 页面左侧没有“新对话、搜索、插件、自动化”等入口。
-- 页面没有仿 macOS 三个窗口控制按钮。
-- 使用 `deepseek/deepseek-v4-flash` 完成真实 Pi SDK 对话并落盘。
-- `zexi/gpt-5.3-codex-spark` 已设为默认模型，但当前本机 Pi provider 返回 `400 status code (no body)`，需要后续单独排查 provider 配置或 SDK 兼容问题。
-
-启动方式：
-
-```bash
-bun install
-ATREE_ROOT=/path/to/root bun run server
-bun run dev
-```
-
-浏览器访问：
+已开始落地的目录事实源：
 
 ```text
-http://127.0.0.1:5173/
+some-directory/
+  .agents/
+    skills/
+    atree/
+      meta.yaml
+      sessions/
+        <session-id>/
+          meta.yaml
+          session.jsonl
+          assets/
+          schedule.json
+          todo.json
 ```
+
+当前重要限制：
+
+- OpenCode SQLite 仍存在，但定位应收缩为投影缓存和运行缓存，不应继续作为 atree 业务唯一事实源。
+- OpenCode 的大量原始 HTTP API 仍在代码中，尚未收敛成 atree 自己的精简接口。
+- Pi core 尚未替换 OpenCode core。Pi 替换属于下一阶段，不要在当前 MVP 文档里假设已经完成。
+- `schedule.json`、`todo.json` 是当前 OpenCode spike 的过渡实现；长期可以折叠进 `meta.yaml` 或 `session.jsonl` 事件流。
 
 ## 技术约束
 
 - 使用 Bun + TypeScript。
-- 前端使用 React。
-- 应用以本地 HTTP 服务形式运行。
-- 不使用 Electron。
-- 服务需要能被局域网或外部机器访问。
+- 前端继续复用并改造 OpenCode Web UI。
+- 应用以本地 HTTP 服务形式运行，不使用 Electron。
+- 服务需要能通过局域网或外部机器访问。
 - MVP 暂不考虑外部访问鉴权。
-- AI 执行层直接使用 Pi Coding Agent / pi-mono 的 TypeScript SDK 和会话设计。
-- 不在 Pi SDK 之上再抽象另一套 Agent runtime。
-- 每个会话的默认工作目录是它所属的 atree 目录。
-- MVP 不做模型执行权限限制；用户指定时，会话可以访问工作目录以外的路径。
+- MVP 不做模型执行权限限制；会话默认以所属目录为工作目录，但用户明确要求时可以访问其他路径。
+- 当前阶段优先把状态事实源移回目录；Pi core 替换在状态边界稳定后推进。
 
-## 第一阶段功能
+## 启动方式
 
-### 1. 根目录选择
-
-用户启动应用时选择一个根目录。
-
-MVP 可以先通过配置或启动参数指定：
+安装依赖：
 
 ```bash
-atree --root /Users/zexi/workspace
+bun install
 ```
 
-后续再做 UI 选择。
+一体服务：
 
-### 2. 扫描 atree 目录
+```bash
+bun run web --hostname 0.0.0.0 --port 3001
+```
 
-从根目录向下扫描，只展示存在以下文件的目录：
+前后端分离开发：
+
+```bash
+bun run dev:split
+```
+
+默认分离端口：
+
+- 后端：`http://127.0.0.1:4096`
+- 前端：`http://127.0.0.1:3000`
+
+## 核心对象
+
+MVP 只保留两个核心对象，外加一个会话属性：
 
 ```text
-.agents/atree.yaml
+Directory
+Session
+Automation message  # 会话里的自动化消息
 ```
 
-扫描结果形成左侧目录树。
+### Directory
 
-要求：
+目录是上下文作用域，也是状态归属边界。
 
-- 保持目录层级。
-- 不展示没有 `.agents/atree.yaml` 的普通目录。
-- 普通目录可以作为路径中间节点出现，但 UI 重点是 atree 节点。
+一个目录下发生的会话、附件、自动化消息和工具状态，都应该能在该目录的 `.agents/atree/` 下找到事实源。
 
-### 3. 初始化目录为 atree 节点
+### Session
 
-通过会话里的 AI 或后端 API 创建：
+会话是 atree 中 Agent 的唯一表现形式。
+
+不单独建立 Agent 注册表，不让用户通过表单创建“某某 Agent”。用户只是在目录里开启会话；当会话被长期复用或设置自动化时，它自然成为常驻工作单元。
+
+### Automation Message
+
+自动化消息本质上是一条未来会自动发送到当前会话的用户消息。
+
+它支持两种时间类型：
+
+- `at`：一次性时间点。
+- `cron`：周期表达式。
+
+一个会话最多一条自动化消息。
+
+## 存储规则
+
+### 目录元数据
+
+目录是否被 atree 初始化，由以下文件表示：
 
 ```text
-.agents/atree.yaml
-.agents/sessions/
-.agents/attachments/
-.agents/skills/
+.agents/atree/meta.yaml
 ```
 
-MVP 的 `atree.yaml`：
+这个文件只保存目录级轻量信息。会话索引不应该长期集中写在这里；会话列表应通过扫描 `sessions/*/meta.yaml` 得到。
 
-```yaml
-version: 1
-title: 目录名
-sessions: []
+### 会话目录
+
+每个会话是一个自包含目录：
+
+```text
+.agents/atree/sessions/<session-id>/
+  meta.yaml
+  session.jsonl
+  assets/
+  schedule.json
+  todo.json
 ```
 
-### 4. 目录会话列表
+职责：
 
-读取当前目录 `.agents/atree.yaml` 中的 sessions 列表，并检查对应 JSONL 文件是否存在。
+- `meta.yaml`：标题、emoji、归档时间、所属目录、更新时间等会话元数据。
+- `session.jsonl`：会话原始事件流。
+- `assets/`：图片、文件等会话资产。
+- `schedule.json`：当前 spike 的自动化消息状态。
+- `todo.json`：当前 spike 的工具状态。
 
-会话元数据字段：
+### JSONL
 
-```yaml
-sessions:
-  - id: 01JXYZ
-    title: 我的会话
-    icon: 🦊
-    schedule: "0 9 * * *"
-    last_run_at: "2026-06-13T09:00:00+08:00"
-    next_run_at: "2026-06-14T09:00:00+08:00"
-    updated_at: "2026-06-13T09:00:00+08:00"
-```
+`session.jsonl` 是会话原始数据，不只是渲染后的聊天文本。
 
-字段说明：
-
-- `id`：会话 ID。
-- `title`：会话标题。
-- `icon`：可选，会话显示 icon。
-- `schedule`：可选，CRON 表达式，直接存入 `.agents/atree.yaml`。
-- `last_run_at`：周期会话上次执行时间。
-- `next_run_at`：周期会话下次执行时间。
-- `updated_at`：会话最近更新时间。
-
-### 5. 创建会话
-
-用户在某个目录里开始新会话。
-
-行为：
-
-- 生成会话 ID。
-- 在 `.agents/sessions/<id>.jsonl` 创建会话文件。
-- 在 `.agents/atree.yaml` 追加会话元数据。
-- 打开右侧聊天界面。
-- 创建 Pi `AgentSession` 时使用当前目录作为会话工作目录，并在系统提示词中注入该路径。
-
-会话标题可以先用第一条用户消息生成或用默认标题。
-
-### 6. 会话保存
-
-会话以 JSONL 事件流保存，格式尽可能和 Pi Coding Agent 保持一致。
-
-MVP 不立即锁死 schema，但至少需要表达：
+它需要能表达：
 
 - 用户消息。
 - 助手消息。
 - 工具调用。
 - 工具结果。
-- 调度唤醒事件，以 Pi 兼容的自定义/扩展消息形式表达。
-- 附件引用。
+- 文件 part。
+- 自动化唤醒事件。
 
-示例方向：
+当前 OpenCode spike 会把 OpenCode 消息/part 写入 `session.jsonl`，并在读取时把它投影回现有 UI 和模型调用链路需要的数据形状。
 
-```jsonl
-{"type":"session","id":"01JXYZ","created_at":"2026-06-13T10:00:00+08:00"}
-{"type":"user_message","created_at":"2026-06-13T10:01:00+08:00","content":[{"type":"text","text":"帮我整理这个目录"}]}
-{"type":"assistant_message","created_at":"2026-06-13T10:01:10+08:00","content":[{"type":"text","text":"我先读取目录结构。"}]}
-```
+### Assets
 
-最终 schema 应参考：
+多媒体不直接塞进 JSONL。
 
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent`
-- `/Users/zexi/workspace/refs/pi-mono/packages/mom`
-
-### 7. 图片和附件
-
-聊天中的图片不写入 JSONL。
-
-附件保存到：
+会话中的 data URL 文件 part 会保存到：
 
 ```text
-.agents/attachments/<session-id>/
+.agents/atree/sessions/<session-id>/assets/
 ```
 
-JSONL 中只保存相对路径引用。
+`session.jsonl` 中只保存 `assets/...` 相对路径。这样目录迁移、复制和 AI 读取都更自然。
 
-示例：
+## UI 范围
 
-```jsonl
-{"type":"user_message","content":[{"type":"text","text":"看这张图"},{"type":"image","path":".agents/attachments/01JXYZ/20260613-001.png"}]}
+### 左侧目录树
+
+- 左侧展示根目录下的目录树。
+- 有会话或自动化的目录优先展示。
+- 普通目录可以通过展开父节点查看。
+- 有自动化的目录用即将执行的会话 emoji 作为外露信号。
+- 点击目录只切换右侧会话分组，不创建新会话。
+- 新会话入口在目录条目右侧，图标为 `square-pen` 风格。
+
+### 顶部 tab
+
+- tab 属于当前选中的目录。
+- 切换目录时，tab 组必须完全换成该目录自身的会话。
+- tab 不包含子目录会话。
+- 有自动化的会话排在左侧，并按下次触发时间排序。
+- 普通会话按最后交互时间倒序。
+- 归档会话只出现在归档菜单，不和 tab 重复。
+- “新会话” tab 只是草稿入口；不发消息不落盘。
+
+### 聊天区
+
+- 用户消息靠右，助手消息靠左。
+- 工具调用和思考内容保持可折叠。
+- 自动化消息显示在输入框上方，与输入框视觉上连成一组。
+- 自动化触发或删除后，UI 必须立即反映最新状态，不依赖刷新。
+
+## 调度行为
+
+自动化消息的行为：
+
+1. 用户通过自然语言设置自动化。
+2. 后端创建 `at` 或 `cron` schedule。
+3. 状态写入当前会话目录的 `schedule.json`。
+4. UI 在输入框上方展示自动化消息。
+5. 到期后，调度器把消息发送回同一会话。
+6. 一次性 `at` 执行后清空 `schedule.json` 中的任务。
+7. 周期 `cron` 执行后计算下一次触发时间。
+8. 会话归档时，如果存在自动化，必须二次确认；归档成功后清空自动化。
+
+## 测试策略
+
+当前阶段测试重点是固定已经跑通的产品行为，为后续替换存储和核心做护栏。
+
+已存在的关键测试：
+
+- `packages/app/e2e/atree/smoke.spec.ts`
+- `packages/app/e2e/atree/invariants.spec.ts`
+- `packages/opencode/test/session/atree-self-contained.test.ts`
+- `packages/opencode/test/session/schedule-atree.test.ts`
+- `packages/opencode/test/session/schedule.test.ts`
+- `packages/opencode/test/session/session.test.ts`
+- `packages/opencode/test/server/session-list.test.ts`
+- `packages/opencode/test/server/global-session-list.test.ts`
+- `packages/opencode/test/atree/session-store.test.ts`
+- `packages/opencode/test/atree/schedule-store.test.ts`
+- `packages/opencode/test/atree/todo-store.test.ts`
+
+推荐每次动到会话存储、归档、schedule 或目录扫描时运行：
+
+```bash
+cd packages/opencode
+bun test test/server/session-list.test.ts test/server/global-session-list.test.ts test/session/session.test.ts test/session/schedule.test.ts test/session/schedule-atree.test.ts test/session/atree-self-contained.test.ts
+bun run typecheck
 ```
 
-说明：
+动到 UI 行为时运行：
 
-- Pi Coding Agent 当前会话格式支持把图片作为 base64 `ImageContent` 嵌入 JSONL。
-- atree MVP 选择把图片作为文件保存，并在 JSONL 中引用相对路径。
-- 这样更符合 atree 的目录长期管理模型，也避免会话 JSONL 因多媒体变得过大。
-
-### 8. 会话 icon 展示
-
-右侧当前目录标题附近展示会话 icon 组。
-
-规则：
-
-- 周期会话全部展示。
-- 周期会话按 `next_run_at` 升序排序。
-- 非周期会话最多展示最近更新的一个。
-- 其他非周期会话折叠为 `…`。
-- hover 周期会话显示标题、上次执行、下次执行。
-- hover 非周期会话显示标题、最近更新。
-- 点击 icon 打开会话。
-- 点击 `…` 展开更多会话列表。
-
-不做重要会话，不做手动排序，不做 pin。
-
-### 9. 修改会话元数据
-
-用户通过对话让 AI 修改会话元数据。
-
-MVP 需要提供后端能力或全局技能，让 AI 能安全修改：
-
-- title
-- icon
-- schedule
-
-典型指令：
-
-```text
-把这个会话 icon 改成 🦊。
-每天上午 9 点运行这个会话。
-取消这个会话的周期执行。
+```bash
+cd packages/app
+bun run test:e2e -- e2e/atree/smoke.spec.ts
+bun run test:e2e -- e2e/atree/invariants.spec.ts
 ```
 
-### 10. 周期会话调度
+## 下一步
 
-有 `schedule` 的会话是周期会话。
+优先级从高到低：
 
-行为：
-
-- 调度器根据 `next_run_at` 唤醒会话。
-- 在同一个 JSONL 中追加调度唤醒事件。
-- 继续运行该会话。
-- 更新 `last_run_at`、`next_run_at`、`updated_at`。
-
-MVP 中每个周期不创建新会话，也不创建独立 run 目录。
-
-### 11. 全局技能注入
-
-所有会话启动时注入 atree 全局技能说明。
-
-技能至少说明：
-
-- `.agents/atree.yaml` 的作用。
-- `.agents/sessions/*.jsonl` 的作用。
-- 如何初始化目录。
-- 如何创建会话。
-- 如何修改会话 title/icon/schedule。
-- 如何读取当前目录会话列表。
-
-实现上可以先作为系统 prompt 片段，后续再整理为 Skill 标准目录。
-
-## 前后端协议方向
-
-MVP 需要以下 API：
-
-```text
-GET  /api/tree
-GET  /api/directories/:id
-GET  /api/directories/:id/sessions
-POST /api/directories/:id/sessions
-GET  /api/sessions/:id/events
-POST /api/sessions/:id/messages
-PATCH /api/sessions/:id
-POST /api/sessions/:id/attachments
-```
-
-会话响应需要流式事件，事件格式以 Pi Coding Agent 为准。
-
-传输层 MVP 可以采用 Server-Sent Events：
-
-- 本地单用户服务实现简单。
-- 浏览器原生支持。
-- 适合从后端向前端推送会话增量、调度状态和工具执行状态。
-- 后续确实需要双向低延迟通道时再补 WebSocket。
-
-注意：
-
-- SSE 只是传输层选择。
-- 事件 payload 不参考 opencode，优先直接转发 Pi 事件；只有 UI 必需时才做最小字段适配。
-
-备选传输方向：
-
-- fetch streaming。
-- WebSocket。
-
-MVP 优先选择实现简单、适合单用户本地服务的方案。
-
-## 参考实现结论
-
-### Pi Coding Agent / pi-mono
-
-本地路径：
-
-- `/Users/zexi/workspace/refs/pi-mono`
-
-远程参考：
-
-- `https://github.com/badlogic/pi-mono`
-- `https://github.com/earendil-works/pi`
-
-关键结论：
-
-- 会话默认保存为 JSONL。
-- 会话条目通过 `id` / `parentId` 形成树结构。
-- TypeScript SDK 入口是 `createAgentSession()`。
-- `AgentSession.subscribe()` 提供事件订阅。
-- `prompt()` 支持图片输入。
-- Pi 当前图片通常作为 base64 `ImageContent` 进入会话，atree MVP 会改成附件文件引用。
-
-重点阅读：
-
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent/docs/sdk.md`
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent/docs/session.md`
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent/docs/rpc.md`
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent/src/core/agent-session.ts`
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent/src/core/session-manager.ts`
-- `/Users/zexi/workspace/refs/pi-mono/packages/coding-agent/src/cli/file-processor.ts`
-
-### pi-mono web-ui
-
-本地路径：
-
-- `/Users/zexi/workspace/refs/pi-mono/packages/web-ui`
-
-可参考：
-
-- ChatPanel / AgentInterface 的消息流、工具展示和附件交互。
-- 不建议照搬 IndexedDB 存储，因为 atree 的状态应落在目录 `.agents/` 下。
-
-### pi-mono mom
-
-本地路径：
-
-- `/Users/zexi/workspace/refs/pi-mono/packages/mom`
-
-可参考：
-
-- `log.jsonl` / `context.jsonl` 分层。
-- `attachments/` 下载和本地路径引用。
-- 长期会话和外部消息同步的设计。
-
-### opencode
-
-本地路径：
-
-- `/Users/zexi/workspace/refs/opencode`
-
-可参考：
-
-- 本地 HTTP GUI 启动。
-- SPA 静态资源和 API 分层。
-- 服务进程与浏览器 UI 的组织方式。
-
-不参考：
-
-- Agent 事件格式。
-- 会话语义。
-- SQLite 会话模型。
-
-重点阅读：
-
-- `/Users/zexi/workspace/refs/opencode/packages/opencode/src/cli/cmd/web.ts`
-- `/Users/zexi/workspace/refs/opencode/packages/opencode/src/server/routes/instance/httpapi/server.ts`
-- `/Users/zexi/workspace/refs/opencode/packages/opencode/src/server/shared/ui.ts`
+1. 继续让目录内 `.agents/atree/` 成为会话、归档、附件、schedule、todo 的事实源。
+2. 明确 SQLite 只作为可重建投影缓存，不作为业务唯一来源。
+3. 固定核心浏览器冒烟路径，防止 UI 回归。
+4. 在存储边界稳定后，收敛 OpenCode 原始 API。
+5. 再推进 Pi core 替换或 facade 重写。
 
 ## 暂不实现
 
 - interface session。
 - 父子目录访问拦截。
 - 自治目录权限边界。
-- 完整文件树浏览器。
-- 文件内容预览。
-- 多平台发布。
+- 多设备同步。
 - 外部社交平台挂载。
-- 多设备同步和冲突处理。
+- 多平台发布。
 - 预算系统。
 - 独立 Agent 注册表。
 - 插件管理 UI。
@@ -398,66 +280,3 @@ MVP 优先选择实现简单、适合单用户本地服务的方案。
 - Electron。
 - 模型执行权限控制。
 - 目录沙箱。
-
-## 验收标准
-
-MVP 完成时应能做到：
-
-1. 启动本地 HTTP 服务并打开 GUI。
-2. 指定一个根目录。
-3. 左侧展示根目录下存在 `.agents/atree.yaml` 的目录树。
-4. 进入某个目录后看到当前目录会话区。
-5. 创建新会话并保存为 JSONL。
-6. 新会话默认以当前目录作为工作目录。
-7. 在会话中发送消息并看到流式助手回复。
-8. 会话历史刷新后仍可恢复。
-9. 上传或粘贴图片后，图片保存到 `.agents/attachments/<session-id>/`，JSONL 保存引用。
-10. 通过对话修改会话 icon。
-11. 通过对话设置 CRON schedule。
-12. 周期会话按计划唤醒，并向同一个 JSONL 追加消息。
-13. 右侧 icon 组按规则展示周期会话和最近临时会话。
-
-## 测试策略
-
-MVP 必须被完整跑通和验证，因为它是纯网页应用，天然适合通过浏览器验证。
-
-行为层面的验收测试放在：
-
-- [docs/acceptance/atree-mvp-bdd.md](docs/acceptance/atree-mvp-bdd.md)
-
-测试策略以真实体验为主：
-
-- 优先使用 Agent Browser 或本机 Chrome CDP 做端到端验证。
-- 每次完成关键功能后，打开本地 HTTP GUI 实际操作。
-- 验证左侧目录树、右侧会话、消息流、附件、CRON 设置和周期唤醒等核心路径。
-- UI 参考 Codex App，但实际可用性以本项目真实体验为准。
-
-自动化测试不强制一开始写满。
-
-原因：
-
-- 项目仍处于 demo 阶段。
-- 需求和交互会快速变化。
-- 过早沉淀大量固定 Playwright 用例，可能很快失效。
-
-取舍原则：
-
-- 高频、稳定、会反复执行的路径，可以写 Playwright 或其他自动化用例。
-- 变化快、一次性验证、交互仍未定型的路径，可以用 Agent Browser 或手动浏览器验证。
-- 自动化测试的目标是节省重复验证成本，不是提前固化尚未稳定的产品行为。
-
-可优先自动化的路径：
-
-- 服务启动后页面可打开。
-- 左侧能展示存在 `.agents/atree.yaml` 的目录。
-- 能创建会话并落盘 JSONL。
-- 能恢复已有会话。
-- 图片附件能落到 `.agents/attachments/<session-id>/`。
-- 设置 CRON 后 UI 能按周期会话排序展示。
-
-不优先自动化的路径：
-
-- 细节 UI 样式。
-- 会话 icon 的具体视觉表现。
-- 暂未稳定的快捷交互。
-- 未来可能改动的全局面板、模拟经营视图、扩展系统。

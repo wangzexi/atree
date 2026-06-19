@@ -153,7 +153,7 @@ MVP 暂不实现外部平台挂载。第一阶段只处理本地根目录。
 目标：
 
 - 用户通过自然语言配置 atree。
-- AI 知道如何修改 `.agents/atree.yaml`。
+- AI 知道如何修改 `.agents/atree/` 下的 atree 协议文件。
 - AI 知道如何创建会话、设置 schedule、修改 icon/title。
 - AI 知道全局配置和 API Key 应该放哪里。
 - AI 知道哪些信息不能写进项目目录。
@@ -164,7 +164,8 @@ MVP 暂不实现外部平台挂载。第一阶段只处理本地根目录。
 ~/.atree/config.yaml        # 全局配置
 ~/.atree/atree.sqlite       # 索引、队列、运行态
 Keychain / env / secrets    # API Key
-.agents/atree.yaml          # 目录级配置
+.agents/atree/meta.yaml     # 目录级 atree 配置
+.agents/atree/sessions/     # 会话事实源
 ```
 
 原则：

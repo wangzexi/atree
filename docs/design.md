@@ -15,7 +15,7 @@
 - 目录保存上下文。
 - 会话承载执行。
 - 周期会话沉淀重复工作。
-- `.agents/` 保存 atree 运行时状态。
+- `.agents/atree/` 保存 atree 目录事实源。
 
 最终形态更像一个“模拟经营自己所有数据”的工作区：用户不是直接管理所有文件细节，而是在关键目录里安排会话长期工作。
 
@@ -34,11 +34,13 @@
 
 目录本身不需要复杂状态。目录只是文件系统里的一个位置，是用户资料、外部挂载、会话历史和局部技能的容器。
 
-一个目录是否出现在 atree UI 中，只看它是否存在：
+一个目录是否被 atree 初始化，只看它是否存在：
 
 ```text
-.agents/atree.yaml
+.agents/atree/meta.yaml
 ```
+
+当前 UI 可以浏览根目录下的普通目录；有会话或自动化的目录会作为关键节点优先展示。
 
 ### 会话
 
@@ -53,7 +55,9 @@ Session = Agent
 区别只在会话属性：
 
 - 普通会话：一次或少量使用的临时对话。
-- 周期会话：带 CRON schedule，会按时间自动唤醒并继续执行。
+- 自动化会话：带 `at` 或 `cron` 自动化消息，会按时间自动唤醒并继续执行。
+
+自动化消息不是独立 Agent 对象，它只是会话里的一条未来会自动发送的用户消息。
 
 MVP 暂不实现 interface session。
 
@@ -69,7 +73,7 @@ MVP 阶段不做模型执行权限限制：
 - 用户明确要求时，会话可以访问当前工作目录以外的路径。
 - 暂不实现目录沙箱、读写 ACL、跨目录访问拦截。
 
-后续如果需要权限控制，再单独设计。第一版优先保持 Pi Coding Agent 的原生执行模型。
+后续如果需要权限控制，再单独设计。第一版优先保持底层 Agent runtime 的原生执行模型；当前 spike 复用 OpenCode core，长期方向是切到 Pi core。
 
 ## 工作方式
 
@@ -89,66 +93,76 @@ MVP 阶段不做模型执行权限限制：
 
 ## 存储边界
 
-atree 只控制 `.agents/` 目录。
+`.agents/` 是通用 Agent 目录，不是 atree 的私有目录。atree 只控制 `.agents/atree/`。
 
 ```text
 some-directory/
   .agents/
-    atree.yaml
-    sessions/
-      <session-id>.jsonl
-    attachments/
-      <session-id>/
-        ...
-    skills/
-      ...
+    skills/        # 通用 Agent Skill
+    atree/         # atree 专属事实源
+      meta.yaml
+      sessions/
+        <session-id>/
+          meta.yaml
+          session.jsonl
+          assets/
+          schedule.json
+          todo.json
 ```
 
 `README.md` 不属于 atree 协议。用户是否使用 README、如何组织普通文件、是否建立 facts/assets/refs 等目录，都由用户自己决定。
 
-### `.agents/atree.yaml`
+### `.agents/atree/meta.yaml`
 
-表示当前目录被 atree 管理，并提供 UI 和调度所需的轻量元数据。
+表示当前目录被 atree 管理，并保存目录级轻量元数据。
 
-MVP 中它可以同时承担目录声明和会话索引：
+它不应该长期承担完整会话索引。会话列表应通过扫描 `sessions/*/meta.yaml` 得到。
 
 ```yaml
 version: 1
-title: 我的agent
-
-sessions:
-  - id: 01JXYZ
-    title: 每日整理
-    icon: 🦊
-    schedule: "0 9 * * *"
-    last_run_at: "2026-06-13T09:00:00+08:00"
-    next_run_at: "2026-06-14T09:00:00+08:00"
-    updated_at: "2026-06-13T09:00:00+08:00"
+title: 我的目录
+createdAt: 1781462400000
+updatedAt: 1781462400000
 ```
 
-### `sessions/*.jsonl`
+### `sessions/<session-id>/`
 
-会话保存为事件流，格式应尽可能和 Pi Coding Agent 保持一致。Agent 相关事件、消息结构和会话语义以 Pi 为核心，不再另行抽象一套 atree Agent runtime。
+每个会话是一个自包含目录。
+
+```text
+.agents/atree/sessions/<session-id>/
+  meta.yaml
+  session.jsonl
+  assets/
+  schedule.json
+  todo.json
+```
+
+`meta.yaml` 保存标题、emoji、归档状态、更新时间等会话元数据。
+
+`session.jsonl` 保存会话原始事件流。Agent 相关事件、消息结构和会话语义长期以 Pi 为核心，不再另行抽象一套 atree Agent runtime。
 
 - 会话历史是 JSONL。
 - 用户消息、助手消息、工具调用、工具结果、调度唤醒都追加到同一个会话文件。
 - 周期会话不会为每次执行创建新 run 文件，而是继续向原会话追加事件。
 
-### `attachments/<session-id>/`
+`schedule.json`、`todo.json` 是当前 OpenCode spike 的过渡文件，用于先把工具状态放回会话目录；长期可以折叠进 `meta.yaml` 或 `session.jsonl`。
+
+### `assets/`
 
 聊天过程里的图片、截图、音频、PDF 等二进制内容不写入 JSONL。
 
 JSONL 只保存引用，文件落到：
 
 ```text
-.agents/attachments/<session-id>/
+.agents/atree/sessions/<session-id>/assets/
 ```
 
-如果某个附件后来成为用户要长期管理的业务材料，可以由用户或 AI 移动到普通目录里，例如 `assets/`、`refs/`、`facts/`。`.agents/attachments` 只表示“会话附件”。
+如果某个附件后来成为用户要长期管理的业务材料，可以由用户或 AI 移动到普通目录里，例如目录自己的 `assets/`、`refs/`、`facts/`。会话目录内的 `assets/` 只表示“这个会话的附件和多媒体材料”。
 
 这和 Pi Coding Agent 当前默认做法不完全一样。Pi 的会话格式支持把图片以 base64 `ImageContent` 直接嵌入 JSONL。atree 第一版有意采用“JSONL 引用 + 附件文件落盘”，因为 atree 的核心是目录结构，图片和多媒体作为文件存在更符合长期管理、复制和迁移。
 
-### `skills/`
+### `.agents/skills/`
 
 `.agents/skills/` 用来兼容 Agent Skill 标准。
 
@@ -180,27 +194,28 @@ UI 参考：
 
 ### 左侧目录树
 
-左侧只展示存在 `.agents/atree.yaml` 的目录。
+左侧展示根目录下的目录树。
 
-不展示完整文件树，不做文件浏览器，不在第一版处理普通文件预览。
+有会话或自动化的目录是关键节点，默认优先展示；普通目录可以通过展开父节点临时显示。第一版不把左侧做成完整文件浏览器，也不在左侧处理文件预览。
 
-### 右侧会话 icon 组
+### 顶部会话 tab 与目录外露 icon
 
 icon 属于会话，不属于目录。
 
-一个目录上可能有多个会话工作，因此目录右侧可以展示多个会话 icon：
+一个目录上可能有多个会话工作，因此右侧顶部使用 tab 展示当前目录的会话组。左侧目录节点只外露有自动化的即将执行会话 emoji，作为关键状态提示。
 
 ```text
-当前目录名      🦊 🐳 ◌ …
+当前目录 tab：🦊 🐳 ◌
+左侧目录节点：目录名 🦊
 ```
 
 展示规则：
 
-- 周期会话全部展示，按 `next_run_at` 从早到晚排序。
-- 非周期会话最多展示最近更新的一个。
-- 其他非周期会话折叠进 `…`。
-- 非周期会话没有 icon 时显示暗淡默认图标。
-- hover icon 显示会话标题、上次执行时间、下次执行时间或最近更新时间。
+- 有自动化的会话排在前面，按下次触发时间从早到晚排序。
+- 非自动化会话按最后交互时间从新到旧排序。
+- 归档会话只出现在归档菜单，不和 tab 重复。
+- 新会话 tab 是草稿入口，不发消息不落盘。
+- hover tab 显示会话标题和时间信息。
 
 不引入“重要会话”概念，不做手动排序。MVP 里也不做 pin。
 
@@ -214,7 +229,7 @@ icon 属于会话，不属于目录。
 - 创建新会话。
 - 修改会话标题。
 - 修改会话 icon。
-- 设置或取消会话 CRON schedule。
+- 设置或取消 `at` / `cron` 自动化消息。
 - 读取当前目录会话列表。
 
 用户不需要通过 UI 表单做这些事，而是直接在会话里给 AI 下指令。
@@ -242,9 +257,10 @@ icon 属于会话，不属于目录。
 
 - 全 Bun + TypeScript。
 - 前端 React。
-- 后端使用 Bun HTTP 服务，具体路由/流式协议实现后续在技术调研中确定。
-- 需要支持会话流式事件，事件格式以 Pi Coding Agent 为准。
-- 会话执行直接使用 Pi Coding Agent 的 TypeScript SDK，不在其上再抽象另一套 Agent runtime。
+- 当前 spike 复用 OpenCode 的 HTTP 服务、聊天流、工具执行和文件交互基础。
+- atree 正在把外层产品模型和事实源改成目录工作区。
+- 长期需要支持 Pi Coding Agent 的事件和扩展生态，但 Pi core 替换是下一阶段。
+- 不在 Pi 之上再抽象另一套 Agent runtime。
 
 ## 暂不做
 

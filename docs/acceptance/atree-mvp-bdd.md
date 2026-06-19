@@ -5,17 +5,19 @@
 
 ## 1. 术语
 
-- **节点**：有 `.agents/atree.yaml` 的目录节点。
-- **会话**：节点目录下的 `/.agents/sessions/*.jsonl`。
-- **自动化**：会话在 `.agents/schedule` 的 `at` / `cron` 任务。
+- **目录节点**：根目录下可在左侧树中浏览的文件夹。
+- **关键节点**：存在 `.agents/atree/meta.yaml`、会话目录或自动化消息的目录节点。
+- **会话**：目录下的 `.agents/atree/sessions/<session-id>/`，其中 `session.jsonl` 是原始记录。
+- **自动化**：会话目录中 `schedule.json` 记录的 `at` / `cron` 自动化消息。
 
 ## 2. 行为场景（BDD）
 
-### Scenario: 仅展示可识别的 atree 节点
+### Scenario: 关键节点优先展示，普通目录可展开
 - Given 打开根目录
 - When 节点扫描完成
-- Then 左侧只展示可见 atree 节点
-- And 无 `.agents/atree.yaml` 的目录不进入会话树
+- Then 左侧优先展示关键节点
+- And 无会话的普通目录可通过父节点展开查看
+- And 普通目录不会污染右侧会话 tab 计算
 
 ### Scenario: 根目录切换不污染会话组
 - Given 已有两个根目录
@@ -34,7 +36,7 @@
 ### Scenario: 纯目录节点默认收敛
 - Given 某节点下只有子目录无会话
 - When 节点未展开
-- Then 该子树在左侧默认不展示
+- Then 该子树在左侧默认收敛
 - When 展开该节点
 - Then 显示子目录结构
 - And 收起后恢复默认隐藏
