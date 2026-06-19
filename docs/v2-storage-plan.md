@@ -192,6 +192,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 复制 `.agents/atree/` 到另一个目录后，显式传入目标目录的元数据、消息和 part 写入只落在目标目录；读取源目录时不会再被同一 session id 的全局 MessageV2 投影串入目标消息。
 - HTTP prompt 路由在 `directory` hint 指向一个复制出来的 file-backed session 时，会优先使用该目标目录；如果 hint 目录没有对应 session，则回退到 session 自己持久化的目录。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
+- plan/reminder 相关 synthetic 消息和 part 写入开始携带当前 session 目录上下文，避免 plan agent 切换、plan_exit 工具产生的内部消息落到错误目录。
 - processor 的重复工具调用检测会从目录会话历史读取 assistant tool parts；即使全局 SQLite `part` 投影被删除，只要 `session.jsonl` 仍在，doom-loop 检测仍可工作。
 - processor 会使用 assistant message 的 `path.cwd` 作为目录 hint 解析当前会话；流式文本、reasoning、step、patch、cleanup 等 assistant 写入都会显式落到该目录的 `session.jsonl`，复制 `.agents/atree/` 后不会把新回复写回源目录。
 - compaction 的 prune/create/process 会接受并传递目录 hint；压缩标记、summary assistant、replay/continue 用户消息和被裁剪 tool part 都会写入当前会话目录。

@@ -53,16 +53,19 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
     const ctx = yield* InstanceState.context
     const plan = Session.plan(input.session, ctx)
     const exists = yield* fsys.existsSafe(plan)
-    const part = yield* sessions.updatePart({
-      id: PartID.ascending(),
-      messageID: userMessage.info.id,
-      sessionID: userMessage.info.sessionID,
-      type: "text",
-      text: exists
-        ? `${BUILD_SWITCH}\n\nA plan file exists at ${plan}. You should execute on the plan defined within it`
-        : BUILD_SWITCH,
-      synthetic: true,
-    })
+    const part = yield* sessions.updatePart(
+      {
+        id: PartID.ascending(),
+        messageID: userMessage.info.id,
+        sessionID: userMessage.info.sessionID,
+        type: "text",
+        text: exists
+          ? `${BUILD_SWITCH}\n\nA plan file exists at ${plan}. You should execute on the plan defined within it`
+          : BUILD_SWITCH,
+        synthetic: true,
+      },
+      { directory: input.session.directory },
+    )
     userMessage.parts.push(part)
     return input.messages
   }
@@ -73,18 +76,21 @@ export const apply = Effect.fn("SessionReminders.apply")(function* (input: {
   const plan = Session.plan(input.session, ctx)
   const exists = yield* fsys.existsSafe(plan)
   if (!exists) yield* fsys.ensureDir(path.dirname(plan)).pipe(Effect.catch(Effect.die))
-  const part = yield* sessions.updatePart({
-    id: PartID.ascending(),
-    messageID: userMessage.info.id,
-    sessionID: userMessage.info.sessionID,
-    type: "text",
-    text: PLAN_MODE.replace("${planInfo}", () =>
-      exists
-        ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.`
-        : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`,
-    ),
-    synthetic: true,
-  })
+  const part = yield* sessions.updatePart(
+    {
+      id: PartID.ascending(),
+      messageID: userMessage.info.id,
+      sessionID: userMessage.info.sessionID,
+      type: "text",
+      text: PLAN_MODE.replace("${planInfo}", () =>
+        exists
+          ? `A plan file already exists at ${plan}. You can read it and make incremental edits using the edit tool.`
+          : `No plan file exists yet. You should create your plan at ${plan} using the write tool.`,
+      ),
+      synthetic: true,
+    },
+    { directory: input.session.directory },
+  )
   userMessage.parts.push(part)
   return input.messages
 })

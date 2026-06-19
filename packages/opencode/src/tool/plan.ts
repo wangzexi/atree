@@ -45,7 +45,7 @@ export const PlanExitTool = Tool.define(
 
           if (answers[0]?.[0] === "No") yield* new Question.RejectedError()
 
-          const messages = yield* session.messages({ sessionID: ctx.sessionID }).pipe(Effect.orDie)
+          const messages = yield* session.messages({ sessionID: ctx.sessionID, directory: info.directory }).pipe(Effect.orDie)
           const lastUser = messages.findLast((item) => item.info.role === "user" && item.info.model)
           const model =
             lastUser?.info.role === "user" && lastUser.info.model ? lastUser.info.model : yield* provider.defaultModel()
@@ -58,15 +58,18 @@ export const PlanExitTool = Tool.define(
             agent: "build",
             model,
           }
-          yield* session.updateMessage(msg)
-          yield* session.updatePart({
-            id: PartID.ascending(),
-            messageID: msg.id,
-            sessionID: ctx.sessionID,
-            type: "text",
-            text: `The plan at ${plan} has been approved, you can now edit files. Execute the plan`,
-            synthetic: true,
-          } satisfies SessionV1.TextPart)
+          yield* session.updateMessage(msg, { directory: info.directory })
+          yield* session.updatePart(
+            {
+              id: PartID.ascending(),
+              messageID: msg.id,
+              sessionID: ctx.sessionID,
+              type: "text",
+              text: `The plan at ${plan} has been approved, you can now edit files. Execute the plan`,
+              synthetic: true,
+            } satisfies SessionV1.TextPart,
+            { directory: info.directory },
+          )
 
           return {
             title: "Switching to build agent",
