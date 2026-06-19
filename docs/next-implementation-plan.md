@@ -11,15 +11,16 @@
 - 会话可以归档、恢复、设置 emoji。
 - 自动化消息可以作为会话输入框上的状态展示。
 - schedule 可以支持 `cron` 和 `at` 两类触发。
+- 打开的根目录已经是服务端状态，通过 `/api/workspace` 和 `/api/workspace/root` 持久化。
+- 左侧目录树已经从服务端 root 派生，通过 `/api/tree` 读取。
 
 但当前实现仍然继承了 OpenCode 的大量状态模型：
 
-- 打开的根目录主要存在前端持久化状态里。
-- 会话事实源仍是 OpenCode 全局 SQLite。
+- 会话仍依赖 OpenCode 全局 SQLite 作为运行时投影和部分兼容缓存。
 - 前端仍在消费 OpenCode 的宽接口面。
 - schedule 当前是 atree 第一版硬编码服务，不是 Pi 扩展。
 
-下一阶段要先处理状态边界，再处理核心替换。
+下一阶段要继续收紧会话事实源边界，再处理接口收敛和核心替换。
 
 ## 阶段 0：固定当前可用版本
 
@@ -31,19 +32,24 @@
 - 直接打开某个 session URL 时，只显示当前 session tab 和新会话占位。
 - 只有从左侧点击目录节点时，才显示该目录的会话 tab group。
 - 归档 tab 后，同步移除 server sync 和目录树本地缓存，避免被旧缓存重新加回来。
+- 直接打开 session URL 时，会恢复该 session 所在目录的完整 tab group。
+- 切换目录时，tab group 只展示当前目录自身的会话，不包含子目录会话。
+- 有自动化消息的会话归档需要二次确认，确认后清除自动化消息。
 
 后续补充：
 
-- 为这些不变量补 Playwright 测试。
+- 继续为新增不变量补 Playwright 测试。
 - 当前提交不再继续扩大 UI 交互细节，除非影响主流程。
 
 ## 阶段 1：服务端 root workspace 状态
 
 atree 用户视角中，服务实例只打开一个根目录。这个 root 是服务端状态，不应该属于浏览器 localStorage。
 
+当前状态：已实现。后续只在发现 root 切换缓存污染时继续补测试或清理。
+
 ### 目标
 
-增加最小 workspace API：
+最小 workspace API：
 
 ```text
 GET /api/workspace
@@ -63,13 +69,7 @@ PUT /api/workspace/root
 
 root workspace 状态不应放入 root 目录自己的 `.agents/atree/`，因为它描述的是 atree 服务实例“当前打开哪个根目录”，不是该目录内部数据。
 
-MVP 可选存储：
-
-```text
-~/.config/atree/state.json
-```
-
-或者复用当前 OpenCode data dir 下的 atree 专属状态文件：
+当前实现复用 OpenCode data dir 下的 atree 专属状态文件：
 
 ```text
 <opencode-data-dir>/atree/state.json
@@ -87,10 +87,10 @@ MVP 可选存储：
 
 实现要求：
 
-- 写入前把目录规范化为绝对路径。
-- 写文件使用原子写入，避免中途崩溃损坏状态。
-- 服务启动时读取一次并放入内存。
-- `PUT /api/workspace/root` 覆盖旧 root，并清掉旧 root 相关的运行期缓存。
+- 写入前把目录规范化为绝对路径。已实现。
+- 写文件使用原子写入，避免中途崩溃损坏状态。已实现。
+- `PUT /api/workspace/root` 覆盖旧 root。已实现。
+- 切换 root 时前端必须清空当前 tab group 和目录缓存。已通过 E2E 保护主路径，后续继续补边界。
 
 ### 前端行为
 
