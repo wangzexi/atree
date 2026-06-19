@@ -105,7 +105,9 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
-      const currentSession = yield* session.get(input.sessionID).pipe(Effect.orDie)
+      const currentSession = yield* session
+        .get(input.sessionID, { directory: input.assistantMessage.path.cwd })
+        .pipe(Effect.orDie)
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
@@ -266,7 +268,7 @@ export const layer = Layer.effect(
         // oxlint-disable-next-line no-self-assign -- reactivity trigger
         ctx.reasoningMap[reasoningID].text = ctx.reasoningMap[reasoningID].text
         ctx.reasoningMap[reasoningID].time = { ...ctx.reasoningMap[reasoningID].time, end: Date.now() }
-        yield* session.updatePart(ctx.reasoningMap[reasoningID])
+        yield* session.updatePart(ctx.reasoningMap[reasoningID], { directory: currentSession.directory })
         delete ctx.reasoningMap[reasoningID]
       })
 
@@ -402,7 +404,7 @@ export const layer = Layer.effect(
               time: { start: Date.now() },
               metadata: value.providerMetadata,
             }
-            yield* session.updatePart(ctx.reasoningMap[value.id])
+            yield* session.updatePart(ctx.reasoningMap[value.id], { directory: currentSession.directory })
             return
 
           case "reasoning-delta":
@@ -694,13 +696,16 @@ export const layer = Layer.effect(
                 yield* ensureV2AssistantMessage()
               }
             }
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              snapshot: ctx.snapshot,
-              type: "step-start",
-            })
+            yield* session.updatePart(
+              {
+                id: PartID.ascending(),
+                messageID: ctx.assistantMessage.id,
+                sessionID: ctx.sessionID,
+                snapshot: ctx.snapshot,
+                type: "step-start",
+              },
+              { directory: currentSession.directory },
+            )
             return
 
           case "step-finish": {
@@ -729,28 +734,34 @@ export const layer = Layer.effect(
             ctx.assistantMessage.finish = value.reason
             ctx.assistantMessage.cost += usage.cost
             ctx.assistantMessage.tokens = usage.tokens
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              reason: value.reason,
-              snapshot: completedSnapshot,
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.assistantMessage.sessionID,
-              type: "step-finish",
-              tokens: usage.tokens,
-              cost: usage.cost,
-            })
-            yield* session.updateMessage(ctx.assistantMessage)
+            yield* session.updatePart(
+              {
+                id: PartID.ascending(),
+                reason: value.reason,
+                snapshot: completedSnapshot,
+                messageID: ctx.assistantMessage.id,
+                sessionID: ctx.assistantMessage.sessionID,
+                type: "step-finish",
+                tokens: usage.tokens,
+                cost: usage.cost,
+              },
+              { directory: currentSession.directory },
+            )
+            yield* session.updateMessage(ctx.assistantMessage, { directory: currentSession.directory })
             if (ctx.snapshot) {
               const patch = yield* snapshot.patch(ctx.snapshot)
               if (patch.files.length) {
-                yield* session.updatePart({
-                  id: PartID.ascending(),
-                  messageID: ctx.assistantMessage.id,
-                  sessionID: ctx.sessionID,
-                  type: "patch",
-                  hash: patch.hash,
-                  files: patch.files,
-                })
+                yield* session.updatePart(
+                  {
+                    id: PartID.ascending(),
+                    messageID: ctx.assistantMessage.id,
+                    sessionID: ctx.sessionID,
+                    type: "patch",
+                    hash: patch.hash,
+                    files: patch.files,
+                  },
+                  { directory: currentSession.directory },
+                )
               }
               ctx.snapshot = undefined
             }
@@ -791,7 +802,7 @@ export const layer = Layer.effect(
               metadata: value.providerMetadata,
             }
             ctx.currentTextID = value.id
-            yield* session.updatePart(ctx.currentText)
+            yield* session.updatePart(ctx.currentText, { directory: currentSession.directory })
             return
 
           case "text-delta":
@@ -846,7 +857,7 @@ export const layer = Layer.effect(
               ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
             }
             if (value.providerMetadata) ctx.currentText.metadata = value.providerMetadata
-            yield* session.updatePart(ctx.currentText)
+            yield* session.updatePart(ctx.currentText, { directory: currentSession.directory })
             ctx.currentText = undefined
             ctx.currentTextID = undefined
             return
@@ -860,14 +871,17 @@ export const layer = Layer.effect(
         if (ctx.snapshot) {
           const patch = yield* snapshot.patch(ctx.snapshot)
           if (patch.files.length) {
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: ctx.assistantMessage.id,
-              sessionID: ctx.sessionID,
-              type: "patch",
-              hash: patch.hash,
-              files: patch.files,
-            })
+            yield* session.updatePart(
+              {
+                id: PartID.ascending(),
+                messageID: ctx.assistantMessage.id,
+                sessionID: ctx.sessionID,
+                type: "patch",
+                hash: patch.hash,
+                files: patch.files,
+              },
+              { directory: currentSession.directory },
+            )
           }
           ctx.snapshot = undefined
         }
@@ -875,17 +889,20 @@ export const layer = Layer.effect(
         if (ctx.currentText) {
           const end = Date.now()
           ctx.currentText.time = { start: ctx.currentText.time?.start ?? end, end }
-          yield* session.updatePart(ctx.currentText)
+          yield* session.updatePart(ctx.currentText, { directory: currentSession.directory })
           ctx.currentText = undefined
           ctx.currentTextID = undefined
         }
 
         for (const part of Object.values(ctx.reasoningMap)) {
           const end = Date.now()
-          yield* session.updatePart({
-            ...part,
-            time: { start: part.time.start ?? end, end },
-          })
+          yield* session.updatePart(
+            {
+              ...part,
+              time: { start: part.time.start ?? end, end },
+            },
+            { directory: currentSession.directory },
+          )
         }
         ctx.reasoningMap = {}
 
@@ -911,20 +928,23 @@ export const layer = Layer.effect(
           }
           const end = Date.now()
           const metadata = "metadata" in part.state && isRecord(part.state.metadata) ? part.state.metadata : {}
-          yield* session.updatePart({
-            ...part,
-            state: {
-              ...part.state,
-              status: "error",
-              error: "Tool execution aborted",
-              metadata: { ...metadata, interrupted: true },
-              time: { start: "time" in part.state ? part.state.time.start : end, end },
+          yield* session.updatePart(
+            {
+              ...part,
+              state: {
+                ...part.state,
+                status: "error",
+                error: "Tool execution aborted",
+                metadata: { ...metadata, interrupted: true },
+                time: { start: "time" in part.state ? part.state.time.start : end, end },
+              },
             },
-          })
+            { directory: currentSession.directory },
+          )
         }
         ctx.toolcalls = {}
         ctx.assistantMessage.time.completed = Date.now()
-        yield* session.updateMessage(ctx.assistantMessage)
+        yield* session.updateMessage(ctx.assistantMessage, { directory: currentSession.directory })
       })
 
       const halt = Effect.fn("SessionProcessor.halt")(function* (e: unknown) {

@@ -193,6 +193,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - HTTP prompt 路由在 `directory` hint 指向一个复制出来的 file-backed session 时，会优先使用该目标目录；如果 hint 目录没有对应 session，则回退到 session 自己持久化的目录。
 - prompt 用户消息、自动标题、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
 - processor 的重复工具调用检测会从目录会话历史读取 assistant tool parts；即使全局 SQLite `part` 投影被删除，只要 `session.jsonl` 仍在，doom-loop 检测仍可工作。
+- processor 会使用 assistant message 的 `path.cwd` 作为目录 hint 解析当前会话；流式文本、reasoning、step、patch、cleanup 等 assistant 写入都会显式落到该目录的 `session.jsonl`，复制 `.agents/atree/` 后不会把新回复写回源目录。
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
 - schedule 执行后的 `lastRanAt`、`lastRunStatus` 会回写到目录 `schedule.json`，重启后可以恢复运行状态。
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。

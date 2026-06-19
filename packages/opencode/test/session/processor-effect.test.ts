@@ -6,6 +6,8 @@ import { expect } from "bun:test"
 import { tool } from "ai"
 import { Cause, Effect, Exit, Fiber, Layer, Stream } from "effect"
 import { eq } from "drizzle-orm"
+import * as fs from "fs/promises"
+import os from "os"
 import path from "path"
 import z from "zod"
 import type { Agent } from "../../src/agent/agent"
@@ -118,23 +120,29 @@ const waitFor = <A>(check: Effect.Effect<A | undefined>, message: string, timeou
     return yield* Effect.fail(new Error(message))
   })
 
-const user = Effect.fn("TestSession.user")(function* (sessionID: SessionID, text: string) {
+const user = Effect.fn("TestSession.user")(function* (sessionID: SessionID, text: string, directory?: string) {
   const session = yield* Session.Service
-  const msg = yield* session.updateMessage({
-    id: MessageID.ascending(),
-    role: "user",
-    sessionID,
-    agent: "build",
-    model: ref,
-    time: { created: Date.now() },
-  })
-  yield* session.updatePart({
-    id: PartID.ascending(),
-    messageID: msg.id,
-    sessionID,
-    type: "text",
-    text,
-  })
+  const msg = yield* session.updateMessage(
+    {
+      id: MessageID.ascending(),
+      role: "user",
+      sessionID,
+      agent: "build",
+      model: ref,
+      time: { created: Date.now() },
+    },
+    { directory },
+  )
+  yield* session.updatePart(
+    {
+      id: PartID.ascending(),
+      messageID: msg.id,
+      sessionID,
+      type: "text",
+      text,
+    },
+    { directory },
+  )
   return msg
 })
 
@@ -142,6 +150,7 @@ const assistant = Effect.fn("TestSession.assistant")(function* (
   sessionID: SessionID,
   parentID: MessageID,
   root: string,
+  directory?: string,
 ) {
   const session = yield* Session.Service
   const msg: SessionV1.Assistant = {
@@ -165,7 +174,7 @@ const assistant = Effect.fn("TestSession.assistant")(function* (
     time: { created: Date.now() },
     finish: "end_turn",
   }
-  yield* session.updateMessage(msg)
+  yield* session.updateMessage(msg, { directory })
   return msg
 })
 
@@ -310,6 +319,64 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         expect(value).toBe("continue")
         expect(calls).toBe(1)
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
+      }),
+    { config: (url) => providerCfg(url) },
+  ),
+)
+
+it.live("session.processor writes streamed assistant parts to the hinted directory store", () =>
+  provideTmpdirServer(
+    ({ dir, llm }) =>
+      Effect.gen(function* () {
+        const { processors, session, provider } = yield* boot()
+        const target = yield* Effect.acquireRelease(
+          Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-test-target-"))),
+          (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+        )
+
+        yield* llm.text("target-only response")
+
+        const chat = yield* session.create({ title: "copied processor source" })
+        const sourceParent = yield* user(chat.id, "source hi", dir)
+        yield* assistant(chat.id, sourceParent.id, dir, dir)
+        yield* Effect.promise(() => fs.cp(path.join(dir, ".agents"), path.join(target, ".agents"), { recursive: true }))
+
+        const targetParent = yield* user(chat.id, "target hi", target)
+        const targetAssistant = yield* assistant(chat.id, targetParent.id, target, target)
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: targetAssistant,
+          sessionID: chat.id,
+          model: mdl,
+        })
+
+        const value = yield* handle.process({
+          user: {
+            id: targetParent.id,
+            sessionID: chat.id,
+            role: "user",
+            time: targetParent.time,
+            agent: targetParent.agent,
+            model: { providerID: ref.providerID, modelID: ref.modelID },
+          } satisfies SessionV1.User,
+          sessionID: chat.id,
+          model: mdl,
+          agent: agent(),
+          system: [],
+          messages: [{ role: "user", content: "target hi" }],
+          tools: {},
+        } satisfies LLM.StreamInput)
+
+        const sourceJsonl = yield* Effect.promise(() =>
+          fs.readFile(path.join(dir, ".agents", "atree", "sessions", chat.id, "session.jsonl"), "utf8"),
+        )
+        const targetJsonl = yield* Effect.promise(() =>
+          fs.readFile(path.join(target, ".agents", "atree", "sessions", chat.id, "session.jsonl"), "utf8"),
+        )
+
+        expect(value).toBe("continue")
+        expect(targetJsonl).toContain("target-only response")
+        expect(sourceJsonl).not.toContain("target-only response")
       }),
     { config: (url) => providerCfg(url) },
   ),
