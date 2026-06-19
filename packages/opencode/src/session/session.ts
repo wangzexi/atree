@@ -516,21 +516,21 @@ export interface Interface {
     workspaceID?: WorkspaceV2.ID
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
-  readonly touch: (sessionID: SessionID) => Effect.Effect<void>
+  readonly touch: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string } & DirectoryOption) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number | null } & DirectoryOption) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type & DirectoryOption) => Effect.Effect<void>
-  readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset }) => Effect.Effect<void>
+  readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset } & DirectoryOption) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
     revert: Info["revert"]
     summary: Info["summary"]
-  }) => Effect.Effect<void>
-  readonly clearRevert: (sessionID: SessionID) => Effect.Effect<void>
-  readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] }) => Effect.Effect<void>
-  readonly setShare: (input: { sessionID: SessionID; share: Info["share"] }) => Effect.Effect<void>
-  readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] }) => Effect.Effect<void>
+  } & DirectoryOption) => Effect.Effect<void>
+  readonly clearRevert: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void>
+  readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] } & DirectoryOption) => Effect.Effect<void>
+  readonly setShare: (input: { sessionID: SessionID; share: Info["share"] } & DirectoryOption) => Effect.Effect<void>
+  readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] } & DirectoryOption) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number } & DirectoryOption) => Effect.Effect<
     SessionV1.WithParts[],
@@ -1003,8 +1003,8 @@ export const layer: Layer.Layer<
         yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
       })
 
-    const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID) {
-      yield* patch(sessionID, { time: { updated: Date.now() } }).pipe(Effect.orDie)
+    const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID, options?: DirectoryOption) {
+      yield* patch(sessionID, { time: { updated: Date.now() } }, { directory: options?.directory }).pipe(Effect.orDie)
     })
 
     const setTitle = Effect.fn("Session.setTitle")(function* (
@@ -1030,8 +1030,11 @@ export const layer: Layer.Layer<
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
       sessionID: SessionID
       permission: PermissionV1.Ruleset
+      directory?: string
     }) {
-      yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } }).pipe(
+      yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } }, {
+        directory: input.directory,
+      }).pipe(
         Effect.orDie,
       )
     })
@@ -1040,36 +1043,57 @@ export const layer: Layer.Layer<
       sessionID: SessionID
       revert: Info["revert"]
       summary: Info["summary"]
+      directory?: string
     }) {
-      yield* patch(input.sessionID, {
+      yield* patch(
+        input.sessionID,
+        {
         summary: input.summary,
         time: { updated: Date.now() },
         revert: input.revert,
-      }).pipe(Effect.orDie)
+        },
+        { directory: input.directory },
+      ).pipe(Effect.orDie)
     })
 
-    const clearRevert = Effect.fn("Session.clearRevert")(function* (sessionID: SessionID) {
-      yield* patch(sessionID, { time: { updated: Date.now() }, revert: null }).pipe(Effect.orDie)
+    const clearRevert = Effect.fn("Session.clearRevert")(function* (sessionID: SessionID, options?: DirectoryOption) {
+      yield* patch(sessionID, { time: { updated: Date.now() }, revert: null }, { directory: options?.directory }).pipe(
+        Effect.orDie,
+      )
     })
 
     const setSummary = Effect.fn("Session.setSummary")(function* (input: {
       sessionID: SessionID
       summary: Info["summary"]
+      directory?: string
     }) {
-      yield* patch(input.sessionID, { time: { updated: Date.now() }, summary: input.summary }).pipe(Effect.orDie)
+      yield* patch(input.sessionID, { time: { updated: Date.now() }, summary: input.summary }, { directory: input.directory }).pipe(
+        Effect.orDie,
+      )
     })
 
-    const setShare = Effect.fn("Session.setShare")(function* (input: { sessionID: SessionID; share: Info["share"] }) {
-      yield* patch(input.sessionID, { share: input.share ?? null, time: { updated: Date.now() } }).pipe(Effect.orDie)
+    const setShare = Effect.fn("Session.setShare")(function* (input: {
+      sessionID: SessionID
+      share: Info["share"]
+      directory?: string
+    }) {
+      yield* patch(
+        input.sessionID,
+        { share: input.share ?? null, time: { updated: Date.now() } },
+        { directory: input.directory },
+      ).pipe(Effect.orDie)
     })
 
     const setWorkspace = Effect.fn("Session.setWorkspace")(function* (input: {
       sessionID: SessionID
       workspaceID: Info["workspaceID"]
+      directory?: string
     }) {
-      yield* patch(input.sessionID, { workspaceID: input.workspaceID, time: { updated: Date.now() } }).pipe(
-        Effect.orDie,
-      )
+      yield* patch(
+        input.sessionID,
+        { workspaceID: input.workspaceID, time: { updated: Date.now() } },
+        { directory: input.directory },
+      ).pipe(Effect.orDie)
     })
 
     const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {

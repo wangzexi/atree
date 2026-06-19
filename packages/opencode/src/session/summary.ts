@@ -103,8 +103,10 @@ export const layer = Layer.effect(
       sessionID: SessionID
       messageID: MessageID
     }) {
+      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* sessions.setSummary({
         sessionID: input.sessionID,
+        directory: current.directory,
         summary: {
           additions: 0,
           deletions: 0,

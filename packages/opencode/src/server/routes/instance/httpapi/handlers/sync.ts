@@ -4,6 +4,7 @@ import { Session } from "@/session/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { NotFoundError } from "@/storage/storage"
 import { EventTable } from "@opencode-ai/core/event/sql"
 import { asc } from "drizzle-orm"
 import { and } from "drizzle-orm"
@@ -61,8 +62,11 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     const steal = Effect.fn("SyncHttpApi.steal")(function* (ctx: { payload: typeof SessionPayload.Type }) {
       const workspaceID = yield* InstanceState.workspaceID
       if (!workspaceID) return yield* new HttpApiError.BadRequest({})
+      const current = yield* session.get(ctx.payload.sessionID).pipe(
+        Effect.catchIf(NotFoundError.isInstance, () => Effect.fail(new HttpApiError.BadRequest({}))),
+      )
 
-      yield* session.setWorkspace({ sessionID: ctx.payload.sessionID, workspaceID })
+      yield* session.setWorkspace({ sessionID: ctx.payload.sessionID, directory: current.directory, workspaceID })
 
       yield* Effect.logInfo("sync session stolen", { sessionID: ctx.payload.sessionID, workspaceID })
 

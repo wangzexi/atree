@@ -575,7 +575,7 @@ export const layer = Layer.effect(
     const sessionWarp = Effect.fn("Workspace.sessionWarp")(function* (input: SessionWarpInput) {
       return yield* Effect.gen(function* () {
         const current = yield* db
-          .select({ workspaceID: SessionTable.workspace_id })
+          .select({ workspaceID: SessionTable.workspace_id, directory: SessionTable.directory })
           .from(SessionTable)
           .where(eq(SessionTable.id, input.sessionID))
           .get()
@@ -637,7 +637,11 @@ export const layer = Layer.effect(
         }
 
         if (input.workspaceID === null) {
-          yield* session.setWorkspace({ sessionID: input.sessionID, workspaceID: undefined })
+          yield* session.setWorkspace({
+            sessionID: input.sessionID,
+            directory: current?.directory ?? undefined,
+            workspaceID: undefined,
+          })
 
           return
         }
@@ -653,7 +657,11 @@ export const layer = Layer.effect(
         const target = yield* WorkspaceAdapterRuntime.target(space)
 
         if (target.type === "local") {
-          yield* session.setWorkspace({ sessionID: input.sessionID, workspaceID: input.workspaceID })
+          yield* session.setWorkspace({
+            sessionID: input.sessionID,
+            directory: current?.directory ?? undefined,
+            workspaceID: input.workspaceID,
+          })
 
           return
         }
@@ -725,7 +733,11 @@ export const layer = Layer.effect(
           })
         }
 
-        yield* session.setWorkspace({ sessionID: input.sessionID, workspaceID: input.workspaceID })
+        yield* session.setWorkspace({
+          sessionID: input.sessionID,
+          directory: current?.directory ?? undefined,
+          workspaceID: input.workspaceID,
+        })
       })
     })
 

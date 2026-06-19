@@ -77,6 +77,7 @@ export const layer = Layer.effect(
       yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: diffs })
       yield* sessions.setRevert({
         sessionID: input.sessionID,
+        directory: session.directory,
         revert: rev,
         summary: {
           additions: diffs.reduce((sum, x) => sum + x.additions, 0),
@@ -93,7 +94,7 @@ export const layer = Layer.effect(
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       if (!session.revert) return session
       if (session.revert.snapshot) yield* snap.restore(session.revert.snapshot)
-      yield* sessions.clearRevert(input.sessionID)
+      yield* sessions.clearRevert(input.sessionID, { directory: session.directory })
       return yield* sessions.get(input.sessionID).pipe(Effect.orDie)
     })
 
@@ -130,7 +131,7 @@ export const layer = Layer.effect(
           }
         }
       }
-      yield* sessions.clearRevert(sessionID)
+      yield* sessions.clearRevert(sessionID, { directory: session.directory })
     })
 
     return Service.of({ revert, unrevert, cleanup })

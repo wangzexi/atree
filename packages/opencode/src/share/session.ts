@@ -26,14 +26,16 @@ export const layer = Layer.effect(
     const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID) {
       const conf = yield* cfg.get()
       if (conf.share === "disabled") throw new Error("Sharing is disabled in configuration")
+      const current = yield* session.get(sessionID)
       const result = yield* shareNext.create(sessionID)
-      yield* session.setShare({ sessionID, share: { url: result.url } })
+      yield* session.setShare({ sessionID, directory: current.directory, share: { url: result.url } })
       return result
     })
 
     const unshare = Effect.fn("SessionShare.unshare")(function* (sessionID: SessionID) {
       yield* shareNext.remove(sessionID)
-      yield* session.setShare({ sessionID, share: undefined })
+      const current = yield* session.get(sessionID)
+      yield* session.setShare({ sessionID, directory: current.directory, share: undefined })
     })
 
     const create = Effect.fn("SessionShare.create")(function* (input?: Session.CreateInput) {

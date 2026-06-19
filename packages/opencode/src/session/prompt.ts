@@ -1108,7 +1108,7 @@ export const layer = Layer.effect(
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage(input)
-      yield* sessions.touch(input.sessionID)
+      yield* sessions.touch(input.sessionID, { directory: session.directory })
 
       const permissions: PermissionV1.Rule[] = []
       for (const [t, enabled] of Object.entries(input.tools ?? {})) {
@@ -1116,7 +1116,7 @@ export const layer = Layer.effect(
       }
       if (permissions.length > 0) {
         session.permission = permissions
-        yield* sessions.setPermission({ sessionID: session.id, permission: permissions })
+        yield* sessions.setPermission({ sessionID: session.id, permission: permissions, directory: session.directory })
       }
 
       if (input.noReply === true) return message
