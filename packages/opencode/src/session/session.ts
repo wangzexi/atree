@@ -522,33 +522,44 @@ export interface Interface {
   readonly setTitle: (input: { sessionID: SessionID; title: string } & DirectoryOption) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number | null } & DirectoryOption) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type & DirectoryOption) => Effect.Effect<void>
-  readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset } & DirectoryOption) => Effect.Effect<void>
-  readonly setRevert: (input: {
-    sessionID: SessionID
-    revert: Info["revert"]
-    summary: Info["summary"]
-  } & DirectoryOption) => Effect.Effect<void>
+  readonly setPermission: (
+    input: { sessionID: SessionID; permission: PermissionV1.Ruleset } & DirectoryOption,
+  ) => Effect.Effect<void>
+  readonly setRevert: (
+    input: {
+      sessionID: SessionID
+      revert: Info["revert"]
+      summary: Info["summary"]
+    } & DirectoryOption,
+  ) => Effect.Effect<void>
   readonly clearRevert: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void>
-  readonly setSummary: (input: { sessionID: SessionID; summary: Info["summary"] } & DirectoryOption) => Effect.Effect<void>
+  readonly setSummary: (
+    input: { sessionID: SessionID; summary: Info["summary"] } & DirectoryOption,
+  ) => Effect.Effect<void>
   readonly setShare: (input: { sessionID: SessionID; share: Info["share"] } & DirectoryOption) => Effect.Effect<void>
-  readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] } & DirectoryOption) => Effect.Effect<void>
+  readonly setWorkspace: (
+    input: { sessionID: SessionID; workspaceID: Info["workspaceID"] } & DirectoryOption,
+  ) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
-  readonly messages: (input: { sessionID: SessionID; limit?: number } & DirectoryOption) => Effect.Effect<
-    SessionV1.WithParts[],
-    NotFound
-  >
+  readonly messages: (
+    input: { sessionID: SessionID; limit?: number } & DirectoryOption,
+  ) => Effect.Effect<SessionV1.WithParts[], NotFound>
   readonly children: (parentID: SessionID, options?: DirectoryOption) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T, options?: DirectoryOption) => Effect.Effect<T>
-  readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID } & DirectoryOption) => Effect.Effect<MessageID>
+  readonly removeMessage: (
+    input: { sessionID: SessionID; messageID: MessageID } & DirectoryOption,
+  ) => Effect.Effect<MessageID>
   readonly removePart: (
     input: { sessionID: SessionID; messageID: MessageID; partID: PartID } & DirectoryOption,
   ) => Effect.Effect<PartID>
-  readonly getPart: (input: {
-    sessionID: SessionID
-    messageID: MessageID
-    partID: PartID
-  } & DirectoryOption) => Effect.Effect<SessionV1.Part | undefined>
+  readonly getPart: (
+    input: {
+      sessionID: SessionID
+      messageID: MessageID
+      partID: PartID
+    } & DirectoryOption,
+  ) => Effect.Effect<SessionV1.Part | undefined>
   readonly updatePart: <T extends SessionV1.Part>(part: T, options?: DirectoryOption) => Effect.Effect<T>
   readonly updatePartDelta: (input: {
     sessionID: SessionID
@@ -835,10 +846,7 @@ export const layer: Layer.Layer<
       return [...byID.values()]
     })
 
-    const remove: Interface["remove"] = Effect.fnUntraced(function* (
-      sessionID: SessionID,
-      options?: DirectoryOption,
-    ) {
+    const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID, options?: DirectoryOption) {
       const session = yield* getWithDirectory(sessionID, options?.directory)
       try {
         // `remove` needs to work in all cases, such as broken sessions that
@@ -972,13 +980,13 @@ export const layer: Layer.Layer<
       const original = yield* get(input.sessionID)
       const title = getForkedTitle(original.title)
       const session = yield* createNext({
-        directory: ctx.directory,
-        path: sessionPath(ctx.worktree, ctx.directory),
+        directory: original.directory,
+        path: sessionPath(ctx.worktree, original.directory),
         workspaceID: original.workspaceID,
         title,
         metadata: structuredClone(original.metadata),
       })
-      const msgs = yield* messages({ sessionID: input.sessionID })
+      const msgs = yield* messages({ sessionID: input.sessionID, directory: original.directory })
       const idMap = new Map<string, MessageID>()
 
       for (const msg of msgs) {
@@ -987,12 +995,15 @@ export const layer: Layer.Layer<
         idMap.set(msg.info.id, newID)
 
         const parentID = msg.info.role === "assistant" && msg.info.parentID ? idMap.get(msg.info.parentID) : undefined
-        const cloned = yield* updateMessage({
-          ...msg.info,
-          sessionID: session.id,
-          id: newID,
-          ...(parentID && { parentID }),
-        })
+        const cloned = yield* updateMessage(
+          {
+            ...msg.info,
+            sessionID: session.id,
+            id: newID,
+            ...(parentID && { parentID }),
+          },
+          { directory: session.directory },
+        )
 
         for (const part of msg.parts) {
           const p: SessionV1.Part = {
@@ -1004,7 +1015,7 @@ export const layer: Layer.Layer<
           if (p.type === "compaction" && p.tail_start_id) {
             p.tail_start_id = idMap.get(p.tail_start_id)
           }
-          yield* updatePart(p)
+          yield* updatePart(p, { directory: session.directory })
         }
       }
       return session
@@ -1047,10 +1058,16 @@ export const layer: Layer.Layer<
       )
     })
 
-    const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type & DirectoryOption) {
-      yield* patch(input.sessionID, { metadata: input.metadata, time: { updated: Date.now() } }, {
-        directory: input.directory,
-      }).pipe(Effect.orDie)
+    const setMetadata = Effect.fn("Session.setMetadata")(function* (
+      input: typeof SetMetadataInput.Type & DirectoryOption,
+    ) {
+      yield* patch(
+        input.sessionID,
+        { metadata: input.metadata, time: { updated: Date.now() } },
+        {
+          directory: input.directory,
+        },
+      ).pipe(Effect.orDie)
     })
 
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
@@ -1058,11 +1075,13 @@ export const layer: Layer.Layer<
       permission: PermissionV1.Ruleset
       directory?: string
     }) {
-      yield* patch(input.sessionID, { permission: [...input.permission], time: { updated: Date.now() } }, {
-        directory: input.directory,
-      }).pipe(
-        Effect.orDie,
-      )
+      yield* patch(
+        input.sessionID,
+        { permission: [...input.permission], time: { updated: Date.now() } },
+        {
+          directory: input.directory,
+        },
+      ).pipe(Effect.orDie)
     })
 
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
@@ -1074,9 +1093,9 @@ export const layer: Layer.Layer<
       yield* patch(
         input.sessionID,
         {
-        summary: input.summary,
-        time: { updated: Date.now() },
-        revert: input.revert,
+          summary: input.summary,
+          time: { updated: Date.now() },
+          revert: input.revert,
         },
         { directory: input.directory },
       ).pipe(Effect.orDie)
@@ -1093,9 +1112,11 @@ export const layer: Layer.Layer<
       summary: Info["summary"]
       directory?: string
     }) {
-      yield* patch(input.sessionID, { time: { updated: Date.now() }, summary: input.summary }, { directory: input.directory }).pipe(
-        Effect.orDie,
-      )
+      yield* patch(
+        input.sessionID,
+        { time: { updated: Date.now() }, summary: input.summary },
+        { directory: input.directory },
+      ).pipe(Effect.orDie)
     })
 
     const setShare = Effect.fn("Session.setShare")(function* (input: {
@@ -1176,9 +1197,7 @@ export const layer: Layer.Layer<
           limit: size,
           before,
           directory: session.directory,
-        }).pipe(
-          Effect.provideService(Database.Service, database),
-        )
+        }).pipe(Effect.provideService(Database.Service, database))
         if (page.items.length === 0) break
         for (let i = page.items.length - 1; i >= 0; i--) {
           const item = page.items[i]
@@ -1244,43 +1263,41 @@ export const layer: Layer.Layer<
     })
 
     /** Finds the first message matching the predicate, searching newest-first. */
-    const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (
-      sessionID,
-      predicate,
-      options,
-    ) {
-      if (!sessionID) return Option.none<SessionV1.WithParts>()
-      const session = yield* getWithDirectory(sessionID, options?.directory)
-      const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-      if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) {
-        return Option.none<SessionV1.WithParts>()
-      }
-      const canUseCache = yield* canUseMessageProjectionCache(session)
-      const size = 50
-      let before: string | undefined
-      if (canUseCache) {
-        while (true) {
-          const page = yield* MessageV2.page({ sessionID, limit: size, before, directory: session.directory }).pipe(
-            Effect.provideService(Database.Service, database),
-            Effect.catchIf(NotFoundError.isInstance, () =>
-              Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
-            ),
-          )
-          if (page.items.length === 0) break
-          for (let i = page.items.length - 1; i >= 0; i--) {
-            const item = filterRemovedProjection(page.items[i] ? [page.items[i]] : [], fileProjection)[0]
-            if (item && predicate(item)) return Option.some(item)
-          }
-          if (!page.more || !page.cursor) break
-          before = page.cursor
+    const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(
+      function* (sessionID, predicate, options) {
+        if (!sessionID) return Option.none<SessionV1.WithParts>()
+        const session = yield* getWithDirectory(sessionID, options?.directory)
+        const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
+        if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) {
+          return Option.none<SessionV1.WithParts>()
         }
-      }
-      for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
-        const item = fileProjection.messages[i]
-        if (item && predicate(item)) return Option.some(item)
-      }
-      return Option.none<SessionV1.WithParts>()
-    })
+        const canUseCache = yield* canUseMessageProjectionCache(session)
+        const size = 50
+        let before: string | undefined
+        if (canUseCache) {
+          while (true) {
+            const page = yield* MessageV2.page({ sessionID, limit: size, before, directory: session.directory }).pipe(
+              Effect.provideService(Database.Service, database),
+              Effect.catchIf(NotFoundError.isInstance, () =>
+                Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
+              ),
+            )
+            if (page.items.length === 0) break
+            for (let i = page.items.length - 1; i >= 0; i--) {
+              const item = filterRemovedProjection(page.items[i] ? [page.items[i]] : [], fileProjection)[0]
+              if (item && predicate(item)) return Option.some(item)
+            }
+            if (!page.more || !page.cursor) break
+            before = page.cursor
+          }
+        }
+        for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
+          const item = fileProjection.messages[i]
+          if (item && predicate(item)) return Option.some(item)
+        }
+        return Option.none<SessionV1.WithParts>()
+      },
+    )
 
     return Service.of({
       list,

@@ -19,7 +19,12 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { GlobalBus } from "@/bus/global"
-import { appendSessionJsonl, readSessionJsonlMessages, readSessionStore, writeSessionStore } from "@/atree/session-store"
+import {
+  appendSessionJsonl,
+  readSessionJsonlMessages,
+  readSessionStore,
+  writeSessionStore,
+} from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(
@@ -395,7 +400,9 @@ describe("Session", () => {
       const child = yield* provideInstance(source)(
         session.create({ parentID: parent.id, title: "copied-child", metadata: { icon: "🧭" } }),
       )
-      yield* Effect.promise(() => fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
       const targetCtx = yield* provideInstance(target)(InstanceState.context)
 
       const children = yield* provideInstance(target)(session.children(parent.id))
@@ -790,10 +797,17 @@ describe("Session", () => {
       yield* session.remove(info.id)
 
       expect(yield* Effect.promise(() => readSessionStore(instance.directory, info.id))).toBeUndefined()
-      expect(yield* Effect.promise(() => fs.stat(root).then(() => true, () => false))).toBe(false)
-      expect((yield* session.list({ directory: instance.directory, archived: true })).map((item) => item.id)).not.toContain(
-        info.id,
-      )
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(root).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
+      expect(
+        (yield* session.list({ directory: instance.directory, archived: true })).map((item) => item.id),
+      ).not.toContain(info.id)
     }),
   )
 
@@ -825,7 +839,14 @@ describe("Session", () => {
       yield* session.remove(sessionID, { directory })
 
       expect(yield* Effect.promise(() => readSessionStore(directory, sessionID))).toBeUndefined()
-      expect(yield* Effect.promise(() => fs.stat(root).then(() => true, () => false))).toBe(false)
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(root).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
     }),
   )
 
@@ -833,26 +854,17 @@ describe("Session", () => {
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const instance = yield* TestInstance
-      const ctx = yield* InstanceState.context
-      const sourceID = "ses_file_fork_source" as SessionID
+      const nodeDirectory = path.join(instance.directory, "node-fork")
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      const source = yield* session.create({
+        title: "File fork source",
+        directory: nodeDirectory,
+        metadata: { icon: "🧭" },
+      })
+      const sourceID = source.id
       const messageID = MessageID.ascending()
       const partID = PartID.ascending()
       const filePartID = PartID.ascending()
-      const source = {
-        id: sourceID,
-        slug: "file-fork-source",
-        version: "test",
-        projectID: ctx.project.id,
-        directory: instance.directory,
-        path: ".",
-        title: "File fork source",
-        metadata: { icon: "🧭" },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        time: { created: 10, updated: 20 },
-      } as any
-
-      yield* Effect.promise(() => writeSessionStore(source))
       yield* Effect.promise(() =>
         appendSessionJsonl(source, {
           type: "message.updated",
@@ -900,11 +912,11 @@ describe("Session", () => {
       )
       const forkMessages = yield* Effect.promise(() => readSessionJsonlMessages(fork as any))
       const forkText = JSON.stringify(forkMessages)
-      const forkAssetsRoot = path.join(instance.directory, ".agents", "atree", "sessions", fork.id, "assets")
+      const forkAssetsRoot = path.join(nodeDirectory, ".agents", "atree", "sessions", fork.id, "assets")
       const forkAssets = yield* Effect.promise(() => fs.readdir(forkAssetsRoot))
       const forkAsset = yield* Effect.promise(() => fs.readFile(path.join(forkAssetsRoot, forkAssets[0]!)))
 
-      expect(fork.directory).toBe(instance.directory)
+      expect(fork.directory).toBe(nodeDirectory)
       expect(fork.metadata).toEqual({ icon: "🧭" })
       expect(forkText).toContain("copy me from jsonl")
       expect(forkText).toContain("data:image/png;base64,Zm9yay1hc3NldA==")
