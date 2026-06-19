@@ -236,4 +236,72 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(messages[0]).toMatchObject({ id: "msg_core_prompt", type: "user", text: "record this prompt" })
     }),
   )
+
+  it.effect("replays text part deltas from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_delta",
+          title: "Core delta",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_delta", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_assistant_delta",
+              role: "assistant",
+              model: { providerID: "test", modelID: "test", variant: "default" },
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_delta",
+              messageID: "msg_core_assistant_delta",
+              type: "text",
+              text: "",
+            },
+          },
+          {
+            type: "message.part.delta",
+            messageID: "msg_core_assistant_delta",
+            partID: "prt_core_delta",
+            field: "text",
+            delta: "hello ",
+          },
+          {
+            type: "message.part.delta",
+            messageID: "msg_core_assistant_delta",
+            partID: "prt_core_delta",
+            field: "text",
+            delta: "delta",
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({ sessionID: SessionV2.ID.make("ses_core_delta"), order: "asc" })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_assistant_delta",
+        type: "assistant",
+        content: [{ type: "text", text: "hello delta" }],
+      })
+    }),
+  )
 })

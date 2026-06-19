@@ -203,6 +203,12 @@ function textParts(parts: V1Part[]) {
   return result
 }
 
+function appendPartDelta(part: V1Part, field: string, delta: string) {
+  const record = part as unknown as Record<string, unknown>
+  const current = record[field]
+  record[field] = typeof current === "string" ? current + delta : delta
+}
+
 function toV2Message(message: V1Message, parts: V1Part[]): SessionMessage.Message | undefined {
   const id = SessionMessage.ID.make(message.id)
   const created = DateTime.makeUnsafe(messageCreated(message, 0))
@@ -224,11 +230,14 @@ function toV2Message(message: V1Message, parts: V1Part[]): SessionMessage.Messag
         id: ModelV2.ID.make(message.model?.modelID ?? message.model?.id ?? "unknown"),
         variant: ModelV2.VariantID.make(message.model?.variant ?? "default"),
       },
-      content: textParts(parts).map((text, index) => ({
-        type: "text" as const,
-        id: `${id}-text-${index}`,
-        text,
-      })),
+      content: textParts(parts).map(
+        (text, index) =>
+          new SessionMessage.AssistantText({
+            type: "text",
+            id: `${id}-text-${index}`,
+            text,
+          }),
+      ),
       time: {
         created,
         completed:
@@ -272,6 +281,15 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const next = message.parts.filter((item) => item.id !== part.id)
       next.push(part)
       messages.set(part.messageID, { info: message.info, parts: next })
+    }
+    if (entry.type === "message.part.delta") {
+      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
+      const partID = typeof entry.partID === "string" ? entry.partID : undefined
+      const field = typeof entry.field === "string" ? entry.field : undefined
+      const delta = typeof entry.delta === "string" ? entry.delta : undefined
+      if (!messageID || !partID || !field || delta === undefined) continue
+      const part = messages.get(messageID)?.parts.find((item) => item.id === partID)
+      if (part) appendPartDelta(part, field, delta)
     }
     if (entry.type === "message.removed" && typeof entry.messageID === "string") {
       removed.add(entry.messageID)
