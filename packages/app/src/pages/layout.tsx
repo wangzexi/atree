@@ -2568,6 +2568,9 @@ export default function Layout(props: ParentProps) {
         void fetchSessionSchedules(session)
       }
     }
+    const directoryLoadVersion = new Map<string, number>()
+    const isCurrentDirectoryLoad = (directory: string, version: number) => directoryLoadVersion.get(directory) === version
+
     const probeChildDirectories = async (children: AtreeDirectoryNode[]) => {
       await Promise.all(
         children.map(async (child) => {
@@ -2606,6 +2609,8 @@ export default function Layout(props: ParentProps) {
       opts?: { force?: boolean; probeChildren?: boolean },
     ) => {
       const key = directoryKey(directory)
+      const version = (directoryLoadVersion.get(key) ?? 0) + 1
+      directoryLoadVersion.set(key, version)
       ensureDirectory(directory, directoryKey(root) === key)
       const state = tree.directory[key]
       if (!opts?.force && state?.loaded) {
@@ -2628,6 +2633,7 @@ export default function Layout(props: ParentProps) {
           }),
           sessionClient.session.list({ directory, roots: true }),
         ])
+        if (!isCurrentDirectoryLoad(key, version)) return
         const children = toDirectoryNodes(files.data)
         setTree("directory", key, (prev) => ({
           ...prev,
@@ -2636,11 +2642,14 @@ export default function Layout(props: ParentProps) {
           children,
           sessions: sessions.data ?? [],
         }))
+        if (!isCurrentDirectoryLoad(key, version)) return
         preloadSessionSchedules(sessions.data ?? [])
         for (const child of children) ensureDirectory(child.absolute)
         await probeChildDirectories(children)
+        if (!isCurrentDirectoryLoad(key, version)) return
         setTree("directory", key, (prev) => ({ ...prev, childrenProbed: true }))
       } catch (error) {
+        if (!isCurrentDirectoryLoad(key, version)) return
         setTree("directory", key, (prev) => ({ ...prev, loading: false }))
         const message = errorMessage(error, directory)
 
