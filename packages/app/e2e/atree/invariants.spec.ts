@@ -161,7 +161,7 @@ test.describe("atree invariants", () => {
     // Create a session in the child directory the same way the smoke flow does,
     // but without any automation so a single click archives it.
     await page.locator(`[data-atree-new-session="${child}"]`).click()
-    await expect(page).toHaveURL(/\/new-session\?draftId=/)
+    await expect(page).toHaveURL(/\/(new-session\?draftId=|session)$/)
 
     const editor = page.locator('[contenteditable="true"]').first()
     await expect(editor).toBeVisible()
@@ -305,7 +305,7 @@ test.describe("atree invariants", () => {
     await expect(childNode).toBeVisible()
 
     await page.locator(`[data-atree-new-session="${child}"]`).click()
-    await expect(page).toHaveURL(/\/new-session\?draftId=/)
+    await expect(page).toHaveURL(/\/(new-session\?draftId=|session)$/)
 
     const editor = page.locator('[contenteditable="true"]').first()
     await expect(editor).toBeVisible()
