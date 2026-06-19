@@ -16,6 +16,7 @@ import { SessionSummary } from "@/session/summary"
 import { Todo } from "@/session/todo"
 import { Schedule } from "@/session/schedule"
 import { MessageID, PartID, SessionID } from "@/session/schema"
+import { InstanceState } from "@/effect/instance-state"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
 import * as Stream from "effect/Stream"
@@ -88,8 +89,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const scope = yield* Scope.Scope
 
     const list = Effect.fn("SessionHttpApi.list")(function* (ctx: { query: typeof ListQuery.Type }) {
+      const directory =
+        ctx.query.scope === "project" ? undefined : ctx.query.directory ?? (yield* InstanceState.context).directory
       return yield* session.list({
-        directory: ctx.query.scope === "project" ? undefined : ctx.query.directory,
+        directory,
         scope: ctx.query.scope,
         path: ctx.query.path,
         roots: ctx.query.roots,
