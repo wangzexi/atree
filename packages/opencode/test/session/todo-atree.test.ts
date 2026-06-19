@@ -2,12 +2,14 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@opencode-ai/core/global"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { readSessionTodoState, writeSessionTodoState } from "../../src/atree/todo-store"
 import { writeSessionStore } from "../../src/atree/session-store"
+import { writeWorkspaceRoot } from "../../src/atree/state"
 import { Session } from "../../src/session/session"
 import { type SessionID } from "../../src/session/schema"
 import { Todo } from "../../src/session/todo"
@@ -171,6 +173,53 @@ describe("atree todo state", () => {
         db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
       )
       expect(sessionRow?.directory).toBe(directory)
+    }),
+  )
+
+  it.instance("updates todo state for a nested file-backed session found from the persisted atree root", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-root-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = "ses_nested_todo_update" as SessionID
+      const now = Date.now()
+      const nodeDirectory = path.join(instance.directory, "nested", "todo-node")
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "nested-todo-update",
+          version: "test",
+          projectID: "proj_file",
+          directory: nodeDirectory,
+          path: "nested/todo-node",
+          title: "Nested todo update",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* todo.update({
+        sessionID,
+        todos: [{ content: "write nested todo", status: "in_progress", priority: "high" }],
+      })
+
+      expect(yield* Effect.promise(() => readSessionTodoState(nodeDirectory, sessionID))).toEqual([
+        { content: "write nested todo", status: "in_progress", priority: "high" },
+      ])
+      const sessionRow = yield* Database.Service.use(({ db }) =>
+        db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+      )
+      expect(sessionRow?.directory).toBe(nodeDirectory)
     }),
   )
 

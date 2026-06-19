@@ -9,8 +9,9 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { readSessionStore } from "@/atree/session-store"
+import { findSessionStore, readSessionStore } from "@/atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "@/atree/todo-store"
+import { readWorkspaceState } from "@/atree/state"
 import { InstanceRef } from "@/effect/instance-ref"
 
 export const Info = Schema.Struct({
@@ -137,12 +138,26 @@ export const layer = Layer.effect(
       if (row?.directory) return row.directory
 
       const instance = yield* InstanceRef
-      if (!instance) return
-      const fileSession = yield* Effect.promise(() => readSessionStore(instance.directory, sessionID))
-      return fileSession ? instance.directory : undefined
+      if (instance) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(instance.directory, sessionID))
+        if (fileSession) return instance.directory
+      }
+
+      const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+        Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+      )
+      if (!state.rootDirectory) return
+      const fileSession = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
+      if (!fileSession) return
+      yield* upsertFileSessionCache(fileSession)
+      return fileSession.directory
     })
 
-    const update = Effect.fn("Todo.update")(function* (input: { sessionID: SessionID; todos: Info[]; directory?: string }) {
+    const update = Effect.fn("Todo.update")(function* (input: {
+      sessionID: SessionID
+      todos: Info[]
+      directory?: string
+    }) {
       const directory = yield* sessionDirectory(input.sessionID, input.directory)
       const fileSession = directory
         ? yield* Effect.promise(() => readSessionStore(directory, input.sessionID))
