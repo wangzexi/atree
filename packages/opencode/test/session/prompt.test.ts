@@ -583,6 +583,35 @@ it.instance("loop includes file-backed session history when database cache is mi
   }),
 )
 
+it.instance("loop writes assistant output to the session directory instead of the instance root", () =>
+  Effect.gen(function* () {
+    const { dir, llm } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const nodeDirectory = path.join(dir, "node-loop")
+    yield* ensureDir(nodeDirectory)
+    const chat = yield* sessions.create({ title: "Node loop", directory: nodeDirectory })
+
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "write from node session" }],
+    })
+    yield* llm.text("node response")
+
+    const result = yield* prompt.loop({ sessionID: chat.id })
+    const stored = yield* Effect.promise(() => readSessionJsonlMessages(chat))
+    const storedText = JSON.stringify(stored)
+
+    expect(result.info.role).toBe("assistant")
+    if (result.info.role !== "assistant") throw new Error("expected assistant message")
+    expect(result.info.path.cwd).toBe(nodeDirectory)
+    expect(storedText).toContain("write from node session")
+    expect(storedText).toContain("node response")
+  }),
+)
+
 it.instance("loop surfaces content-filter finishes as session errors", () =>
   Effect.gen(function* () {
     const { llm } = yield* useServerConfig(providerCfg)
@@ -2278,7 +2307,9 @@ it.instance(
 
       const stored = yield* Effect.promise(() => readSessionJsonlMessages(chat))
       const assistant = stored.findLast((message) => message.info.role === "assistant")
-      expect(assistant?.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: partial })]))
+      expect(assistant?.parts).toEqual(
+        expect.arrayContaining([expect.objectContaining({ type: "text", text: partial })]),
+      )
     }),
   5_000,
 )

@@ -1156,26 +1156,31 @@ export const layer = Layer.effect(
       return yield* loop({ sessionID: input.sessionID })
     })
 
-    const lastAssistant = Effect.fnUntraced(function* (sessionID: SessionID) {
-      const match = yield* sessions.findMessage(sessionID, (m) => m.info.role !== "user").pipe(Effect.orDie)
+    const lastAssistant = Effect.fnUntraced(function* (session: Session.Info) {
+      const sessionID = session.id
+      const match = yield* sessions
+        .findMessage(sessionID, (m) => m.info.role !== "user", { directory: session.directory })
+        .pipe(Effect.orDie)
       if (Option.isSome(match)) return match.value
-      const msgs = yield* sessions.messages({ sessionID, limit: 1 }).pipe(Effect.orDie)
+      const msgs = yield* sessions.messages({ sessionID, limit: 1, directory: session.directory }).pipe(Effect.orDie)
       if (msgs.length > 0) return msgs[0]
       throw new Error("Impossible")
     })
 
-    const runLoop: (sessionID: SessionID) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
-      function* (sessionID: SessionID) {
+    const runLoop: (session: Session.Info) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.run")(
+      function* (session: Session.Info) {
+        const sessionID = session.id
         const ctx = yield* InstanceState.context
         let structured: unknown
         let step = 0
-        const session = yield* sessions.get(sessionID).pipe(Effect.orDie)
 
         while (true) {
           yield* status.set(sessionID, { type: "busy" })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
-          let msgs = MessageV2.filterCompacted(yield* sessions.messages({ sessionID }).pipe(Effect.orDie))
+          let msgs = MessageV2.filterCompacted(
+            yield* sessions.messages({ sessionID, directory: session.directory }).pipe(Effect.orDie),
+          )
 
           const { user: lastUser, assistant: lastAssistant, finished: lastFinished, tasks } = MessageV2.latest(msgs)
 
@@ -1281,7 +1286,7 @@ export const layer = Layer.effect(
             mode: agent.name,
             agent: agent.name,
             variant: lastUser.model.variant,
-            path: { cwd: ctx.directory, root: ctx.worktree },
+            path: { cwd: session.directory, root: ctx.worktree },
             cost: 0,
             tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
             modelID: model.id,
@@ -1436,21 +1441,23 @@ export const layer = Layer.effect(
         }
 
         yield* compaction.prune({ sessionID, directory: session.directory }).pipe(Effect.ignore, Effect.forkIn(scope))
-        return yield* lastAssistant(sessionID)
+        return yield* lastAssistant(session)
       },
     )
 
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(input.sessionID), runLoop(input.sessionID))
+      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      return yield* state.ensureRunning(input.sessionID, lastAssistant(session), runLoop(session))
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
       const ready = yield* Latch.make()
-      return yield* state.startShell(input.sessionID, lastAssistant(input.sessionID), shellImpl(input, ready), ready)
+      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      return yield* state.startShell(input.sessionID, lastAssistant(session), shellImpl(input, ready), ready)
     })
 
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
