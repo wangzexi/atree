@@ -113,7 +113,7 @@ export interface Interface {
     message: string
     directory?: string
   }) => Effect.Effect<Info, InvalidExpression | InvalidRunAt | IntervalTooShort | LimitExceeded>
-  readonly delete: (scheduleID: ID) => Effect.Effect<void, NotFound>
+  readonly delete: (scheduleID: ID, options?: { directory?: string }) => Effect.Effect<void, NotFound>
   /** Manually fire the tick for a schedule (publishes Triggered). */
   readonly tick: (scheduleID: ID) => Effect.Effect<void>
   /** Record that a fire was processed by the runner. */
@@ -873,7 +873,10 @@ export const layer = Layer.effect(
       } satisfies Info
     })
 
-    const deleteSchedule: Interface["delete"] = Effect.fn("Schedule.delete")(function* (scheduleID: ID) {
+    const deleteSchedule: Interface["delete"] = Effect.fn("Schedule.delete")(function* (
+      scheduleID: ID,
+      options?: { directory?: string },
+    ) {
       const row = yield* db
         .select()
         .from(ScheduleTable)
@@ -891,7 +894,7 @@ export const layer = Layer.effect(
         scheduleID,
         sessionID: row.session_id as SessionID,
       })
-      yield* syncScheduleState(row.session_id as SessionID)
+      yield* syncScheduleState(row.session_id as SessionID, options?.directory)
     })
 
     const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (

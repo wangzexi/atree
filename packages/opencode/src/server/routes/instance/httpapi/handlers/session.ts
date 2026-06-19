@@ -150,7 +150,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
       yield* scheduleSvc.list(ctx.params.sessionID, { directory: info.directory })
-      return yield* scheduleSvc.delete(ctx.params.scheduleID).pipe(
+      return yield* scheduleSvc.delete(ctx.params.scheduleID, { directory: info.directory }).pipe(
         Effect.map(() => true),
         Effect.catchTag("ScheduleNotFound", () => Effect.fail(notFound("Schedule not found"))),
       )

@@ -386,6 +386,94 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
+    "deletes copied file-backed schedule state from the explicit target directory",
+    Effect.gen(function* () {
+      const schedules = yield* Schedule.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-delete-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const sessionID = "ses_copied_schedule_delete" as SessionID
+      const now = Date.now()
+      const storedSchedule = {
+        id: "sch_copied_schedule_delete",
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 60_000,
+        message: "delete copied schedule",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_copied_schedule_delete",
+          worktree: source.directory,
+          vcs: "git",
+          name: "copied schedule delete",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_copied_schedule_delete",
+          slug: "copied-schedule-delete",
+          directory: source.directory,
+          title: "Copied schedule delete",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "copied-schedule-delete",
+          version: "test",
+          projectID: "proj_copied_schedule_delete",
+          directory: source.directory,
+          path: ".",
+          title: "Copied schedule delete",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [storedSchedule]))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      const restored = yield* schedules.list(sessionID, { directory: target })
+      expect(restored).toHaveLength(1)
+      yield* schedules.delete(storedSchedule.id as Schedule.ID, { directory: target })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual([
+        storedSchedule,
+      ])
+    }),
+  )
+
+  it.instance(
     "restores recurring schedule run state from directory state",
     Effect.gen(function* () {
       const instance = yield* TestInstance
