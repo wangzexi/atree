@@ -255,6 +255,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
   })
   const messages = new Map<string, { info: V1Message; parts: V1Part[] }>()
   const removed = new Set<string>()
+  const removedParts = new Set<string>()
   let index = 0
   for (const line of raw.split(/\r?\n/)) {
     const trimmed = line.trim()
@@ -281,6 +282,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const next = message.parts.filter((item) => item.id !== part.id)
       next.push(part)
       messages.set(part.messageID, { info: message.info, parts: next })
+      removedParts.delete(`${part.messageID}:${part.id}`)
     }
     if (entry.type === "message.part.delta") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
@@ -288,6 +290,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const field = typeof entry.field === "string" ? entry.field : undefined
       const delta = typeof entry.delta === "string" ? entry.delta : undefined
       if (!messageID || !partID || !field || delta === undefined) continue
+      if (removedParts.has(`${messageID}:${partID}`)) continue
       const part = messages.get(messageID)?.parts.find((item) => item.id === partID)
       if (part) appendPartDelta(part, field, delta)
     }
@@ -295,10 +298,22 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       removed.add(entry.messageID)
       messages.delete(entry.messageID)
     }
+    if (entry.type === "message.part.removed") {
+      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
+      const partID = typeof entry.partID === "string" ? entry.partID : undefined
+      if (!messageID || !partID) continue
+      removedParts.add(`${messageID}:${partID}`)
+      const message = messages.get(messageID)
+      if (message) message.parts = message.parts.filter((part) => part.id !== partID)
+    }
   }
 
   return [...messages.values()]
     .filter((message) => !removed.has(message.info.id))
+    .map((message) => ({
+      ...message,
+      parts: message.parts.filter((part) => !removedParts.has(`${message.info.id}:${part.id}`)),
+    }))
     .sort((a, b) => messageCreated(a.info, index) - messageCreated(b.info, index) || a.info.id.localeCompare(b.info.id))
     .flatMap((message) => {
       const converted = toV2Message(message.info, message.parts)
