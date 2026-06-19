@@ -60,6 +60,7 @@ describe("atree session store", () => {
     expect(meta).not.toContain("directory:")
     expect(meta).not.toContain("projectID:")
     expect(meta).not.toContain("workspaceID:")
+    expect(meta).not.toContain("source:")
     expect(meta).not.toContain(directory)
     expect((await fs.stat(path.join(root, "session.jsonl"))).isFile()).toBe(true)
     expect((await fs.stat(path.join(root, "assets"))).isDirectory()).toBe(true)

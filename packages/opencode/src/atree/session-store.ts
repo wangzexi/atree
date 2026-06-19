@@ -43,7 +43,6 @@ function metaYaml(info: SessionInfo) {
     `share: ${yamlValue(info.share)}`,
     `summary: ${yamlValue(info.summary)}`,
     `revert: ${yamlValue(info.revert)}`,
-    `source: ${yamlValue("opencode")}`,
     yamlMetadata(info.metadata).trimEnd(),
     "",
   ].join("\n")
