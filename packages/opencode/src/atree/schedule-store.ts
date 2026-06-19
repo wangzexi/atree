@@ -1,6 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { ensureAtreeDirectoryStore } from "./directory-store"
+import { ensureSessionPayloadFilesByID } from "./session-store"
 
 export type StoredSchedule = {
   id: string
@@ -86,6 +87,7 @@ async function removeLegacySessionSchedule(directory: string, sessionID: string)
 
 export async function writeSessionScheduleState(directory: string, sessionID: string, schedules: StoredSchedule[]) {
   await ensureAtreeDirectoryStore(directory)
+  await ensureSessionPayloadFilesByID(directory, sessionID)
   await writeAtomic(sessionStatePath(directory, sessionID), {
     version: 1,
     updatedAt: Date.now(),

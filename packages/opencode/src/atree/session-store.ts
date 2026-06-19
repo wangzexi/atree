@@ -80,6 +80,10 @@ function sessionRoot(info: SessionInfo) {
   return path.join(info.directory, ".agents", "atree", "sessions", info.id)
 }
 
+function sessionRootByID(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID)
+}
+
 export async function writeSessionStore(info: SessionInfo) {
   await ensureAtreeDirectoryStore(info.directory)
   const root = sessionRoot(info)
@@ -99,6 +103,13 @@ export async function ensureSessionStore(info: SessionInfo) {
 export async function ensureSessionPayloadFiles(info: SessionInfo) {
   await ensureAtreeDirectoryStore(info.directory)
   const root = sessionRoot(info)
+  await fs.mkdir(path.join(root, "assets"), { recursive: true })
+  await writeIfMissing(path.join(root, "session.jsonl"), "")
+}
+
+export async function ensureSessionPayloadFilesByID(directory: string, sessionID: string) {
+  await ensureAtreeDirectoryStore(directory)
+  const root = sessionRootByID(directory, sessionID)
   await fs.mkdir(path.join(root, "assets"), { recursive: true })
   await writeIfMissing(path.join(root, "session.jsonl"), "")
 }

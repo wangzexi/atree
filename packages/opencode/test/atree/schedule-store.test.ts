@@ -85,6 +85,19 @@ describe("atree schedule store", () => {
     expect(await readSessionScheduleState(directory, "missing")).toEqual([])
   })
 
+  test("creates the session payload skeleton when writing schedule state", async () => {
+    const directory = await tempdir()
+    await writeSessionScheduleState(directory, "ses_skeleton", [])
+
+    const root = path.join(directory, ".agents", "atree", "sessions", "ses_skeleton")
+    expect(await fs.readFile(path.join(root, "session.jsonl"), "utf8")).toBe("")
+    expect((await fs.stat(path.join(root, "assets"))).isDirectory()).toBe(true)
+    expect(JSON.parse(await fs.readFile(path.join(root, "schedule.json"), "utf8"))).toMatchObject({
+      version: 1,
+      schedules: [],
+    })
+  })
+
   test("falls back to legacy directory schedule state until the session is rewritten", async () => {
     const directory = await tempdir()
     const schedule = {

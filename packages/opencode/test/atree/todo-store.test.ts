@@ -62,6 +62,19 @@ describe("atree todo store", () => {
     expect(await readSessionTodoProjection(directory, "ses_missing")).toEqual({ hasState: false, todos: [] })
   })
 
+  test("creates the session payload skeleton when writing todo state", async () => {
+    const directory = await tempdir()
+    await writeSessionTodoState(directory, "ses_skeleton", [])
+
+    const root = path.join(directory, ".agents", "atree", "sessions", "ses_skeleton")
+    expect(await fs.readFile(path.join(root, "session.jsonl"), "utf8")).toBe("")
+    expect((await fs.stat(path.join(root, "assets"))).isDirectory()).toBe(true)
+    expect(JSON.parse(await fs.readFile(path.join(root, "todo.json"), "utf8"))).toMatchObject({
+      version: 1,
+      todos: [],
+    })
+  })
+
   test("falls back to legacy directory todo state until the session is rewritten", async () => {
     const directory = await tempdir()
     const todo = { content: "legacy todo", status: "pending", priority: "medium" }
