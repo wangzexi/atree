@@ -2612,8 +2612,6 @@ export default function Layout(props: ParentProps) {
       opts?: { force?: boolean; probeChildren?: boolean },
     ) => {
       const key = directoryKey(directory)
-      const version = (directoryLoadVersion.get(key) ?? 0) + 1
-      directoryLoadVersion.set(key, version)
       ensureDirectory(directory, directoryKey(root) === key)
       const state = tree.directory[key]
       if (!opts?.force && state?.loaded) {
@@ -2625,6 +2623,8 @@ export default function Layout(props: ParentProps) {
       }
       if (state?.loading) return
 
+      const version = (directoryLoadVersion.get(key) ?? 0) + 1
+      directoryLoadVersion.set(key, version)
       setTree("directory", key, (prev) => ({ ...prev, loading: true }))
       const sessionClient = serverSDK.createClient({ directory, throwOnError: true })
 

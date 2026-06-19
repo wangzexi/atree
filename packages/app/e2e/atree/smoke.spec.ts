@@ -101,10 +101,12 @@ test.describe("atree smoke", () => {
       },
     })
 
-    await page.goto(`/${base64Encode(child)}/session`)
+    await page.goto(`/${base64Encode(root)}/session`)
     await expect(page.getByText("aTree", { exact: true })).toBeVisible()
     await expect(page.locator(`[data-atree-directory="${root}"]`)).toBeVisible()
-    await expect(page).toHaveURL(/\/(new-session\?draftId=|session)$/)
+    await expect(page.locator(`[data-atree-directory="${child}"]`)).toBeVisible()
+    await page.locator(`[data-atree-directory="${child}"]`).click()
+    await expect(page).toHaveURL(new RegExp(`/${base64Encode(child)}/session/ses_child_existing`))
 
     const editor = page.locator('[contenteditable="true"]').first()
     await expect(editor).toBeVisible()
@@ -112,7 +114,7 @@ test.describe("atree smoke", () => {
     await editor.fill("1 分钟后提醒我检查 atree 冒烟测试")
     await page.locator('[data-action="prompt-submit"]').first().click()
 
-    await expect(page).toHaveURL(new RegExp(`/${base64Encode(child)}/session/ses_e2e_`))
+    await expect(page).toHaveURL(new RegExp(`/${base64Encode(child)}/session/ses_child_existing`))
     await page.reload()
 
     const dock = page.locator('[data-component="session-schedule-dock"]')
