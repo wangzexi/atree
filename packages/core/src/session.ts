@@ -103,6 +103,18 @@ export class PromptConflictError extends Schema.TaggedErrorClass<PromptConflictE
 
 export type Error = NotFoundError | MessageDecodeError | OperationUnavailableError | PromptConflictError
 
+function stableJson(value: unknown) {
+  return JSON.stringify(value ?? null)
+}
+
+function promptsMatch(input: Prompt, existing: SessionMessage.User) {
+  return (
+    existing.text === input.text &&
+    stableJson(existing.files) === stableJson(input.files) &&
+    stableJson(existing.agents) === stableJson(input.agents)
+  )
+}
+
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
@@ -442,7 +454,7 @@ export const layer = Layer.effect(
                 Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
               )).find((message) => message.id === messageID)
               if (existing) {
-                if (existing.type !== "user" || existing.text !== input.prompt.text)
+                if (existing.type !== "user" || !promptsMatch(input.prompt, existing))
                   return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
                 return new SessionInput.Admitted({
                   admittedSeq: 0,

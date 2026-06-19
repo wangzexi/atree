@@ -292,6 +292,50 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("detects file-backed prompt conflicts across files", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_prompt_conflict",
+          title: "Core prompt conflict",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_prompt_conflict")
+      const messageID = SessionMessage.ID.make("msg_core_prompt_conflict")
+      const firstPrompt = new Prompt({
+        text: "same text",
+        files: [new FileAttachment({ uri: "data:text/plain;base64,Zmlyc3Q=", mime: "text/plain", name: "same.txt" })],
+      })
+      const secondPrompt = new Prompt({
+        text: "same text",
+        files: [new FileAttachment({ uri: "data:text/plain;base64,c2Vjb25k", mime: "text/plain", name: "same.txt" })],
+      })
+
+      const first = yield* sessions.prompt({ sessionID, id: messageID, prompt: firstPrompt, resume: false })
+      const replayed = yield* sessions.prompt({ sessionID, id: messageID, prompt: firstPrompt, resume: false })
+      const conflict = yield* sessions
+        .prompt({ sessionID, id: messageID, prompt: secondPrompt, resume: false })
+        .pipe(Effect.flip)
+
+      expect(first.id).toBe(messageID)
+      expect(replayed.id).toBe(messageID)
+      expect(conflict._tag).toBe("Session.PromptConflictError")
+    }),
+  )
+
   it.effect("replays text part deltas from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
