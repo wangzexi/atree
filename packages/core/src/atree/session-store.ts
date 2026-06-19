@@ -1,4 +1,5 @@
 import { DateTime } from "effect"
+import { createHash } from "crypto"
 import fs from "fs/promises"
 import path from "path"
 import { AgentV2 } from "../agent"
@@ -265,10 +266,11 @@ async function materializePromptFile(info: SessionSchema.Info, file: FileAttachm
   const decoded = decodeDataURL(file.uri)
   if (!decoded) return { uri: file.uri, mime: file.mime }
   const mime = file.mime || decoded.mime
+  const sha256 = createHash("sha256").update(decoded.buffer).digest("hex")
   const root = sessionRoot(info)
   const relative = path.join(
     "assets",
-    `${safeAssetStem(file.name ?? `file-${index}`)}-${Date.now().toString(36)}-${index}${extensionFor(mime, file.name)}`,
+    `${safeAssetStem(file.name ?? `file-${index}`)}-${sha256.slice(0, 16)}${extensionFor(mime, file.name)}`,
   )
   const target = path.join(root, relative)
   await fs.mkdir(path.dirname(target), { recursive: true })
