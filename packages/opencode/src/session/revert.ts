@@ -37,9 +37,11 @@ export const layer = Layer.effect(
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
-      const all = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
-      let lastUser: SessionV1.User | undefined
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const all = yield* sessions
+        .messages({ sessionID: input.sessionID, directory: session.directory })
+        .pipe(Effect.orDie)
+      let lastUser: SessionV1.User | undefined
 
       let rev: Session.Info["revert"]
       const patches: Snapshot.Patch[] = []
@@ -85,7 +87,7 @@ export const layer = Layer.effect(
           files: diffs.length,
         },
       })
-      return yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      return yield* sessions.get(input.sessionID, { directory: session.directory }).pipe(Effect.orDie)
     })
 
     const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
@@ -95,7 +97,7 @@ export const layer = Layer.effect(
       if (!session.revert) return session
       if (session.revert.snapshot) yield* snap.restore(session.revert.snapshot)
       yield* sessions.clearRevert(input.sessionID, { directory: session.directory })
-      return yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      return yield* sessions.get(input.sessionID, { directory: session.directory }).pipe(Effect.orDie)
     })
 
     const cleanup = Effect.fn("SessionRevert.cleanup")(function* (session: Session.Info) {
@@ -127,7 +129,12 @@ export const layer = Layer.effect(
           const removeParts = target.parts.slice(idx)
           target.parts = target.parts.slice(0, idx)
           for (const part of removeParts) {
-            yield* sessions.removePart({ sessionID, directory: session.directory, messageID: target.info.id, partID: part.id })
+            yield* sessions.removePart({
+              sessionID,
+              directory: session.directory,
+              messageID: target.info.id,
+              partID: part.id,
+            })
           }
         }
       }

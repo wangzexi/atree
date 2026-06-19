@@ -14,6 +14,7 @@ import { provideTmpdirInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { readSessionStore } from "../../src/atree/session-store"
 
 const env = Layer.mergeAll(
   Session.defaultLayer,
@@ -447,6 +448,34 @@ describe("revert + compact workflow", () => {
 
           const msgs = yield* session.messages({ sessionID: sid })
           expect(msgs.length).toBe(1)
+        }),
+      { git: true },
+    ),
+  )
+
+  it.live(
+    "revert persists file-backed state in the session directory",
+    provideTmpdirInstance(
+      (dir) =>
+        Effect.gen(function* () {
+          const session = yield* Session.Service
+          const revert = yield* SessionRevert.Service
+          const nodeDirectory = path.join(dir, "node")
+          yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+
+          const info = yield* session.create({ title: "Node revert", directory: nodeDirectory })
+          const u1 = yield* user(info.id)
+          yield* text(info.id, u1.id, "keep revert state with the node")
+
+          const reverted = yield* revert.revert({
+            sessionID: info.id,
+            messageID: u1.id,
+          })
+          const stored = yield* Effect.promise(() => readSessionStore(nodeDirectory, info.id))
+
+          expect(reverted.directory).toBe(nodeDirectory)
+          expect(reverted.revert?.messageID).toBe(u1.id)
+          expect(stored?.revert?.messageID).toBe(u1.id)
         }),
       { git: true },
     ),
