@@ -123,8 +123,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const schedules = Effect.fn("SessionHttpApi.schedules")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* scheduleSvc.list(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
+      return yield* scheduleSvc.list(ctx.params.sessionID, { directory: info.directory })
     })
 
     const createSchedule = Effect.fn("SessionHttpApi.createSchedule")(function* (ctx: {
@@ -148,8 +148,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const deleteSchedule = Effect.fn("SessionHttpApi.deleteSchedule")(function* (ctx: {
       params: { sessionID: SessionID; scheduleID: Schedule.ID }
     }) {
-      yield* requireSession(ctx.params.sessionID)
-      yield* scheduleSvc.list(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
+      yield* scheduleSvc.list(ctx.params.sessionID, { directory: info.directory })
       return yield* scheduleSvc.delete(ctx.params.scheduleID).pipe(
         Effect.map(() => true),
         Effect.catchTag("ScheduleNotFound", () => Effect.fail(notFound("Schedule not found"))),
@@ -258,7 +258,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       }
       if (ctx.payload.time?.archived !== undefined) {
         if (ctx.payload.time.archived !== null) {
-          yield* scheduleSvc.clear(ctx.params.sessionID)
+          yield* scheduleSvc.clear(ctx.params.sessionID, { directory: current.directory })
         }
         yield* session.setArchived({ sessionID: ctx.params.sessionID, time: ctx.payload.time.archived })
       }

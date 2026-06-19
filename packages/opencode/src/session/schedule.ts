@@ -104,7 +104,7 @@ export class NotFound extends Schema.TaggedErrorClass<NotFound>()("ScheduleNotFo
 }) {}
 
 export interface Interface {
-  readonly list: (sessionID: SessionID) => Effect.Effect<Info[]>
+  readonly list: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<Info[]>
   readonly create: (input: {
     sessionID: SessionID
     kind?: Kind
@@ -119,7 +119,7 @@ export interface Interface {
   /** Record that a fire was processed by the runner. */
   readonly recordRun: (scheduleID: ID, sessionID: SessionID, status: RunStatus, ranAt: number) => Effect.Effect<void>
   /** Remove every scheduled message for a session. */
-  readonly clear: (sessionID: SessionID) => Effect.Effect<void>
+  readonly clear: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void>
   /** Restore scheduled messages for every file-backed session in a directory. */
   readonly restoreDirectory: (directory: string) => Effect.Effect<void>
 }
@@ -500,8 +500,11 @@ export const layer = Layer.effect(
       )
     })
 
-    const syncScheduleState = Effect.fn("Schedule.syncScheduleState")(function* (sessionID: SessionID) {
-      const directory = yield* sessionDirectory(sessionID)
+    const syncScheduleState = Effect.fn("Schedule.syncScheduleState")(function* (
+      sessionID: SessionID,
+      directoryHint?: string,
+    ) {
+      const directory = yield* sessionDirectory(sessionID, directoryHint)
       if (!directory) return
       const schedules = yield* activeSchedules(sessionID)
       yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, schedules))
@@ -694,7 +697,7 @@ export const layer = Layer.effect(
       }
 
       const schedules = yield* activeSchedules(sessionID)
-      if (schedules.length > 0) yield* syncScheduleState(sessionID)
+      if (schedules.length > 0) yield* syncScheduleState(sessionID, directory)
       return schedules
     })
 
@@ -736,8 +739,12 @@ export const layer = Layer.effect(
       )
     })
 
-    const list: Interface["list"] = Effect.fn("Schedule.list")(function* (sessionID: SessionID) {
-      const archiveState = yield* sessionArchiveState(sessionID)
+    const list: Interface["list"] = Effect.fn("Schedule.list")(function* (
+      sessionID: SessionID,
+      options?: { directory?: string },
+    ) {
+      const directoryHint = options?.directory
+      const archiveState = yield* sessionArchiveState(sessionID, directoryHint)
       if (archiveState?.archived) {
         stopSessionTimers(timers, sessionID)
         yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
@@ -767,12 +774,12 @@ export const layer = Layer.effect(
       }
       const items = yield* activeSchedules(sessionID)
       if (items.length > 0 || rows.length > 0) {
-        yield* syncScheduleState(sessionID)
+        yield* syncScheduleState(sessionID, directoryHint)
         return items
       }
-      const directory = yield* sessionDirectory(sessionID)
+      const directory = yield* sessionDirectory(sessionID, directoryHint)
       if (!directory) return items
-      const restored = yield* restoreStoredSchedules(sessionID)
+      const restored = yield* restoreStoredSchedules(sessionID, directory)
       if (restored.length > 0) return restored
       const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
       return stored.filter(canRestoreStoredSchedule).map((schedule) => ({
@@ -831,7 +838,7 @@ export const layer = Layer.effect(
       const bridge = yield* EffectBridge.make()
       startTimer(id, input.sessionID, kind, expression || "", runAt, bridge)
       yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID })
-      yield* syncScheduleState(input.sessionID)
+      yield* syncScheduleState(input.sessionID, input.directory)
       const createdTimer = timers.get(id)
       return {
         id,
@@ -873,7 +880,10 @@ export const layer = Layer.effect(
       yield* syncScheduleState(row.session_id as SessionID)
     })
 
-    const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (sessionID: SessionID) {
+    const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (
+      sessionID: SessionID,
+      options?: { directory?: string },
+    ) {
       stopSessionTimers(timers, sessionID)
       const rows = yield* db
         .select({ id: ScheduleTable.id })
@@ -888,7 +898,7 @@ export const layer = Layer.effect(
         const id = row.id as ID
         yield* events.publish(Event.Deleted, { scheduleID: id, sessionID })
       }
-      yield* syncScheduleState(sessionID)
+      yield* syncScheduleState(sessionID, options?.directory)
     })
 
     return Service.of({

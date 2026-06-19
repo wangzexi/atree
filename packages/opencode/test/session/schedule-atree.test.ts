@@ -247,6 +247,60 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "lists schedules for an explicit directory without a database session row",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_explicit_list_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-list-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit list schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: "sch_explicit_list",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "list with explicit directory",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
+      expect(schedules).toHaveLength(1)
+      expect(schedules[0]).toMatchObject({ id: "sch_explicit_list", sessionID, message: "list with explicit directory" })
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, "sch_explicit_list" as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
   it.instance(
     "restores recurring schedule run state from directory state",
     Effect.gen(function* () {
@@ -485,6 +539,49 @@ describe("atree schedule restore", () => {
 
       yield* Schedule.Service.use((schedule) => schedule.clear(sessionID))
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+    }),
+  )
+
+  it.effect(
+    "clears schedules for an explicit directory without a database session row",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_explicit_clear_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-clear-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit clear schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: "sch_explicit_clear",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "clear with explicit directory",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.clear(sessionID, { directory }))
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
     }),
   )
 
