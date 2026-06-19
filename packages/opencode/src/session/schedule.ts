@@ -8,10 +8,12 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cron } from "croner"
 import { desc, eq, inArray, sql as drizzleSql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
 import { readSessionStore, readSessionStores } from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
@@ -329,12 +331,39 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
+    const ensureFileSessionProject = Effect.fn("Schedule.ensureFileSessionProject")(function* (session: FileSession) {
+      const existing = yield* db
+        .select({ id: ProjectTable.id })
+        .from(ProjectTable)
+        .where(eq(ProjectTable.id, session.projectID))
+        .get()
+        .pipe(Effect.orDie)
+      if (existing) return
+      const now = Date.now()
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: session.projectID,
+          worktree: AbsolutePath.make(session.directory),
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as typeof ProjectTable.$inferInsert)
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+    })
+
     const upsertFileSessionCache = Effect.fn("Schedule.upsertFileSessionCache")(function* (session: FileSession) {
       const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+      const projectID = ctx?.project.id ?? session.projectID
+      yield* ensureFileSessionProject({ ...session, projectID })
       const row = {
         id: session.id,
-        project_id: ctx?.project.id ?? session.projectID,
+        project_id: projectID,
         workspace_id: session.workspaceID ?? null,
         parent_id: session.parentID ?? null,
         slug: session.slug,
@@ -371,7 +400,10 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const sessionDirectory = Effect.fn("Schedule.sessionDirectory")(function* (sessionID: SessionID) {
+    const sessionDirectory = Effect.fn("Schedule.sessionDirectory")(function* (
+      sessionID: SessionID,
+      fallbackDirectory?: string,
+    ) {
       const row = yield* db
         .select({ directory: SessionTable.directory })
         .from(SessionTable)
@@ -387,9 +419,9 @@ export const layer = Layer.effect(
         return row.directory
       }
 
-      const directory = yield* InstanceState.directory.pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
+      const directory =
+        fallbackDirectory ??
+        (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
@@ -397,7 +429,10 @@ export const layer = Layer.effect(
       return session?.directory
     })
 
-    const sessionArchiveState = Effect.fn("Schedule.sessionArchiveState")(function* (sessionID: SessionID) {
+    const sessionArchiveState = Effect.fn("Schedule.sessionArchiveState")(function* (
+      sessionID: SessionID,
+      fallbackDirectory?: string,
+    ) {
       const row = yield* db
         .select({ directory: SessionTable.directory, archived: SessionTable.time_archived })
         .from(SessionTable)
@@ -413,9 +448,9 @@ export const layer = Layer.effect(
         return { directory: row.directory, archived: row.archived !== null }
       }
 
-      const directory = yield* InstanceState.directory.pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
+      const directory =
+        fallbackDirectory ??
+        (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
@@ -606,8 +641,11 @@ export const layer = Layer.effect(
     })
 
     const serviceBridge = yield* EffectBridge.make()
-    const restoreStoredSchedules = Effect.fn("Schedule.restoreStoredSchedules")(function* (sessionID: SessionID) {
-      const archiveState = yield* sessionArchiveState(sessionID)
+    const restoreStoredSchedules = Effect.fn("Schedule.restoreStoredSchedules")(function* (
+      sessionID: SessionID,
+      directoryHint?: string,
+    ) {
+      const archiveState = yield* sessionArchiveState(sessionID, directoryHint)
       if (!archiveState) return [] as Info[]
       if (archiveState.archived) {
         stopSessionTimers(timers, sessionID)
@@ -616,7 +654,7 @@ export const layer = Layer.effect(
         return [] as Info[]
       }
       const directory = archiveState.directory
-      yield* sessionDirectory(sessionID)
+      yield* sessionDirectory(sessionID, directory)
       const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
       if (stored.length === 0) return [] as Info[]
 
@@ -690,7 +728,7 @@ export const layer = Layer.effect(
       yield* Effect.forEach(
         fileSessions,
         (session) =>
-          restoreStoredSchedules(session.id).pipe(
+          restoreStoredSchedules(session.id, directory).pipe(
             Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
           ),
         { concurrency: "unbounded", discard: true },
