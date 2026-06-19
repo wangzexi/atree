@@ -149,6 +149,79 @@ describe("session.list", () => {
     { git: true },
   )
 
+  it.instance(
+    "filters file-backed sessions by path without requiring SQLite rows",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const directory = test.directory
+
+        const base = {
+          slug: "file-path",
+          version: "test",
+          projectID: "proj_file_path",
+          directory,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }
+        yield* Effect.promise(() =>
+          Promise.all([
+            writeSessionStore({
+              ...base,
+              id: "ses_file_path_current",
+              path: "packages/opencode/src",
+              title: "File path current",
+              time: { created: 1, updated: 30 },
+            } as any),
+            writeSessionStore({
+              ...base,
+              id: "ses_file_path_deeper",
+              path: "packages/opencode/src/deep",
+              title: "File path deeper",
+              time: { created: 2, updated: 40 },
+            } as any),
+            writeSessionStore({
+              ...base,
+              id: "ses_file_path_parent",
+              path: "packages/opencode",
+              title: "File path parent",
+              time: { created: 3, updated: 50 },
+            } as any),
+            writeSessionStore({
+              ...base,
+              id: "ses_file_path_legacy",
+              path: undefined,
+              title: "File path legacy",
+              time: { created: 4, updated: 20 },
+            } as any),
+            writeSessionStore({
+              ...base,
+              id: "ses_file_path_archived",
+              path: "packages/opencode/src",
+              title: "File path archived",
+              time: { created: 5, updated: 60, archived: 61 },
+            } as any),
+          ]),
+        )
+
+        const ids = (yield* SessionNs.Service.use((session) =>
+          session.list({ directory, path: "packages/opencode/src" }),
+        )).map((session) => String(session.id))
+
+        expect(ids).toContain("ses_file_path_current")
+        expect(ids).toContain("ses_file_path_deeper")
+        expect(ids).toContain("ses_file_path_legacy")
+        expect(ids).not.toContain("ses_file_path_parent")
+        expect(ids).not.toContain("ses_file_path_archived")
+
+        const archivedIDs = (yield* SessionNs.Service.use((session) =>
+          session.list({ directory, path: "packages/opencode/src", archived: true }),
+        )).map((session) => String(session.id))
+        expect(archivedIDs).toContain("ses_file_path_archived")
+      }),
+    { git: true },
+  )
+
   itWorkspaces.instance(
     "filters by directory when experimental workspaces are enabled",
     () =>

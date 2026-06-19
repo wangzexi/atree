@@ -647,15 +647,11 @@ export const layer: Layer.Layer<
       input?: ListInput,
     ) {
       if (!input?.directory) return items
-      if (input.path !== undefined) return items
       const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
       const byID = new Map<string, Info>()
       for (const item of items) byID.set(item.id, item)
       for (const item of fileSessions) {
-        if (input.roots && item.parentID) continue
-        if (input.start && item.time.updated < input.start) continue
-        if (input.search && !item.title.includes(input.search)) continue
-        if (!input.archived && item.time.archived !== undefined) continue
+        if (!matchesListInput(item, input)) continue
         byID.set(item.id, item)
       }
       return [...byID.values()]
@@ -1227,6 +1223,19 @@ function listByProject(
       Effect.orDie,
       Effect.map((rows) => rows.map(fromRow)),
     )
+}
+
+function matchesListInput(item: Info, input: ListInput) {
+  if (input.path !== undefined && input.path) {
+    const pathMatches = item.path === input.path || item.path?.startsWith(`${input.path}/`)
+    const legacyDirectoryMatch = item.path === undefined && item.directory === input.directory
+    if (!pathMatches && !legacyDirectoryMatch) return false
+  }
+  if (input.roots && item.parentID) return false
+  if (input.start && item.time.updated < input.start) return false
+  if (input.search && !item.title.includes(input.search)) return false
+  if (!input.archived && item.time.archived !== undefined) return false
+  return true
 }
 
 export function* listGlobal(input?: {
