@@ -128,6 +128,8 @@ schedule:
 - `schedule.kind` 支持 `cron` 和 `at`。
 - `next_run_at`、`last_run_at` 可以作为运行投影存在，但不能成为唯一事实。
 
+当前 OpenCode spike 先使用同一会话目录下的 `schedule.json` 保存自动化消息状态，避免 `meta.yaml` 被标题、归档等旧更新链路重写时误删 schedule。这个文件仍然满足会话目录自包含；后续切到 Pi core 后，可以再把它折叠进 `meta.yaml` 或 `session.jsonl` 事件流。
+
 ### `session.jsonl`
 
 保存会话原始记录。
@@ -436,9 +438,10 @@ MVP 可以先假设单进程，但第二版计划里需要保留这个约束。
 
 ```text
 .agents/atree/sessions/*/meta.yaml
+.agents/atree/sessions/*/schedule.json
 ```
 
-读取其中的：
+读取其中的自动化消息定义，例如：
 
 ```yaml
 schedule:

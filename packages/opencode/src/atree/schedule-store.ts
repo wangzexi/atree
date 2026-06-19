@@ -21,8 +21,18 @@ type ScheduleState = {
   sessions: Record<string, StoredSchedule[]>
 }
 
-function statePath(directory: string) {
+type SessionScheduleState = {
+  version: 1
+  updatedAt: number
+  schedules: StoredSchedule[]
+}
+
+function legacyStatePath(directory: string) {
   return path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json")
+}
+
+function sessionStatePath(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID, "schedule.json")
 }
 
 async function readState(target: string): Promise<ScheduleState> {
@@ -42,25 +52,53 @@ async function readState(target: string): Promise<ScheduleState> {
   }
 }
 
-async function writeAtomic(target: string, value: ScheduleState) {
+async function readSessionState(target: string) {
+  try {
+    const raw = await fs.readFile(target, "utf8")
+    const parsed = JSON.parse(raw) as Partial<SessionScheduleState>
+    return {
+      hasState: true,
+      schedules: Array.isArray(parsed.schedules) ? parsed.schedules : [],
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return { hasState: false, schedules: [] as StoredSchedule[] }
+    }
+    throw error
+  }
+}
+
+async function writeAtomic(target: string, value: ScheduleState | SessionScheduleState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
   await fs.writeFile(temp, JSON.stringify(value, null, 2))
   await fs.rename(temp, target)
 }
 
-export async function writeSessionScheduleState(directory: string, sessionID: string, schedules: StoredSchedule[]) {
-  await ensureAtreeDirectoryStore(directory)
-  const target = statePath(directory)
+async function removeLegacySessionSchedule(directory: string, sessionID: string) {
+  const target = legacyStatePath(directory)
   const state = await readState(target)
+  if (!Object.hasOwn(state.sessions, sessionID)) return
+  delete state.sessions[sessionID]
   state.updatedAt = Date.now()
-  if (schedules.length === 0) delete state.sessions[sessionID]
-  else state.sessions[sessionID] = schedules
   await writeAtomic(target, state)
 }
 
+export async function writeSessionScheduleState(directory: string, sessionID: string, schedules: StoredSchedule[]) {
+  await ensureAtreeDirectoryStore(directory)
+  await writeAtomic(sessionStatePath(directory, sessionID), {
+    version: 1,
+    updatedAt: Date.now(),
+    schedules,
+  })
+  await removeLegacySessionSchedule(directory, sessionID)
+}
+
 export async function readSessionScheduleState(directory: string, sessionID: string) {
-  const state = await readState(statePath(directory))
+  const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
+  if (sessionState.hasState) return sessionState.schedules
+
+  const state = await readState(legacyStatePath(directory))
   const schedules = state.sessions[sessionID]
   return Array.isArray(schedules) ? schedules : []
 }

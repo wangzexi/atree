@@ -14,6 +14,15 @@ async function tempdir() {
 
 async function readState(directory: string) {
   return JSON.parse(
+    await fs.readFile(path.join(directory, ".agents", "atree", "sessions", "ses_two", "schedule.json"), "utf8"),
+  ) as {
+    version: 1
+    schedules: unknown[]
+  }
+}
+
+async function readLegacyState(directory: string) {
+  return JSON.parse(
     await fs.readFile(path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json"), "utf8"),
   ) as {
     version: 1
@@ -50,9 +59,9 @@ describe("atree schedule store", () => {
     expect(meta).toContain("version: 1")
     expect(meta).toContain('source: "atree"')
     expect(state.version).toBe(1)
-    expect(state.sessions.ses_one).toBeUndefined()
-    expect(state.sessions.ses_two).toHaveLength(1)
-    expect(state.sessions.ses_two[0]).toMatchObject({ id: "sch_two", sessionID: "ses_two" })
+    expect(state.schedules).toHaveLength(1)
+    expect(state.schedules[0]).toMatchObject({ id: "sch_two", sessionID: "ses_two" })
+    expect(await readSessionScheduleState(directory, "ses_one")).toEqual([])
   })
 
   test("reads one session schedule state without mutating the file", async () => {
@@ -74,5 +83,32 @@ describe("atree schedule store", () => {
     const schedules = await readSessionScheduleState(directory, "ses_read")
     expect(schedules).toEqual([schedule])
     expect(await readSessionScheduleState(directory, "missing")).toEqual([])
+  })
+
+  test("falls back to legacy directory schedule state until the session is rewritten", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_legacy",
+      sessionID: "ses_legacy",
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "legacy check",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+
+    await fs.mkdir(path.join(directory, ".agents", "atree", "extensions", "schedule"), { recursive: true })
+    await fs.writeFile(
+      path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json"),
+      JSON.stringify({ version: 1, updatedAt: 1, sessions: { ses_legacy: [schedule] } }),
+    )
+
+    expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([schedule])
+    await writeSessionScheduleState(directory, "ses_legacy", [])
+    expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([])
+    expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()
   })
 })
