@@ -382,11 +382,29 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               if (!tabs.ready()) return
               if (route.type === "session") {
                 const currentServer = route.server ?? server.key
-                const group = tabs.directoryGroup()
-                if (group?.server === currentServer && pathKey(group.directory) === pathKey(route.dir)) return
-
                 const run = ++restoreDirectoryRun
                 void (async () => {
+                  const ensureRouteSessionTab = () => {
+                    const sync = serverSync.createDirSyncContext(route.dir)
+                    const routeSession = sync.session.get(route.sessionId)
+                    if (!routeSession) return
+                    const targetSessionId = routeSession.parentID ?? routeSession.id
+                    const routeTabExists = tabsStore.find(
+                      (item) =>
+                        item.type === "session" &&
+                        item.server === currentServer &&
+                        item.dirBase64 === route.dirBase64 &&
+                        item.sessionId === targetSessionId,
+                    )
+                    if (!routeTabExists) {
+                      tabsStoreActions.addSessionTab({
+                        server: currentServer,
+                        dirBase64: route.dirBase64,
+                        sessionId: targetSessionId,
+                      })
+                    }
+                  }
+
                   await serverSync.project.loadSessions(route.dir)
                   if (run !== restoreDirectoryRun) return
 
@@ -401,10 +419,13 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
 
                   if (sessions.length > 0) {
                     tabsStoreActions.replaceDirectorySessions(currentServer, route.dir, sessions)
+                    ensureRouteSessionTab()
                     return
                   }
 
                   if (!routeSession) return
+                  // If this session is not in the directory's root sessions,
+                  // ensure at least its corresponding root session tab exists.
                   tabsStoreActions.addSessionTab({
                     server: currentServer,
                     dirBase64: route.dirBase64,

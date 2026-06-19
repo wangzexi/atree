@@ -135,6 +135,51 @@ test.describe("atree invariants", () => {
     expect(errors).toEqual([])
   })
 
+  test("navigating within same directory keeps the full directory group visible", async ({ page }) => {
+    const errors = trackPageErrors(page)
+    const firstSession = {
+      id: "ses_switch_first",
+      slug: "switch-first",
+      projectID: project.id,
+      directory: child,
+      title: "Switch first",
+      version: "test",
+      metadata: { icon: "🦊" },
+      time: { created: 1700000000000, updated: 1700000000000 },
+    }
+    const secondSession = {
+      id: "ses_switch_second",
+      slug: "switch-second",
+      projectID: project.id,
+      directory: child,
+      title: "Switch second",
+      version: "test",
+      metadata: { icon: "🧭" },
+      time: { created: 1700000001000, updated: 1700000001000 },
+    }
+
+    await mockOpenCodeServer(page, {
+      directory: root,
+      project,
+      provider,
+      sessions: [firstSession, secondSession],
+      pageMessages: () => ({ items: [] }),
+      files: (directory) =>
+        directory === root ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }] : [],
+    })
+
+    await page.goto(`/${base64Encode(child)}/session/${firstSession.id}`)
+    await expect(page.locator(`[data-atree-session-tab][data-session-id="${firstSession.id}"]`)).toBeVisible()
+    await expect(page.locator("[data-atree-session-tab]")).toHaveCount(2)
+
+    await page.goto(`/${base64Encode(child)}/session/${secondSession.id}`)
+
+    await expect(page.locator(`[data-atree-session-tab][data-session-id="${secondSession.id}"]`)).toBeVisible()
+    await expect(page.locator(`[data-atree-session-tab][data-session-id="${firstSession.id}"]`)).toBeVisible()
+    await expect(page.locator("[data-atree-session-tab]")).toHaveCount(2)
+    expect(errors).toEqual([])
+  })
+
   test("archiving a session tab removes it and it does not revive after switching directories", async ({ page }) => {
     const errors = trackPageErrors(page)
 
