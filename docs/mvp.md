@@ -147,7 +147,7 @@ Automation message  # 会话里的自动化消息
 
 职责：
 
-- `meta.yaml`：标题、emoji、归档时间、所属目录、更新时间等会话元数据。
+- `meta.yaml`：标题、emoji、归档时间、更新时间等会话元数据；读取时以当前包含它的目录作为会话目录。
 - `session.jsonl`：会话原始事件流。
 - `assets/`：图片、文件等会话资产。
 - `schedule.json`：当前 spike 的自动化消息状态。

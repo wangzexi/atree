@@ -136,6 +136,33 @@ describe("atree session store", () => {
     expect(await readSessionStore(directory, "ses_missing" as any)).toBeUndefined()
   })
 
+  test("treats the containing directory as authoritative when a session store is copied", async () => {
+    const source = await tempdir()
+    const target = await tempdir()
+    const base = {
+      id: "ses_copied",
+      slug: "copied",
+      version: "test",
+      projectID: "proj_test",
+      directory: source,
+      path: ".",
+      title: "Copied session",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+
+    await writeSessionStore(base as any)
+    await fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true })
+
+    const copied = await readSessionStore(target, "ses_copied" as any)
+    expect(copied?.directory).toBe(target)
+
+    const sessions = await readSessionStores(target)
+    expect(sessions).toHaveLength(1)
+    expect(sessions[0]?.directory).toBe(target)
+  })
+
   test("appends raw session events to session.jsonl", async () => {
     const directory = await tempdir()
     const session = {

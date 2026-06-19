@@ -394,7 +394,10 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefi
   }
 
   if (typeof data.id !== "string") return
-  const directory = typeof data.directory === "string" ? data.directory : fallbackDirectory
+  // The containing directory is authoritative. A copied or moved atree
+  // directory must not keep pointing sessions at the old absolute path stored
+  // in historical meta.yaml files.
+  const directory = fallbackDirectory
   const created = typeof data.createdAt === "number" ? data.createdAt : 0
   const updated = typeof data.updatedAt === "number" ? data.updatedAt : created
   const archived = typeof data.archivedAt === "number" ? data.archivedAt : undefined
