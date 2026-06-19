@@ -457,7 +457,7 @@ export const layer = Layer.effect(
       return yield* Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
           const markReady = ready ? ready.open.pipe(Effect.asVoid) : Effect.void
-          const { msg, part, cwd } = yield* Effect.gen(function* () {
+          const { msg, part, cwd, directory } = yield* Effect.gen(function* () {
             const ctx = yield* InstanceState.context
             const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
             if (session.revert) {
@@ -480,7 +480,7 @@ export const layer = Layer.effect(
               agent: input.agent,
               model: { providerID: model.providerID, modelID: model.modelID },
             }
-            yield* sessions.updateMessage(userMsg)
+            yield* sessions.updateMessage(userMsg, { directory: session.directory })
             const userPart: SessionV1.Part = {
               type: "text",
               id: PartID.ascending(),
@@ -489,7 +489,7 @@ export const layer = Layer.effect(
               text: "The following tool was executed by the user",
               synthetic: true,
             }
-            yield* sessions.updatePart(userPart)
+            yield* sessions.updatePart(userPart, { directory: session.directory })
 
             const msg: SessionV1.Assistant = {
               id: MessageID.ascending(),
@@ -505,7 +505,7 @@ export const layer = Layer.effect(
               modelID: model.modelID,
               providerID: model.providerID,
             }
-            yield* sessions.updateMessage(msg)
+            yield* sessions.updateMessage(msg, { directory: session.directory })
             const started = Date.now()
             const part: SessionV1.ToolPart = {
               type: "tool",
@@ -520,7 +520,7 @@ export const layer = Layer.effect(
                 input: { command: input.command },
               },
             }
-            yield* sessions.updatePart(part)
+            yield* sessions.updatePart(part, { directory: session.directory })
             if (flags.experimentalEventSystem) {
               yield* events.publish(SessionEvent.Shell.Started, {
                 sessionID: input.sessionID,
@@ -530,7 +530,7 @@ export const layer = Layer.effect(
                 command: input.command,
               })
             }
-            return { msg, part, cwd: ctx.directory }
+            return { msg, part, cwd: ctx.directory, directory: session.directory }
           }).pipe(Effect.ensuring(markReady))
 
           const cfg = yield* config.get()
@@ -555,7 +555,7 @@ export const layer = Layer.effect(
               }
               if (!msg.time.completed) {
                 msg.time.completed = completed
-                yield* sessions.updateMessage(msg)
+                yield* sessions.updateMessage(msg, { directory })
               }
               if (part.state.status === "running") {
                 part.state = {
@@ -566,7 +566,7 @@ export const layer = Layer.effect(
                   metadata: { output, description: "" },
                   output,
                 }
-                yield* sessions.updatePart(part)
+                yield* sessions.updatePart(part, { directory })
               }
             }),
           )
@@ -591,7 +591,7 @@ export const layer = Layer.effect(
                   output += chunk
                   if (part.state.status === "running") {
                     part.state.metadata = { output, description: "" }
-                    yield* sessions.updatePart(part)
+                    yield* sessions.updatePart(part, { directory })
                   }
                 }),
               )
