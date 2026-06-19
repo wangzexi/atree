@@ -179,6 +179,27 @@ assets/
 
 当前 OpenCode spike 中，data URL 文件 part 会先写入 `assets/`，再把 `session.jsonl` 里的 part URL 改成 `assets/...`。读取投影时会从相对路径恢复成 data URL，以兼容现有 UI 和 LLM 输入链路。
 
+### 当前已验证切片
+
+OpenCode spike 当前已经把一部分关键事实源移回目录：
+
+- 创建会话会写入 `.agents/atree/sessions/<session-id>/meta.yaml`、`session.jsonl` 和 `assets/`。
+- 会话列表会扫描 `sessions/*/meta.yaml`，并用目录文件覆盖陈旧 SQLite row。
+- 标题、emoji/metadata、归档状态、workspace/project identity、compacting time 等会话元数据会持久化到 `meta.yaml`。
+- 消息、消息片段、删除消息、删除片段会写入 `session.jsonl`，并能在 SQLite 投影缺失时恢复。
+- data URL 文件 part 会物化到会话自己的 `assets/`，fork 会话时也会复制到 fork 会话自己的 `assets/`。
+- 写入消息事件后会推进 `meta.yaml` 的 `updatedAt`，目录列表排序不会只依赖 SQLite 的更新时间。
+- `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
+- schedule 执行后的 `lastRanAt`、`lastRunStatus` 会回写到目录 `schedule.json`，重启后可以恢复运行状态。
+- 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
+
+仍未完成的部分：
+
+- 全局 SQLite 仍然存在，并且仍承担运行时投影和部分 OpenCode 兼容链路。
+- `EventV2` 的 durable event log 还没有迁移到每个目录的 `session.jsonl`。
+- `MessageV2.page`、projector、部分 CLI/旧同步导出仍以 SQLite 为中心。
+- `schedule.json`、`todo.json` 仍是 OpenCode spike 的过渡文件，长期应折叠进 Pi/core session 事件或更清晰的 atree 扩展协议。
+
 ## `.agents/atree/meta.yaml` 的职责
 
 `.agents/atree/meta.yaml` 只描述目录级信息。
