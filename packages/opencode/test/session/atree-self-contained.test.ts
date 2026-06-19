@@ -137,4 +137,35 @@ describe("atree directory self-contained state", () => {
       ])
     }),
   )
+
+  it.instance("removing a scheduled session clears its directory store and schedule runtime cache", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const schedules = yield* Schedule.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "scheduled delete" })
+      const schedule = yield* schedules.create({
+        sessionID: session.id,
+        kind: "once",
+        runAt: Date.now() + 120_000,
+        message: "should be deleted with the session",
+      })
+      expect(yield* schedules.list(session.id)).toHaveLength(1)
+
+      yield* sessions.remove(session.id)
+
+      expect(yield* schedules.list(session.id)).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, session.id))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionStore(instance.directory, session.id))).toBeUndefined()
+      const row = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, schedule.id))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
 })

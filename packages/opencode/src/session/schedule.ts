@@ -4,8 +4,9 @@ import { Identifier } from "../id/id"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
+import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cron } from "croner"
-import { desc, eq, sql as drizzleSql } from "drizzle-orm"
+import { desc, eq, inArray, sql as drizzleSql } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
@@ -228,6 +229,27 @@ export const layer = Layer.effect(
         timers.clear()
       }),
     )
+
+    const clearRuntimeState = Effect.fn("Schedule.clearRuntimeState")(function* (sessionID: SessionID) {
+      stopSessionTimers(timers, sessionID)
+      const rows = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      if (rows.length === 0) return
+      const ids = rows.map((row) => row.id)
+      yield* db.delete(ScheduleRunTable).where(inArray(ScheduleRunTable.schedule_id, ids)).run().pipe(Effect.orDie)
+      yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
+    })
+
+    const unsubscribeDeleted = yield* events.listen((event) => {
+      if (event.type !== SessionV1.Event.Deleted.type) return Effect.void
+      const data = event.data as typeof SessionV1.Event.Deleted.data.Type
+      return clearRuntimeState(data.sessionID)
+    })
+    yield* Effect.addFinalizer(() => unsubscribeDeleted)
 
     const recordRun: Interface["recordRun"] = Effect.fn("Schedule.recordRun")(
       function* (scheduleID, sessionID, runStatus, ranAt) {
