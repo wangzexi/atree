@@ -532,7 +532,10 @@ export interface Interface {
   readonly setShare: (input: { sessionID: SessionID; share: Info["share"] }) => Effect.Effect<void>
   readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] }) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
-  readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
+  readonly messages: (input: { sessionID: SessionID; limit?: number } & DirectoryOption) => Effect.Effect<
+    SessionV1.WithParts[],
+    NotFound
+  >
   readonly children: (parentID: SessionID, options?: DirectoryOption) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
@@ -542,7 +545,7 @@ export interface Interface {
     sessionID: SessionID
     messageID: MessageID
     partID: PartID
-  }) => Effect.Effect<SessionV1.Part | undefined>
+  } & DirectoryOption) => Effect.Effect<SessionV1.Part | undefined>
   readonly updatePart: <T extends SessionV1.Part>(part: T) => Effect.Effect<T>
   readonly updatePartDelta: (input: {
     sessionID: SessionID
@@ -555,6 +558,7 @@ export interface Interface {
   readonly findMessage: (
     sessionID: SessionID,
     predicate: (msg: SessionV1.WithParts) => boolean,
+    options?: DirectoryOption,
   ) => Effect.Effect<Option.Option<SessionV1.WithParts>, NotFound>
 }
 
@@ -870,7 +874,7 @@ export const layer: Layer.Layer<
       }).pipe(Effect.withSpan("Session.updatePart"))
 
     const getPart: Interface["getPart"] = Effect.fn("Session.getPart")(function* (input) {
-      const session = yield* get(input.sessionID).pipe(
+      const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(
         Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
       )
       let projection: Awaited<ReturnType<typeof readSessionJsonlProjection>> | undefined
@@ -1087,7 +1091,7 @@ export const layer: Layer.Layer<
     }
 
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
-      const session = yield* get(input.sessionID)
+      const session = yield* getWithDirectory(input.sessionID, input.directory)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
       if (fileProjection.messages.length > 0) {
         return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
@@ -1169,8 +1173,12 @@ export const layer: Layer.Layer<
     })
 
     /** Finds the first message matching the predicate, searching newest-first. */
-    const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (sessionID, predicate) {
-      const session = yield* get(sessionID)
+    const findMessage: Interface["findMessage"] = Effect.fn("Session.findMessage")(function* (
+      sessionID,
+      predicate,
+      options,
+    ) {
+      const session = yield* getWithDirectory(sessionID, options?.directory)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
       const size = 50
       let before: string | undefined

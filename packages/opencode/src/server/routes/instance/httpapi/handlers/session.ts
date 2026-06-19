@@ -175,8 +175,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           catch: () => new HttpApiError.BadRequest({}),
         })
       }
-      yield* requireSession(ctx.params.sessionID)
-      const allMessages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+      const info = yield* requireSession(ctx.params.sessionID)
+      const allMessages = yield* SessionError.mapStorageNotFound(
+        session.messages({ sessionID: ctx.params.sessionID, directory: info.directory }),
+      )
       if (ctx.query.limit === undefined || ctx.query.limit === 0) {
         return allMessages
       }
@@ -202,8 +204,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     const message = Effect.fn("SessionHttpApi.message")(function* (ctx: {
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
+      const info = yield* requireSession(ctx.params.sessionID)
       const result = yield* SessionError.mapStorageNotFound(
-        session.findMessage(ctx.params.sessionID, (item) => item.info.id === ctx.params.messageID),
+        session.findMessage(ctx.params.sessionID, (item) => item.info.id === ctx.params.messageID, {
+          directory: info.directory,
+        }),
       )
       if (Option.isNone(result)) {
         return yield* Effect.fail(notFound(`Message not found: ${ctx.params.messageID}`))
@@ -345,8 +350,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof SummarizePayload.Type
     }) {
-      yield* revertSvc.cleanup(yield* requireSession(ctx.params.sessionID))
-      const messages = yield* SessionError.mapStorageNotFound(session.messages({ sessionID: ctx.params.sessionID }))
+      const info = yield* requireSession(ctx.params.sessionID)
+      yield* revertSvc.cleanup(info)
+      const messages = yield* SessionError.mapStorageNotFound(
+        session.messages({ sessionID: ctx.params.sessionID, directory: info.directory }),
+      )
       const defaultAgent = yield* agentSvc.defaultAgent()
       const currentAgent = messages.findLast((message) => message.info.role === "user")?.info.agent ?? defaultAgent
 

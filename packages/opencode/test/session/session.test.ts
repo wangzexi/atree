@@ -283,6 +283,57 @@ describe("Session", () => {
     }),
   )
 
+  it.effect("reads file-backed messages with an explicit directory and no instance", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const directory = yield* tmpdirScoped()
+      const now = Date.now()
+      const sessionID = "ses_explicit_messages" as SessionID
+      const messageID = "msg_explicit_file" as MessageID
+      const partID = "prt_explicit_file" as PartID
+      const info = {
+        id: sessionID,
+        slug: "explicit-messages",
+        version: "test",
+        projectID: "proj_file",
+        directory,
+        path: ".",
+        title: "Explicit messages",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: now, updated: now },
+      } as any
+
+      yield* Effect.promise(() => writeSessionStore(info))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "message.updated",
+          message: { id: messageID, sessionID, role: "user", time: { created: now } },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "message.part.updated",
+          part: { id: partID, sessionID, messageID, type: "text", text: "explicit directory message" },
+        }),
+      )
+
+      const messages = yield* session.messages({ sessionID, directory, limit: 10 })
+      expect(messages).toHaveLength(1)
+      expect(messages[0]?.parts[0]).toMatchObject({ id: partID, type: "text", text: "explicit directory message" })
+
+      const part = yield* session.getPart({ sessionID, directory, messageID, partID })
+      expect(part).toMatchObject({ id: partID, type: "text", text: "explicit directory message" })
+
+      const found = yield* session.findMessage(sessionID, (message) => message.info.id === messageID, { directory })
+      expect(Option.isSome(found) ? found.value.parts[0] : undefined).toMatchObject({
+        id: partID,
+        type: "text",
+        text: "explicit directory message",
+      })
+    }),
+  )
+
   it.instance("prefers file metadata from the cached session directory when the current instance differs", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
