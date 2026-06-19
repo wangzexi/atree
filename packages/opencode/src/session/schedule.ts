@@ -15,7 +15,8 @@ import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
-import { readSessionStore, readSessionStores } from "@/atree/session-store"
+import { findSessionStore, readSessionStore, readSessionStores } from "@/atree/session-store"
+import { readWorkspaceState } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
 
 export const MAX_PER_SESSION = 1
@@ -442,11 +443,22 @@ export const layer = Layer.effect(
       const directory = yield* InstanceState.directory.pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
-      if (!directory) return
-      const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      if (directory) {
+        const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+        if (session) {
+          yield* upsertFileSessionCache(session)
+          return session.directory
+        }
+      }
+
+      const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+        Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+      )
+      if (!state.rootDirectory) return
+      const session = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
       if (!session) return
       yield* upsertFileSessionCache(session)
-      return session?.directory
+      return session.directory
     })
 
     const sessionArchiveState = Effect.fn("Schedule.sessionArchiveState")(function* (
@@ -479,9 +491,18 @@ export const layer = Layer.effect(
       const directory = yield* InstanceState.directory.pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
-      if (!directory) return
-      const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      if (directory) {
+        const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+        if (session) return { directory: session.directory, archived: session.time.archived !== undefined }
+      }
+
+      const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+        Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+      )
+      if (!state.rootDirectory) return
+      const session = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
       if (!session) return
+      yield* upsertFileSessionCache(session)
       return { directory: session.directory, archived: session.time.archived !== undefined }
     })
 

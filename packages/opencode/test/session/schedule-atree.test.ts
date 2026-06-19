@@ -2,6 +2,7 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
+import { Global } from "@opencode-ai/core/global"
 import { Database } from "@opencode-ai/core/database/database"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { SessionTable } from "@opencode-ai/core/session/sql"
@@ -9,6 +10,7 @@ import { Effect, Layer } from "effect"
 import { eq } from "drizzle-orm"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { writeSessionStore } from "../../src/atree/session-store"
+import { writeWorkspaceRoot } from "../../src/atree/state"
 import { Schedule } from "../../src/session/schedule"
 import { ScheduleTable } from "../../src/session/schedule.sql"
 import type { SessionID } from "../../src/session/schema"
@@ -614,6 +616,51 @@ describe("atree schedule restore", () => {
           .pipe(Effect.orDie),
       )
       expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
+  it.instance(
+    "creates a schedule for a nested file-backed session found from the persisted atree root",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const data = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = "ses_nested_create_schedule" as SessionID
+      const now = Date.now()
+      const nodeDirectory = path.join(instance.directory, "nested", "schedule-node")
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "nested-create-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: nodeDirectory,
+          path: "nested/schedule-node",
+          title: "Nested create schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          kind: "once",
+          runAt: now + 60_000,
+          message: "created from nested file-backed session",
+        }),
+      )
+
+      expect(created).toMatchObject({ sessionID, message: "created from nested file-backed session" })
+      const stored = yield* Effect.promise(() => readSessionScheduleState(nodeDirectory, sessionID))
+      expect(stored).toHaveLength(1)
+      expect(stored[0]).toMatchObject({ id: created.id, message: "created from nested file-backed session" })
     }),
   )
 
