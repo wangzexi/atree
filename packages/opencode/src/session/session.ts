@@ -16,6 +16,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import {
   appendSessionJsonl,
+  deleteSessionStore,
   ensureSessionStore,
   readSessionJsonlProjection,
   readSessionJsonlMessages,
@@ -774,6 +775,9 @@ export const layer: Layer.Layer<
         for (const child of kids) {
           yield* remove(child.id)
         }
+        yield* Effect.promise(() => deleteSessionStore(session)).pipe(
+          Effect.catchCause((cause) => Effect.logWarning("failed to delete atree session store", { sessionID, cause })),
+        )
 
         yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
         yield* events.remove(sessionID)

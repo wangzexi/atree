@@ -425,6 +425,24 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("deletes the directory session store so removed sessions do not revive from .agents", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* session.create({ title: "delete-source", metadata: { icon: "🧹" } })
+      const root = path.join(instance.directory, ".agents", "atree", "sessions", info.id)
+
+      expect((yield* Effect.promise(() => fs.stat(path.join(root, "meta.yaml")))).isFile()).toBe(true)
+      yield* session.remove(info.id)
+
+      expect(yield* Effect.promise(() => readSessionStore(instance.directory, info.id))).toBeUndefined()
+      expect(yield* Effect.promise(() => fs.stat(root).then(() => true, () => false))).toBe(false)
+      expect((yield* session.list({ directory: instance.directory, archived: true })).map((item) => item.id)).not.toContain(
+        info.id,
+      )
+    }),
+  )
+
   it.instance("forks a file-backed session history into a new directory-backed session", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

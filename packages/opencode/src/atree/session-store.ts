@@ -89,6 +89,10 @@ export async function writeSessionStore(info: SessionInfo) {
   await writeAtomic(path.join(root, "meta.yaml"), metaYaml(info))
 }
 
+export async function deleteSessionStore(info: SessionInfo) {
+  await fs.rm(sessionRoot(info), { recursive: true, force: true })
+}
+
 export async function ensureSessionStore(info: SessionInfo) {
   await writeSessionStore(info)
 }
