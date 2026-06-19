@@ -7,7 +7,10 @@ const serverPort = process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
 const command = `bun run dev -- --host 0.0.0.0 --port ${port}`
 const reuse = !process.env.CI
 const workers = Number(process.env.PLAYWRIGHT_WORKERS ?? (process.env.CI ? 5 : 0)) || undefined
-const channel = process.env.PLAYWRIGHT_CHANNEL || undefined
+// Local runs default to the system-installed Chrome (no extra browser
+// download). CI keeps Playwright's default (its installed headless shell).
+// PLAYWRIGHT_CHANNEL always overrides; set it to "" to disable the channel.
+const channel = process.env.PLAYWRIGHT_CHANNEL ?? (process.env.CI ? undefined : "chrome")
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./e2e/test-results",
