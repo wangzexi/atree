@@ -192,6 +192,70 @@ test.describe("atree invariants", () => {
     expect(errors).toEqual([])
   })
 
+  test("switching directories only shows sessions for the active directory", async ({ page }) => {
+    const errors = trackPageErrors(page)
+
+    const childSession = {
+      id: "ses_invariant_child",
+      slug: "child-session",
+      projectID: project.id,
+      directory: child,
+      title: "Child session",
+      version: "test",
+      metadata: { icon: "🦊" },
+      time: { created: 1700000002000, updated: 1700000003000 },
+    }
+    const otherSession = {
+      id: "ses_invariant_other",
+      slug: "other-session",
+      projectID: project.id,
+      directory: other,
+      title: "Other session",
+      version: "test",
+      metadata: { icon: "🧭" },
+      time: { created: 1700000004000, updated: 1700000004000 },
+    }
+
+    await mockOpenCodeServer(page, {
+      directory: root,
+      project,
+      provider,
+      sessions: [childSession, otherSession],
+      pageMessages: () => ({ items: [] }),
+      files: (directory) =>
+        directory === root
+          ? [
+              { type: "directory", name: "inbox", path: "inbox", absolute: child },
+              { type: "directory", name: "archive", path: "archive", absolute: other },
+            ]
+          : [],
+    })
+
+    await page.goto(`/${base64Encode(child)}/session/${childSession.id}`)
+
+    const childTab = page.locator(`[data-atree-session-tab][data-session-id="${childSession.id}"]`)
+    const otherTab = page.locator(`[data-atree-session-tab][data-session-id="${otherSession.id}"]`)
+
+    await expect(childTab).toBeVisible()
+    await expect(otherTab).toHaveCount(0)
+    await expect(page.locator('[data-atree-session-tab]')).toHaveCount(1)
+
+    const otherNode = page.locator(`[data-atree-directory="${other}"]`)
+    await otherNode.click()
+
+    await expect(otherTab).toBeVisible()
+    await expect(childTab).toHaveCount(0)
+    await expect(page.locator('[data-atree-session-tab]')).toHaveCount(1)
+
+    const childNode = page.locator(`[data-atree-directory="${child}"]`)
+    await childNode.click()
+    await expect(childTab).toBeVisible()
+    await expect(otherTab).toHaveCount(0)
+    await expect(page.locator('[data-atree-session-tab]')).toHaveCount(1)
+
+    expect(errors).toEqual([])
+  })
+
   test("archiving a session with an automation requires confirmation and clears the automation", async ({ page }) => {
     const errors = trackPageErrors(page)
     let automation:
