@@ -57,6 +57,8 @@ describe("atree session store", () => {
     expect(meta).toContain("archivedAt: 4")
     expect(meta).toContain('metadata: {"icon":"🧭"}')
     expect(meta).not.toContain("First title")
+    expect(meta).not.toContain("directory:")
+    expect(meta).not.toContain(directory)
     expect((await fs.stat(path.join(root, "session.jsonl"))).isFile()).toBe(true)
     expect((await fs.stat(path.join(root, "assets"))).isDirectory()).toBe(true)
   })

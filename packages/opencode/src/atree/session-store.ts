@@ -29,7 +29,6 @@ function metaYaml(info: SessionInfo) {
     `id: ${yamlString(info.id)}`,
     `slug: ${yamlString(info.slug)}`,
     `sessionVersion: ${yamlString(info.version)}`,
-    `directory: ${yamlString(info.directory)}`,
     `path: ${yamlString(info.path)}`,
     `projectID: ${yamlString(info.projectID)}`,
     `workspaceID: ${yamlString(info.workspaceID)}`,
