@@ -187,4 +187,42 @@ describe("atree directory self-contained state", () => {
       expect(row).toBeUndefined()
     }),
   )
+
+  it.instance("archiving a scheduled session clears its directory schedule state immediately", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const schedules = yield* Schedule.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "scheduled archive" })
+      const schedule = yield* schedules.create({
+        sessionID: session.id,
+        kind: "once",
+        runAt: Date.now() + 120_000,
+        message: "should be cleared when archived",
+      })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, session.id))).toHaveLength(1)
+      expect(
+        yield* db
+          .select({ id: ScheduleTable.id })
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, schedule.id))
+          .get()
+          .pipe(Effect.orDie),
+      ).toBeDefined()
+
+      yield* sessions.setArchived({ sessionID: session.id, time: Date.now() })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, session.id))).toEqual([])
+      const row = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, schedule.id))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
 })

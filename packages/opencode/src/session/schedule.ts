@@ -251,6 +251,17 @@ export const layer = Layer.effect(
     })
     yield* Effect.addFinalizer(() => unsubscribeDeleted)
 
+    const unsubscribeUpdated = yield* events.listen((event) => {
+      if (event.type !== SessionV1.Event.Updated.type) return Effect.void
+      const data = event.data as typeof SessionV1.Event.Updated.data.Type
+      if (data.info.time.archived === undefined) return Effect.void
+      return Effect.gen(function* () {
+        yield* clearRuntimeState(data.sessionID)
+        yield* Effect.promise(() => writeSessionScheduleState(data.info.directory, data.sessionID, []))
+      })
+    })
+    yield* Effect.addFinalizer(() => unsubscribeUpdated)
+
     const recordRun: Interface["recordRun"] = Effect.fn("Schedule.recordRun")(
       function* (scheduleID, sessionID, runStatus, ranAt) {
         yield* db
