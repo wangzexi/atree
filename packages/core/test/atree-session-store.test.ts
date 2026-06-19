@@ -8,10 +8,10 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { Prompt } from "@opencode-ai/core/session/prompt"
+import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { DateTime, Effect, Layer } from "effect"
-import { mkdir, mkdtemp, realpath, writeFile } from "fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 import { testEffect } from "./lib/effect"
@@ -234,6 +234,61 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(admitted.id).toBe(SessionMessage.ID.make("msg_core_prompt"))
       expect(messages).toHaveLength(1)
       expect(messages[0]).toMatchObject({ id: "msg_core_prompt", type: "user", text: "record this prompt" })
+    }),
+  )
+
+  it.effect("materializes v2 prompt files into file-backed session assets", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_prompt_file",
+          title: "Core prompt file",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_prompt_file")
+      yield* sessions.prompt({
+        sessionID,
+        id: SessionMessage.ID.make("msg_core_prompt_file"),
+        prompt: new Prompt({
+          text: "record this file",
+          files: [
+            new FileAttachment({
+              uri: "data:text/plain;base64,aGVsbG8gZmlsZQ==",
+              mime: "text/plain",
+              name: "hello.txt",
+            }),
+          ],
+        }),
+        resume: false,
+      })
+
+      const sessionRoot = path.join(node, ".agents", "atree", "sessions", "ses_core_prompt_file")
+      const raw = yield* Effect.promise(() => readFile(path.join(sessionRoot, "session.jsonl"), "utf8"))
+      const assets = yield* Effect.promise(() => readdir(path.join(sessionRoot, "assets")))
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+
+      expect(raw).not.toContain("data:text/plain")
+      expect(assets).toHaveLength(1)
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_prompt_file",
+        type: "user",
+        text: "record this file",
+        files: [{ uri: "data:text/plain;base64,aGVsbG8gZmlsZQ==", mime: "text/plain", name: "hello.txt" }],
+      })
     }),
   )
 

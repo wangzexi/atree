@@ -197,6 +197,15 @@ async function appendJsonl(target: string, entries: Record<string, unknown>[]) {
   await fs.appendFile(target, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n")
 }
 
+async function writeBufferIfMissing(target: string, content: Buffer) {
+  try {
+    await fs.writeFile(target, content, { flag: "wx" })
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") return
+    throw error
+  }
+}
+
 function messageCreated(message: V1Message, fallback: number) {
   return typeof message.time?.created === "number" ? message.time.created : fallback
 }
@@ -211,6 +220,60 @@ function textParts(parts: V1Part[]) {
 
 function assetURL(value: string) {
   return !path.isAbsolute(value) && value.split(/[\\/]/)[0] === "assets"
+}
+
+function decodeDataURL(url: string) {
+  const match = url.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/)
+  if (!match) return
+  const mime = match[1] || "application/octet-stream"
+  const payload = match[3] ?? ""
+  try {
+    const buffer = match[2] ? Buffer.from(payload, "base64") : Buffer.from(decodeURIComponent(payload))
+    return { mime, buffer }
+  } catch {
+    return
+  }
+}
+
+function extensionFor(mime: string, name: string | undefined) {
+  const parsed = name ? path.extname(name) : ""
+  if (parsed) return parsed
+  switch (mime) {
+    case "image/png":
+      return ".png"
+    case "image/jpeg":
+      return ".jpg"
+    case "image/gif":
+      return ".gif"
+    case "image/webp":
+      return ".webp"
+    case "application/pdf":
+      return ".pdf"
+    case "text/plain":
+      return ".txt"
+    default:
+      return ".bin"
+  }
+}
+
+function safeAssetStem(value: string | undefined) {
+  return (value ?? "asset").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "asset"
+}
+
+async function materializePromptFile(info: SessionSchema.Info, file: FileAttachment, index: number) {
+  if (!file.uri.startsWith("data:")) return { uri: file.uri, mime: file.mime }
+  const decoded = decodeDataURL(file.uri)
+  if (!decoded) return { uri: file.uri, mime: file.mime }
+  const mime = file.mime || decoded.mime
+  const root = sessionRoot(info)
+  const relative = path.join(
+    "assets",
+    `${safeAssetStem(file.name ?? `file-${index}`)}-${Date.now().toString(36)}-${index}${extensionFor(mime, file.name)}`,
+  )
+  const target = path.join(root, relative)
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  await writeBufferIfMissing(target, decoded.buffer)
+  return { uri: relative.split(path.sep).join("/"), mime }
 }
 
 async function resolveFilePart(info: SessionSchema.Info, part: V1Part) {
@@ -367,7 +430,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
 
 export async function appendPromptJsonl(info: SessionSchema.Info, admitted: SessionInput.Admitted) {
   const created = DateTime.toEpochMillis(admitted.timeCreated)
-  await appendJsonl(sessionJsonl(info), [
+  const entries: Record<string, unknown>[] = [
     {
       type: "message.updated",
       message: {
@@ -377,6 +440,8 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
         time: { created },
       },
     },
+  ]
+  entries.push(
     {
       type: "message.part.updated",
       part: {
@@ -387,5 +452,22 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
         text: admitted.prompt.text,
       },
     },
-  ])
+  )
+  for (const [index, file] of (admitted.prompt.files ?? []).entries()) {
+    const materialized = await materializePromptFile(info, file, index)
+    entries.push({
+      type: "message.part.updated",
+      part: {
+        id: `${promptPartID(admitted.id)}_file_${index}`,
+        sessionID: admitted.sessionID,
+        messageID: admitted.id,
+        type: "file",
+        mime: materialized.mime,
+        filename: file.name,
+        url: materialized.uri,
+        description: file.description,
+      },
+    })
+  }
+  await appendJsonl(sessionJsonl(info), entries)
 }
