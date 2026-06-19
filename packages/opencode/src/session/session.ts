@@ -534,7 +534,7 @@ export interface Interface {
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
   readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
-  readonly remove: (sessionID: SessionID) => Effect.Effect<void, NotFound>
+  readonly remove: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
   readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
@@ -819,8 +819,11 @@ export const layer: Layer.Layer<
       return [...byID.values()]
     })
 
-    const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID) {
-      const session = yield* get(sessionID)
+    const remove: Interface["remove"] = Effect.fnUntraced(function* (
+      sessionID: SessionID,
+      options?: DirectoryOption,
+    ) {
+      const session = yield* getWithDirectory(sessionID, options?.directory)
       try {
         // `remove` needs to work in all cases, such as broken sessions that
         // run cleanup without instance state.
@@ -832,7 +835,7 @@ export const layer: Layer.Layer<
         if (hasInstance) yield* cancelBackgroundJobs(background, sessionID)
         const kids = yield* children(sessionID)
         for (const child of kids) {
-          yield* remove(child.id)
+          yield* remove(child.id, { directory: child.directory })
         }
         yield* Effect.promise(() => deleteSessionStore(session)).pipe(
           Effect.catchCause((cause) => Effect.logWarning("failed to delete atree session store", { sessionID, cause })),

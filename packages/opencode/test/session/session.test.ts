@@ -602,6 +602,38 @@ describe("Session", () => {
     }),
   )
 
+  it.effect("removes a file-backed session with an explicit directory and no instance", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const directory = yield* tmpdirScoped()
+      const now = Date.now()
+      const sessionID = "ses_explicit_remove" as SessionID
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-remove",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit remove",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const root = path.join(directory, ".agents", "atree", "sessions", sessionID)
+      expect((yield* Effect.promise(() => fs.stat(path.join(root, "meta.yaml")))).isFile()).toBe(true)
+
+      yield* session.remove(sessionID, { directory })
+
+      expect(yield* Effect.promise(() => readSessionStore(directory, sessionID))).toBeUndefined()
+      expect(yield* Effect.promise(() => fs.stat(root).then(() => true, () => false))).toBe(false)
+    }),
+  )
+
   it.instance("forks a file-backed session history into a new directory-backed session", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
