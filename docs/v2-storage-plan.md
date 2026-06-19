@@ -195,6 +195,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - processor 的重复工具调用检测会从目录会话历史读取 assistant tool parts；即使全局 SQLite `part` 投影被删除，只要 `session.jsonl` 仍在，doom-loop 检测仍可工作。
 - processor 会使用 assistant message 的 `path.cwd` 作为目录 hint 解析当前会话；流式文本、reasoning、step、patch、cleanup 等 assistant 写入都会显式落到该目录的 `session.jsonl`，复制 `.agents/atree/` 后不会把新回复写回源目录。
 - compaction 的 prune/create/process 会接受并传递目录 hint；压缩标记、summary assistant、replay/continue 用户消息和被裁剪 tool part 都会写入当前会话目录。
+- `MessageV2.page/stream/get/parts` 开始支持可选目录 hint；当目标目录存在对应 session store 时，会直接从该目录的 `session.jsonl` 投影读取，即使全局 SQLite message/part 投影被删除也能恢复。
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
 - schedule 执行后的 `lastRanAt`、`lastRunStatus` 会回写到目录 `schedule.json`，重启后可以恢复运行状态。
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。
@@ -204,7 +205,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 
 - 全局 SQLite 仍然存在，并且仍承担运行时投影和部分 OpenCode 兼容链路。
 - `EventV2` 的 durable event log 还没有迁移到每个目录的 `session.jsonl`。
-- `MessageV2.page`、projector、部分 CLI/旧同步导出仍以 SQLite 为中心。
+- 未传目录 hint 的 `MessageV2.page/stream/get/parts`、projector、部分 CLI/旧同步导出仍以 SQLite 为中心。
 - `schedule.json`、`todo.json` 仍是 OpenCode spike 的过渡文件，长期应折叠进 Pi/core session 事件或更清晰的 atree 扩展协议。
 
 ## `.agents/atree/meta.yaml` 的职责

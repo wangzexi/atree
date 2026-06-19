@@ -1151,7 +1151,11 @@ export const layer: Layer.Layer<
       if (!(yield* canUseMessageProjectionCache(session))) return []
 
       if (input.limit) {
-        const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
+        const page = yield* MessageV2.page({
+          sessionID: input.sessionID,
+          limit: input.limit,
+          directory: session.directory,
+        }).pipe(
           Effect.provideService(Database.Service, database),
           Effect.catchIf(NotFoundError.isInstance, () =>
             Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
@@ -1164,7 +1168,12 @@ export const layer: Layer.Layer<
       const result = [] as SessionV1.WithParts[]
       let before: string | undefined
       while (true) {
-        const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: size, before }).pipe(
+        const page = yield* MessageV2.page({
+          sessionID: input.sessionID,
+          limit: size,
+          before,
+          directory: session.directory,
+        }).pipe(
           Effect.provideService(Database.Service, database),
         )
         if (page.items.length === 0) break
@@ -1248,7 +1257,7 @@ export const layer: Layer.Layer<
       let before: string | undefined
       if (canUseCache) {
         while (true) {
-          const page = yield* MessageV2.page({ sessionID, limit: size, before }).pipe(
+          const page = yield* MessageV2.page({ sessionID, limit: size, before, directory: session.directory }).pipe(
             Effect.provideService(Database.Service, database),
             Effect.catchIf(NotFoundError.isInstance, () =>
               Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),

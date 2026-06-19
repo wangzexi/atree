@@ -37,6 +37,8 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
+import { readSessionJsonlProjection, readSessionStore } from "@/atree/session-store"
+import type { Session } from "./session"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -105,6 +107,35 @@ const part = (row: typeof PartTable.$inferSelect) =>
 
 const older = (row: Cursor) =>
   or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
+
+function olderMessage(item: WithParts, before: Cursor) {
+  const created = item.info.time.created
+  return created < before.time || (created === before.time && item.info.id < before.id)
+}
+
+function pageFileMessages(messages: WithParts[], input: { limit: number; before?: Cursor }) {
+  const candidates = input.before ? messages.filter((item) => olderMessage(item, input.before!)) : messages
+  const pageWithExtra = candidates.slice(Math.max(0, candidates.length - (input.limit + 1)))
+  const more = pageWithExtra.length > input.limit
+  const items = more ? pageWithExtra.slice(1) : pageWithExtra
+  const cursorItem = more ? items[0] : undefined
+  return {
+    items,
+    more,
+    cursor: cursorItem ? cursor.encode({ id: cursorItem.info.id as MessageID, time: cursorItem.info.time.created }) : undefined,
+  }
+}
+
+type PageResult = {
+  items: WithParts[]
+  more: boolean
+  cursor: string | undefined
+}
+
+function fileBackedSession(directory: string | undefined, sessionID: SessionID) {
+  if (!directory) return Effect.succeed<Session.Info | undefined>(undefined)
+  return Effect.promise(() => readSessionStore(directory, sessionID))
+}
 
 function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {
   const ids = rows.map((row) => row.id)
@@ -437,9 +468,16 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   sessionID: SessionID
   limit: number
   before?: string
+  directory?: string
 }) {
-  const { db } = yield* Database.Service
   const before = input.before ? cursor.decode(input.before) : undefined
+  const fileSession = yield* fileBackedSession(input.directory, input.sessionID)
+  if (fileSession) {
+    const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
+    return pageFileMessages(projection.messages, { limit: input.limit, before })
+  }
+
+  const { db } = yield* Database.Service
   const where = before
     ? and(eq(MessageTable.session_id, input.sessionID), older(before))
     : eq(MessageTable.session_id, input.sessionID)
@@ -462,6 +500,7 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
     return {
       items: [] as WithParts[],
       more: false,
+      cursor: undefined,
     }
   }
 
@@ -477,13 +516,13 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   }
 })
 
-export function stream(sessionID: SessionID) {
+export function stream(sessionID: SessionID, options?: { directory?: string }) {
   const size = 50
   return Effect.gen(function* () {
     const result = [] as WithParts[]
     let before: string | undefined
     while (true) {
-      const next = yield* page({ sessionID, limit: size, before }).pipe(
+      const next = yield* page({ sessionID, limit: size, before, directory: options?.directory }).pipe(
         Effect.catchIf(NotFoundError.isInstance, () =>
           Effect.succeed({ items: [] as WithParts[], more: false, cursor: undefined }),
         ),
@@ -500,8 +539,16 @@ export function stream(sessionID: SessionID) {
   })
 }
 
-export function parts(messageID: MessageID) {
+export function parts(messageID: MessageID, options?: { sessionID?: SessionID; directory?: string }) {
   return Effect.gen(function* () {
+    if (options?.sessionID && options.directory) {
+      const fileSession = yield* fileBackedSession(options.directory, options.sessionID)
+      if (fileSession) {
+        const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
+        return projection.messages.find((message) => message.info.id === messageID)?.parts ?? []
+      }
+    }
+
     const { db } = yield* Database.Service
     const rows = yield* db
       .select()
@@ -514,7 +561,19 @@ export function parts(messageID: MessageID) {
   })
 }
 
-export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: SessionID; messageID: MessageID }) {
+export const get = Effect.fn("MessageV2.get")(function* (input: {
+  sessionID: SessionID
+  messageID: MessageID
+  directory?: string
+}) {
+  const fileSession = yield* fileBackedSession(input.directory, input.sessionID)
+  if (fileSession) {
+    const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
+    const message = projection.messages.find((item) => item.info.id === input.messageID)
+    if (!message) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
+    return message
+  }
+
   const { db } = yield* Database.Service
   const row = yield* db
     .select()
@@ -525,7 +584,7 @@ export const get = Effect.fn("MessageV2.get")(function* (input: { sessionID: Ses
   if (!row) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
   return {
     info: info(row),
-    parts: yield* parts(input.messageID),
+    parts: yield* parts(input.messageID, { sessionID: input.sessionID, directory: input.directory }),
   }
 })
 

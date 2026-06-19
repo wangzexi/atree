@@ -5,11 +5,17 @@ import { Effect, Layer, Option } from "effect"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
+import * as fs from "fs/promises"
+import os from "os"
+import path from "path"
+import { eq } from "drizzle-orm"
+import { MessageTable, PartTable } from "@opencode-ai/core/session/sql"
 
 import { NotFoundError } from "@/storage/storage"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { TestInstance } from "../fixture/fixture"
 
 const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Database.defaultLayer))
 
@@ -990,6 +996,64 @@ describe("MessageV2.cursor", () => {
 })
 
 describe("MessageV2 consistency", () => {
+  it.instance("reads copied file-backed messages with an explicit directory after SQLite projections are removed", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-test-message-v2-"))),
+        (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+      )
+      const database = yield* Database.Service
+
+      const created = yield* session.create({ title: "message-v2 copied source" })
+      const sourceMessageID = yield* addUser(created.id, "source only")
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      const targetMessageID = MessageID.ascending()
+      const targetPartID = PartID.ascending()
+      yield* session.updateMessage(
+        {
+          id: targetMessageID,
+          sessionID: created.id,
+          role: "user",
+          time: { created: Date.now() + 1 },
+          agent: "test",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as SessionV1.Info,
+        { directory: target },
+      )
+      yield* session.updatePart(
+        {
+          id: targetPartID,
+          sessionID: created.id,
+          messageID: targetMessageID,
+          type: "text",
+          text: "target only",
+        },
+        { directory: target },
+      )
+
+      yield* database.db.delete(PartTable).where(eq(PartTable.session_id, created.id)).run().pipe(Effect.orDie)
+      yield* database.db.delete(MessageTable).where(eq(MessageTable.session_id, created.id)).run().pipe(Effect.orDie)
+
+      const page = yield* MessageV2.page({ sessionID: created.id, directory: target, limit: 10 })
+      const stream = yield* MessageV2.stream(created.id, { directory: target })
+      const got = yield* MessageV2.get({ sessionID: created.id, directory: target, messageID: targetMessageID })
+      const parts = yield* MessageV2.parts(targetMessageID, { sessionID: created.id, directory: target })
+
+      expect(page.items.map((item) => item.info.id)).toContain(targetMessageID)
+      expect(stream.map((item) => item.info.id)).toContain(targetMessageID)
+      expect(got.parts).toEqual(parts)
+      expect(parts[0]).toMatchObject({ id: targetPartID, type: "text", text: "target only" })
+      expect(page.items.map((item) => item.info.id)).toContain(sourceMessageID)
+    }),
+  )
+
   it.instance("page hydration matches get for each message", () =>
     withSession(({ sessionID }) =>
       Effect.gen(function* () {
