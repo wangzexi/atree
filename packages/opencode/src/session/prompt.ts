@@ -249,39 +249,45 @@ export const layer = Layer.effect(
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
       const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
-      const assistantMessage: SessionV1.Assistant = yield* sessions.updateMessage({
-        id: MessageID.ascending(),
-        role: "assistant",
-        parentID: lastUser.id,
-        sessionID,
-        mode: task.agent,
-        agent: task.agent,
-        variant: lastUser.model.variant,
-        path: { cwd: ctx.directory, root: ctx.worktree },
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        modelID: taskModel.id,
-        providerID: taskModel.providerID,
-        time: { created: Date.now() },
-      })
-      let part: SessionV1.ToolPart = yield* sessions.updatePart({
-        id: PartID.ascending(),
-        messageID: assistantMessage.id,
-        sessionID: assistantMessage.sessionID,
-        type: "tool",
-        callID: ulid(),
-        tool: TaskTool.id,
-        state: {
-          status: "running",
-          input: {
-            prompt: task.prompt,
-            description: task.description,
-            subagent_type: task.agent,
-            command: task.command,
-          },
-          time: { start: Date.now() },
+      const assistantMessage: SessionV1.Assistant = yield* sessions.updateMessage(
+        {
+          id: MessageID.ascending(),
+          role: "assistant",
+          parentID: lastUser.id,
+          sessionID,
+          mode: task.agent,
+          agent: task.agent,
+          variant: lastUser.model.variant,
+          path: { cwd: ctx.directory, root: ctx.worktree },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          modelID: taskModel.id,
+          providerID: taskModel.providerID,
+          time: { created: Date.now() },
         },
-      })
+        { directory: session.directory },
+      )
+      let part: SessionV1.ToolPart = yield* sessions.updatePart(
+        {
+          id: PartID.ascending(),
+          messageID: assistantMessage.id,
+          sessionID: assistantMessage.sessionID,
+          type: "tool",
+          callID: ulid(),
+          tool: TaskTool.id,
+          state: {
+            status: "running",
+            input: {
+              prompt: task.prompt,
+              description: task.description,
+              subagent_type: task.agent,
+              command: task.command,
+            },
+            time: { start: Date.now() },
+          },
+        },
+        { directory: session.directory },
+      )
       const taskArgs = {
         prompt: task.prompt,
         description: task.description,
@@ -316,11 +322,14 @@ export const layer = Layer.effect(
           messages: msgs,
           metadata: (val: { title?: string; metadata?: Record<string, any> }) =>
             Effect.gen(function* () {
-              part = yield* sessions.updatePart({
-                ...part,
-                type: "tool",
-                state: { ...part.state, ...val },
-              } satisfies SessionV1.ToolPart)
+              part = yield* sessions.updatePart(
+                {
+                  ...part,
+                  type: "tool",
+                  state: { ...part.state, ...val },
+                } satisfies SessionV1.ToolPart,
+                { directory: session.directory },
+              )
             }),
           ask: (req: any) =>
             permission
@@ -346,18 +355,21 @@ export const layer = Layer.effect(
               taskAbort.abort()
               assistantMessage.finish = "tool-calls"
               assistantMessage.time.completed = Date.now()
-              yield* sessions.updateMessage(assistantMessage)
+              yield* sessions.updateMessage(assistantMessage, { directory: session.directory })
               if (part.state.status === "running") {
-                yield* sessions.updatePart({
-                  ...part,
-                  state: {
-                    status: "error",
-                    error: "Cancelled",
-                    time: { start: part.state.time.start, end: Date.now() },
-                    metadata: part.state.metadata,
-                    input: part.state.input,
-                  },
-                } satisfies SessionV1.ToolPart)
+                yield* sessions.updatePart(
+                  {
+                    ...part,
+                    state: {
+                      status: "error",
+                      error: "Cancelled",
+                      time: { start: part.state.time.start, end: Date.now() },
+                      metadata: part.state.metadata,
+                      input: part.state.input,
+                    },
+                  } satisfies SessionV1.ToolPart,
+                  { directory: session.directory },
+                )
               }
             }),
           ),
@@ -378,37 +390,43 @@ export const layer = Layer.effect(
 
       assistantMessage.finish = "tool-calls"
       assistantMessage.time.completed = Date.now()
-      yield* sessions.updateMessage(assistantMessage)
+      yield* sessions.updateMessage(assistantMessage, { directory: session.directory })
 
       if (result && part.state.status === "running") {
-        yield* sessions.updatePart({
-          ...part,
-          state: {
-            status: "completed",
-            input: part.state.input,
-            title: result.title,
-            metadata: result.metadata,
-            output: result.output,
-            attachments,
-            time: { ...part.state.time, end: Date.now() },
-          },
-        } satisfies SessionV1.ToolPart)
+        yield* sessions.updatePart(
+          {
+            ...part,
+            state: {
+              status: "completed",
+              input: part.state.input,
+              title: result.title,
+              metadata: result.metadata,
+              output: result.output,
+              attachments,
+              time: { ...part.state.time, end: Date.now() },
+            },
+          } satisfies SessionV1.ToolPart,
+          { directory: session.directory },
+        )
       }
 
       if (!result) {
-        yield* sessions.updatePart({
-          ...part,
-          state: {
-            status: "error",
-            error: error ? `Tool execution failed: ${error.message}` : "Tool execution failed",
-            time: {
-              start: part.state.status === "running" ? part.state.time.start : Date.now(),
-              end: Date.now(),
+        yield* sessions.updatePart(
+          {
+            ...part,
+            state: {
+              status: "error",
+              error: error ? `Tool execution failed: ${error.message}` : "Tool execution failed",
+              time: {
+                start: part.state.status === "running" ? part.state.time.start : Date.now(),
+                end: Date.now(),
+              },
+              metadata: part.state.status === "pending" ? undefined : part.state.metadata,
+              input: part.state.input,
             },
-            metadata: part.state.status === "pending" ? undefined : part.state.metadata,
-            input: part.state.input,
-          },
-        } satisfies SessionV1.ToolPart)
+          } satisfies SessionV1.ToolPart,
+          { directory: session.directory },
+        )
       }
 
       if (!task.command) return
@@ -421,15 +439,18 @@ export const layer = Layer.effect(
         agent: lastUser.agent,
         model: lastUser.model,
       }
-      yield* sessions.updateMessage(summaryUserMsg)
-      yield* sessions.updatePart({
-        id: PartID.ascending(),
-        messageID: summaryUserMsg.id,
-        sessionID,
-        type: "text",
-        text: "Summarize the task tool output above and continue with your task.",
-        synthetic: true,
-      } satisfies SessionV1.TextPart)
+      yield* sessions.updateMessage(summaryUserMsg, { directory: session.directory })
+      yield* sessions.updatePart(
+        {
+          id: PartID.ascending(),
+          messageID: summaryUserMsg.id,
+          sessionID,
+          type: "text",
+          text: "Summarize the task tool output above and continue with your task.",
+          synthetic: true,
+        } satisfies SessionV1.TextPart,
+        { directory: session.directory },
+      )
     })
 
     const shellImpl = Effect.fn("SessionPrompt.shellImpl")(function* (input: ShellInput, ready?: Latch.Latch) {
@@ -1261,7 +1282,7 @@ export const layer = Layer.effect(
             time: { created: Date.now() },
             sessionID,
           }
-          yield* sessions.updateMessage(msg)
+          yield* sessions.updateMessage(msg, { directory: session.directory })
 
           const finalizeInterruptedAssistant = Effect.gen(function* () {
             if (msg.time.completed) return
@@ -1270,7 +1291,7 @@ export const layer = Layer.effect(
               aborted: true,
             })
             msg.time.completed = Date.now()
-            yield* sessions.updateMessage(msg)
+            yield* sessions.updateMessage(msg, { directory: session.directory })
           })
 
           const handle = yield* processor
@@ -1359,7 +1380,7 @@ export const layer = Layer.effect(
             if (structured !== undefined) {
               handle.message.structured = structured
               handle.message.finish = handle.message.finish ?? "stop"
-              yield* sessions.updateMessage(handle.message)
+              yield* sessions.updateMessage(handle.message, { directory: session.directory })
               return "break" as const
             }
 
@@ -1373,7 +1394,7 @@ export const layer = Layer.effect(
                 handle.message.error = new SessionV1.ContentFilterError({
                   message: "The response was blocked by the provider's content filter",
                 }).toObject()
-                yield* sessions.updateMessage(handle.message)
+                yield* sessions.updateMessage(handle.message, { directory: session.directory })
                 yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
                 return "break" as const
               }
@@ -1382,7 +1403,7 @@ export const layer = Layer.effect(
                   message: "Model did not produce structured output",
                   retries: 0,
                 }).toObject()
-                yield* sessions.updateMessage(handle.message)
+                yield* sessions.updateMessage(handle.message, { directory: session.directory })
                 return "break" as const
               }
             }
