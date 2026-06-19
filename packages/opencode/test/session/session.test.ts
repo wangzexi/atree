@@ -439,6 +439,29 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers archived file metadata over stale cached child sessions", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const parent = yield* Effect.acquireRelease(session.create({ title: "file-child-parent" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const child = yield* Effect.acquireRelease(
+        session.create({ parentID: parent.id, title: "file-child-stale-active" }),
+        (created) => session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          ...child,
+          time: { ...child.time, archived: Date.now() },
+        } as any),
+      )
+
+      const children = yield* session.children(parent.id)
+      expect(children.map((item) => item.id)).not.toContain(child.id)
+    }),
+  )
+
   it.instance("materializes data-url file parts into the session assets directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
