@@ -27,6 +27,7 @@ import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from ".
 import { MessageV2 } from "../../src/session/message-v2"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { appendSessionJsonl, readSessionStore, writeSessionStore } from "../../src/atree/session-store"
+import { writeSessionTodoState } from "../../src/atree/todo-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionMessage } from "@opencode-ai/core/session/message"
@@ -562,6 +563,43 @@ describe("session HttpApi", () => {
     { git: true, config: { formatter: false, lsp: false } },
   )
 
+  it.instance(
+    "serves file-backed todo state when database cache is missing",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "file-backed-api-todo",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "File backed API todo",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: now, updated: now },
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionTodoState(test.directory, sessionID, [
+            { content: "todo from directory", status: "pending", priority: "high" },
+          ]),
+        )
+
+        expect(yield* requestJson<unknown[]>(pathFor(SessionPaths.todo, { sessionID }), { headers })).toEqual([
+          { content: "todo from directory", status: "pending", priority: "high" },
+        ])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
   it.live("uses the persisted session directory for prompt requests", () =>
     Effect.gen(function* () {
       const llm = yield* TestLLMServer
@@ -1036,6 +1074,48 @@ describe("session HttpApi", () => {
 
         expect(archived.time.archived).toBe(1)
         expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual([])
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
+    "creates file-backed schedule state through the API when the database cache is missing",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "file-backed-create-schedule",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "File backed create schedule",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: now, updated: now },
+          } as any),
+        )
+
+        const schedule = yield* requestJson<Schedule.Info>(
+          pathFor(SessionPaths.createSchedule, { sessionID }),
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ type: "at", at: now + 60_000, message: "api creates directory schedule" }),
+          },
+        )
+
+        expect(schedule).toMatchObject({ sessionID, kind: "once", message: "api creates directory schedule" })
+        const stored = yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))
+        expect(stored).toHaveLength(1)
+        expect(stored[0]).toMatchObject({ id: schedule.id, message: "api creates directory schedule" })
       }),
     { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
   )

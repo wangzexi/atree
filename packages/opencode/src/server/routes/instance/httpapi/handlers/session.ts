@@ -118,8 +118,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const todo = Effect.fn("SessionHttpApi.todo")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* todoSvc.get(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
+      return yield* todoSvc.get(ctx.params.sessionID, { directory: info.directory })
     })
 
     const schedules = Effect.fn("SessionHttpApi.schedules")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -131,11 +131,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof SchedulePayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
       const resolved = buildScheduleCreateInput(ctx.payload)
       return yield* scheduleSvc
         .create({
           sessionID: ctx.params.sessionID,
+          directory: info.directory,
           kind: resolved.kind,
           expression: resolved.expression?.trim(),
           runAt: resolved.runAt,
