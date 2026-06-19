@@ -167,6 +167,12 @@ it.instance("creates, lists, triggers, records, and deletes a scheduled task", (
 
     const ran = yield* waitForRunStatus(schedules, session.id, "ran")
     expect(ran.lastRanAt).toBeNumber()
+    const directoryState = yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))
+    expect(directoryState[0]).toMatchObject({
+      id: created.id,
+      lastRanAt: ran.lastRanAt,
+      lastRunStatus: "ran",
+    })
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.triggered")
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
 
