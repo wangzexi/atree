@@ -617,6 +617,60 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "serves experimental file-backed session lists from the current instance directory",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory }
+        const activeID = SessionID.descending()
+        const archivedID = SessionID.descending()
+        const base = {
+          version: "test",
+          projectID: ctx.project.id,
+          directory: test.directory,
+          path: ".",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            id: activeID,
+            slug: "experimental-file-backed-active-list",
+            title: "Experimental file backed active list",
+            time: { created: 20, updated: 40 },
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            id: archivedID,
+            slug: "experimental-file-backed-archived-list",
+            title: "Experimental file backed archived list",
+            time: { created: 21, updated: 41, archived: 42 },
+          } as any),
+        )
+
+        const listed = yield* requestJson<Array<Session.Info & { project: unknown }>>("/experimental/session?roots=true", {
+          headers,
+        })
+        expect(listed.map((item) => item.id)).toContain(activeID)
+        expect(listed.map((item) => item.id)).not.toContain(archivedID)
+
+        const withArchived = yield* requestJson<Array<Session.Info & { project: unknown }>>(
+          "/experimental/session?roots=true&archived=true",
+          { headers },
+        )
+        const byID = new Map(withArchived.map((item) => [item.id, item]))
+        expect(byID.get(activeID)?.title).toBe("Experimental file backed active list")
+        expect(byID.get(archivedID)?.time.archived).toBe(42)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
     "serves file-backed todo state when database cache is missing",
     () =>
       Effect.gen(function* () {
