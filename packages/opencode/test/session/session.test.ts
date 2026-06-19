@@ -328,6 +328,50 @@ describe("Session", () => {
     }),
   )
 
+  it.effect("reads file-backed child sessions with an explicit directory and no instance", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const directory = yield* tmpdirScoped()
+      const now = Date.now()
+      const parentID = "ses_explicit_child_parent" as SessionID
+      const childID = "ses_explicit_child" as SessionID
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: parentID,
+          slug: "explicit-child-parent",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit child parent",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: childID,
+          parentID,
+          slug: "explicit-child",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit child",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const children = yield* session.children(parentID, { directory })
+      expect(children).toHaveLength(1)
+      expect(children[0]).toMatchObject({ id: childID, parentID, directory, title: "Explicit child" })
+    }),
+  )
+
   it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

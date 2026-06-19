@@ -533,7 +533,7 @@ export interface Interface {
   readonly setWorkspace: (input: { sessionID: SessionID; workspaceID: Info["workspaceID"] }) => Effect.Effect<void>
   readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (input: { sessionID: SessionID; limit?: number }) => Effect.Effect<SessionV1.WithParts[], NotFound>
-  readonly children: (parentID: SessionID) => Effect.Effect<Info[]>
+  readonly children: (parentID: SessionID, options?: DirectoryOption) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void, NotFound>
   readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
   readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
@@ -783,7 +783,7 @@ export const layer: Layer.Layer<
       return sessions.map((session) => ({ ...session, project: projects.get(session.projectID) ?? null }))
     })
 
-    const children = Effect.fn("Session.children")(function* (parentID: SessionID) {
+    const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: DirectoryOption) {
       const rows = yield* db
         .select()
         .from(SessionTable)
@@ -800,9 +800,12 @@ export const layer: Layer.Layer<
       const ctx = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
-      const parent = yield* get(parentID).pipe(Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)))
+      const parent = yield* getWithDirectory(parentID, options?.directory).pipe(
+        Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)),
+      )
       const directory =
         parent?.directory ??
+        options?.directory ??
         ctx?.directory ??
         (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
       if (directory) {
@@ -833,7 +836,7 @@ export const layer: Layer.Layer<
         )
 
         if (hasInstance) yield* cancelBackgroundJobs(background, sessionID)
-        const kids = yield* children(sessionID)
+        const kids = yield* children(sessionID, { directory: session.directory })
         for (const child of kids) {
           yield* remove(child.id, { directory: child.directory })
         }

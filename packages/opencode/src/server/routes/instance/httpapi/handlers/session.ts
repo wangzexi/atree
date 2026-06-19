@@ -113,8 +113,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const children = Effect.fn("SessionHttpApi.children")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* session.children(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
+      return yield* session.children(ctx.params.sessionID, { directory: info.directory })
     })
 
     const todo = Effect.fn("SessionHttpApi.todo")(function* (ctx: { params: { sessionID: SessionID } }) {
