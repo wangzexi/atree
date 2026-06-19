@@ -150,6 +150,34 @@ describe("session.list", () => {
   )
 
   it.instance(
+    "prefers archived file metadata over stale active database rows",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const stale = yield* withSession({ title: "stale-active-list-cache" })
+        const archivedAt = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...stale,
+            time: { ...stale.time, archived: archivedAt },
+          } as any),
+        )
+
+        const activeIDs = (yield* SessionNs.Service.use((session) =>
+          session.list({ directory: test.directory, roots: true }),
+        )).map((session) => session.id)
+        expect(activeIDs).not.toContain(stale.id)
+
+        const withArchived = yield* SessionNs.Service.use((session) =>
+          session.list({ directory: test.directory, roots: true, archived: true }),
+        )
+        expect(withArchived.find((session) => session.id === stale.id)?.time.archived).toBe(archivedAt)
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "filters file-backed sessions by path without requiring SQLite rows",
     () =>
       Effect.gen(function* () {

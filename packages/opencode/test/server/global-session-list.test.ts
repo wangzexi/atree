@@ -125,6 +125,34 @@ describe("session.listGlobal", () => {
   )
 
   it.instance(
+    "prefers archived file metadata over stale active rows in global lists",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const stale = yield* withSession({ title: "global-stale-active-cache" })
+        const archivedAt = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...stale,
+            time: { ...stale.time, archived: archivedAt },
+          } as any),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) =>
+          session.listGlobal({ directory: test.directory, limit: 200 }),
+        )
+        expect(sessions.map((session) => session.id)).not.toContain(stale.id)
+
+        const archived = yield* SessionNs.Service.use((session) =>
+          session.listGlobal({ directory: test.directory, archived: true, limit: 200 }),
+        )
+        expect(archived.find((session) => session.id === stale.id)?.time.archived).toBe(archivedAt)
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "supports cursor pagination",
     () =>
       Effect.gen(function* () {

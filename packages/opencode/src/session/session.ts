@@ -651,6 +651,7 @@ export const layer: Layer.Layer<
       const byID = new Map<string, Info>()
       for (const item of items) byID.set(item.id, item)
       for (const item of fileSessions) {
+        byID.delete(item.id)
         if (!matchesListInput(item, input)) continue
         byID.set(item.id, item)
       }
@@ -695,11 +696,8 @@ export const layer: Layer.Layer<
       if (input?.directory) {
         const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
         for (const item of fileSessions) {
-          if (input.roots && item.parentID) continue
-          if (input.start && item.time.updated < input.start) continue
-          if (input.cursor && item.time.updated >= input.cursor) continue
-          if (input.search && !item.title.includes(input.search)) continue
-          if (!input.archived && item.time.archived !== undefined) continue
+          byID.delete(item.id)
+          if (!matchesGlobalListInput(item, input)) continue
           byID.set(item.id, item)
         }
       }
@@ -747,6 +745,7 @@ export const layer: Layer.Layer<
       if (directory) {
         const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
         for (const item of fileSessions) {
+          byID.delete(item.id)
           if (item.parentID !== parentID) continue
           if (item.time.archived !== undefined) continue
           byID.set(item.id, item)
@@ -1242,6 +1241,15 @@ function matchesListInput(item: Info, input: ListInput) {
   }
   if (input.roots && item.parentID) return false
   if (input.start && item.time.updated < input.start) return false
+  if (input.search && !item.title.includes(input.search)) return false
+  if (!input.archived && item.time.archived !== undefined) return false
+  return true
+}
+
+function matchesGlobalListInput(item: Info, input: GlobalListInput) {
+  if (input.roots && item.parentID) return false
+  if (input.start && item.time.updated < input.start) return false
+  if (input.cursor && item.time.updated >= input.cursor) return false
   if (input.search && !item.title.includes(input.search)) return false
   if (!input.archived && item.time.archived !== undefined) return false
   return true
