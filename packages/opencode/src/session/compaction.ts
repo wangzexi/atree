@@ -142,13 +142,14 @@ export interface Interface {
     tokens: SessionV1.Assistant["tokens"]
     model: Provider.Model
   }) => Effect.Effect<boolean>
-  readonly prune: (input: { sessionID: SessionID }) => Effect.Effect<void>
+  readonly prune: (input: { sessionID: SessionID; directory?: string }) => Effect.Effect<void>
   readonly process: (input: {
     parentID: MessageID
     messages: SessionV1.WithParts[]
     sessionID: SessionID
     auto: boolean
     overflow?: boolean
+    directory?: string
   }) => Effect.Effect<"continue" | "stop">
   readonly create: (input: {
     sessionID: SessionID
@@ -156,6 +157,7 @@ export interface Interface {
     model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
     auto: boolean
     overflow?: boolean
+    directory?: string
   }) => Effect.Effect<void>
 }
 
@@ -250,13 +252,14 @@ export const layer = Layer.effect(
 
     // goes backwards through parts until there are PRUNE_PROTECT tokens worth of tool
     // calls, then erases output of older tool calls to free context space
-    const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID }) {
+    const prune = Effect.fn("SessionCompaction.prune")(function* (input: { sessionID: SessionID; directory?: string }) {
       const cfg = yield* config.get()
       if (!cfg.compaction?.prune) return
       yield* Effect.logInfo("pruning")
+      const current = yield* session.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
 
       const msgs = yield* session
-        .messages({ sessionID: input.sessionID })
+        .messages({ sessionID: input.sessionID, directory: current.directory })
         .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)))
       if (!msgs) return
 
@@ -289,7 +292,7 @@ export const layer = Layer.effect(
         for (const part of toPrune) {
           if (part.state.status === "completed") {
             part.state.time.compacted = Date.now()
-            yield* session.updatePart(part)
+            yield* session.updatePart(part, { directory: current.directory })
           }
         }
         yield* Effect.logInfo("pruned", { count: toPrune.length })
@@ -302,7 +305,9 @@ export const layer = Layer.effect(
       sessionID: SessionID
       auto: boolean
       overflow?: boolean
+      directory?: string
     }) {
+      const current = yield* session.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       const parent = input.messages.findLast((m) => m.info.id === input.parentID)
       if (!parent || parent.info.role !== "user") {
         throw new Error(`Compaction parent must be a user message: ${input.parentID}`)
@@ -385,7 +390,7 @@ export const layer = Layer.effect(
         variant: userMessage.model.variant,
         summary: true,
         path: {
-          cwd: ctx.directory,
+          cwd: current.directory,
           root: ctx.worktree,
         },
         cost: 0,
@@ -401,7 +406,7 @@ export const layer = Layer.effect(
           created: Date.now(),
         },
       }
-      yield* session.updateMessage(msg)
+      yield* session.updateMessage(msg, { directory: current.directory })
       const processor = yield* processors.create({
         assistantMessage: msg,
         sessionID: input.sessionID,
@@ -430,43 +435,52 @@ export const layer = Layer.effect(
             : "Session too large to compact - context exceeds model limit even after stripping media",
         }).toObject()
         processor.message.finish = "error"
-        yield* session.updateMessage(processor.message)
+        yield* session.updateMessage(processor.message, { directory: current.directory })
         return "stop"
       }
 
       if (compactionPart && selected.tail_start_id && compactionPart.tail_start_id !== selected.tail_start_id) {
-        yield* session.updatePart({
-          ...compactionPart,
-          tail_start_id: selected.tail_start_id,
-        })
+        yield* session.updatePart(
+          {
+            ...compactionPart,
+            tail_start_id: selected.tail_start_id,
+          },
+          { directory: current.directory },
+        )
       }
 
       if (result === "continue" && input.auto) {
         if (replay) {
           const original = replay.info
-          const replayMsg = yield* session.updateMessage({
-            id: MessageID.ascending(),
-            role: "user",
-            sessionID: input.sessionID,
-            time: { created: Date.now() },
-            agent: original.agent,
-            model: original.model,
-            format: original.format,
-            tools: original.tools,
-            system: original.system,
-          })
+          const replayMsg = yield* session.updateMessage(
+            {
+              id: MessageID.ascending(),
+              role: "user",
+              sessionID: input.sessionID,
+              time: { created: Date.now() },
+              agent: original.agent,
+              model: original.model,
+              format: original.format,
+              tools: original.tools,
+              system: original.system,
+            },
+            { directory: current.directory },
+          )
           for (const part of replay.parts) {
             if (part.type === "compaction") continue
             const replayPart =
               part.type === "file" && MessageV2.isMedia(part.mime)
                 ? { type: "text" as const, text: `[Attached ${part.mime}: ${part.filename ?? "file"}]` }
                 : part
-            yield* session.updatePart({
-              ...replayPart,
-              id: PartID.ascending(),
-              messageID: replayMsg.id,
-              sessionID: input.sessionID,
-            })
+            yield* session.updatePart(
+              {
+                ...replayPart,
+                id: PartID.ascending(),
+                messageID: replayMsg.id,
+                sessionID: input.sessionID,
+              },
+              { directory: current.directory },
+            )
           }
         }
 
@@ -492,35 +506,41 @@ export const layer = Layer.effect(
               { enabled: true },
             )).enabled
           ) {
-            const continueMsg = yield* session.updateMessage({
-              id: MessageID.ascending(),
-              role: "user",
-              sessionID: input.sessionID,
-              time: { created: Date.now() },
-              agent: userMessage.agent,
-              model: userMessage.model,
-            })
+            const continueMsg = yield* session.updateMessage(
+              {
+                id: MessageID.ascending(),
+                role: "user",
+                sessionID: input.sessionID,
+                time: { created: Date.now() },
+                agent: userMessage.agent,
+                model: userMessage.model,
+              },
+              { directory: current.directory },
+            )
             const text =
               (input.overflow
                 ? "The previous request exceeded the provider's size limit due to large media attachments. The conversation was compacted and media files were removed from context. If the user was asking about attached images or files, explain that the attachments were too large to process and suggest they try again with smaller or fewer files.\n\n"
                 : "") +
               "Continue if you have next steps, or stop and ask for clarification if you are unsure how to proceed."
-            yield* session.updatePart({
-              id: PartID.ascending(),
-              messageID: continueMsg.id,
-              sessionID: input.sessionID,
-              type: "text",
-              // Internal marker for auto-compaction followups so provider plugins
-              // can distinguish them from manual post-compaction user prompts.
-              // This is not a stable plugin contract and may change or disappear.
-              metadata: { compaction_continue: true },
-              synthetic: true,
-              text,
-              time: {
-                start: Date.now(),
-                end: Date.now(),
+            yield* session.updatePart(
+              {
+                id: PartID.ascending(),
+                messageID: continueMsg.id,
+                sessionID: input.sessionID,
+                type: "text",
+                // Internal marker for auto-compaction followups so provider plugins
+                // can distinguish them from manual post-compaction user prompts.
+                // This is not a stable plugin contract and may change or disappear.
+                metadata: { compaction_continue: true },
+                synthetic: true,
+                text,
+                time: {
+                  start: Date.now(),
+                  end: Date.now(),
+                },
               },
-            })
+              { directory: current.directory },
+            )
           }
         }
       }
@@ -528,7 +548,7 @@ export const layer = Layer.effect(
       if (processor.message.error) return "stop"
       if (result === "continue") {
         const summary = summaryText(
-          (yield* session.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).find(
+          (yield* session.messages({ sessionID: input.sessionID, directory: current.directory }).pipe(Effect.orDie)).find(
             (item) => item.info.id === msg.id,
           ) ?? {
             info: msg,
@@ -557,23 +577,31 @@ export const layer = Layer.effect(
       model: { providerID: ProviderV2.ID; modelID: ModelV2.ID }
       auto: boolean
       overflow?: boolean
+      directory?: string
     }) {
-      const msg = yield* session.updateMessage({
-        id: MessageID.ascending(),
-        role: "user",
-        model: input.model,
-        sessionID: input.sessionID,
-        agent: input.agent,
-        time: { created: Date.now() },
-      })
-      yield* session.updatePart({
-        id: PartID.ascending(),
-        messageID: msg.id,
-        sessionID: msg.sessionID,
-        type: "compaction",
-        auto: input.auto,
-        overflow: input.overflow,
-      })
+      const current = yield* session.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
+      const msg = yield* session.updateMessage(
+        {
+          id: MessageID.ascending(),
+          role: "user",
+          model: input.model,
+          sessionID: input.sessionID,
+          agent: input.agent,
+          time: { created: Date.now() },
+        },
+        { directory: current.directory },
+      )
+      yield* session.updatePart(
+        {
+          id: PartID.ascending(),
+          messageID: msg.id,
+          sessionID: msg.sessionID,
+          type: "compaction",
+          auto: input.auto,
+          overflow: input.overflow,
+        },
+        { directory: current.directory },
+      )
       if (flags.experimentalEventSystem) {
         yield* events.publish(SessionEvent.Compaction.Started, {
           sessionID: input.sessionID,

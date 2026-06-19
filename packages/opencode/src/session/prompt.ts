@@ -1237,6 +1237,7 @@ export const layer = Layer.effect(
               sessionID,
               auto: task.auto,
               overflow: task.overflow,
+              directory: session.directory,
             })
             if (result === "stop") break
             continue
@@ -1247,7 +1248,13 @@ export const layer = Layer.effect(
             lastFinished.summary !== true &&
             (yield* compaction.isOverflow({ tokens: lastFinished.tokens, model }))
           ) {
-            yield* compaction.create({ sessionID, agent: lastUser.agent, model: lastUser.model, auto: true })
+            yield* compaction.create({
+              sessionID,
+              agent: lastUser.agent,
+              model: lastUser.model,
+              auto: true,
+              directory: session.directory,
+            })
             continue
           }
 
@@ -1416,6 +1423,7 @@ export const layer = Layer.effect(
                 model: lastUser.model,
                 auto: true,
                 overflow: !handle.message.finish,
+                directory: session.directory,
               })
             }
             return "continue" as const
@@ -1427,7 +1435,7 @@ export const layer = Layer.effect(
           continue
         }
 
-        yield* compaction.prune({ sessionID }).pipe(Effect.ignore, Effect.forkIn(scope))
+        yield* compaction.prune({ sessionID, directory: session.directory }).pipe(Effect.ignore, Effect.forkIn(scope))
         return yield* lastAssistant(sessionID)
       },
     )
