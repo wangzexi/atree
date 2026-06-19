@@ -1,4 +1,5 @@
 import { afterEach, describe, expect } from "bun:test"
+import { $ } from "bun"
 import { Effect, Layer } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -14,6 +15,7 @@ import { Storage } from "@/storage/storage"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { BackgroundJob } from "@/background/job"
 import { writeSessionStore } from "@/atree/session-store"
+import { InstanceState } from "@/effect/instance-state"
 
 const layer = (experimentalWorkspaces: boolean) =>
   Layer.mergeAll(
@@ -35,6 +37,17 @@ const withSession = (input?: Parameters<SessionNs.Interface["create"]>[0]) =>
   Effect.acquireRelease(SessionNs.use.create(input), (created) =>
     SessionNs.Service.use((session) => session.remove(created.id).pipe(Effect.ignore)),
   )
+
+const initGitRoot = (directory: string) =>
+  Effect.promise(async () => {
+    await mkdir(directory, { recursive: true })
+    await $`git init`.cwd(directory).quiet()
+    await $`git config core.fsmonitor false`.cwd(directory).quiet()
+    await $`git config commit.gpgsign false`.cwd(directory).quiet()
+    await $`git config user.email "test@opencode.test"`.cwd(directory).quiet()
+    await $`git config user.name "Test"`.cwd(directory).quiet()
+    await $`git commit --allow-empty -m "root commit ${directory}"`.cwd(directory).quiet()
+  })
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -104,26 +117,31 @@ describe("session.list", () => {
     () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
-        const source = path.join(test.directory, "source")
-        const target = path.join(test.directory, "target")
-        yield* Effect.promise(() => mkdir(source, { recursive: true }))
-        yield* Effect.promise(() => mkdir(target, { recursive: true }))
+        const source = path.join(test.directory, "source-project")
+        const target = path.join(test.directory, "target-project")
+        yield* initGitRoot(source)
+        yield* initGitRoot(target)
 
         const created = yield* withSession({ title: "copied-directory-session", metadata: { icon: "🧭" } }).pipe(
           provideInstance(source),
         )
         yield* Effect.promise(() => cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+        const sourceCtx = yield* provideInstance(source)(InstanceState.context)
+        const targetCtx = yield* provideInstance(target)(InstanceState.context)
+        expect(sourceCtx.project.id).not.toBe(targetCtx.project.id)
 
         const targetSessions = yield* SessionNs.Service.use((session) =>
           provideInstance(target)(session.list({ directory: target, roots: true })),
         )
         const copied = targetSessions.find((item) => item.id === created.id)
         expect(copied?.directory).toBe(target)
+        expect(copied?.projectID).toBe(targetCtx.project.id)
         expect(copied?.title).toBe("copied-directory-session")
         expect(copied?.metadata).toEqual({ icon: "🧭" })
 
         const loaded = yield* SessionNs.Service.use((session) => provideInstance(target)(session.get(created.id)))
         expect(loaded.directory).toBe(target)
+        expect(loaded.projectID).toBe(targetCtx.project.id)
         expect(loaded.title).toBe("copied-directory-session")
       }),
     { git: true },

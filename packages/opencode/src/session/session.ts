@@ -159,8 +159,12 @@ export function toRow(info: Info) {
 
 function mergeFileSession(cached: Info | undefined, file: Info): Info {
   if (!cached) return file
+  const sameCachedDirectory = sameDirectory(file.directory, cached.directory)
   return {
     ...file,
+    projectID: file.projectID === ProjectV2.ID.global && sameCachedDirectory ? cached.projectID : file.projectID,
+    workspaceID: file.workspaceID ?? (sameCachedDirectory ? cached.workspaceID : undefined),
+    path: file.path ?? (sameCachedDirectory ? cached.path : undefined),
     summary: file.summary ?? cached.summary,
     share: file.share ?? cached.share,
     revert: file.revert ?? cached.revert,
@@ -169,6 +173,19 @@ function mergeFileSession(cached: Info | undefined, file: Info): Info {
       ...file.time,
       compacting: file.time.compacting ?? cached.time.compacting,
     },
+  }
+}
+
+function sameDirectory(left: string, right: string) {
+  return path.resolve(left) === path.resolve(right)
+}
+
+function localizeFileSession(file: Info, ctx: InstanceContext | undefined): Info {
+  if (!ctx || !sameDirectory(file.directory, ctx.directory)) return file
+  return {
+    ...file,
+    directory: ctx.directory,
+    projectID: ctx.project.id,
   }
 }
 
@@ -619,14 +636,15 @@ export const layer: Layer.Layer<
     const get = Effect.fn("Session.get")(function* (id: SessionID) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
       const cached = row ? fromRow(row) : undefined
-      const directory = yield* InstanceState.directory.pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      const ctx = yield* InstanceState.context.pipe(
+        Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
+      const directory = ctx?.directory
       const directories = [...new Set([directory, cached?.directory].filter((item): item is string => !!item))]
       for (const candidate of directories) {
         const fileSession = yield* Effect.promise(() => readSessionStore(candidate, id))
         if (fileSession) {
-          const merged = mergeFileSession(cached, fileSession)
+          const merged = mergeFileSession(cached, localizeFileSession(fileSession, ctx))
           yield* syncFileSessionCache(merged)
           return merged
         }
@@ -646,12 +664,14 @@ export const layer: Layer.Layer<
     const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (
       items: Info[],
       input?: ListInput,
+      ctx?: InstanceContext,
     ) {
       if (!input?.directory) return items
       const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
       const byID = new Map<string, Info>()
       for (const item of items) byID.set(item.id, item)
-      for (const item of fileSessions) {
+      for (const fileSession of fileSessions) {
+        const item = localizeFileSession(fileSession, ctx)
         byID.delete(item.id)
         if (!matchesListInput(item, input)) continue
         byID.set(item.id, item)
@@ -668,10 +688,13 @@ export const layer: Layer.Layer<
         experimentalWorkspaces: flags.experimentalWorkspaces,
         ...input,
       })
-      return yield* mergeAtreeDirectoryIndex(items, input)
+      return yield* mergeAtreeDirectoryIndex(items, input, ctx)
     })
 
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {
+      const ctx = yield* InstanceState.context.pipe(
+        Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
+      )
       const conditions: SQL[] = []
       if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
       if (input?.roots) conditions.push(isNull(SessionTable.parent_id))
@@ -696,7 +719,8 @@ export const layer: Layer.Layer<
       for (const row of rows) byID.set(row.id, fromRow(row))
       if (input?.directory) {
         const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
-        for (const item of fileSessions) {
+        for (const fileSession of fileSessions) {
+          const item = localizeFileSession(fileSession, ctx)
           byID.delete(item.id)
           if (!matchesGlobalListInput(item, input)) continue
           byID.set(item.id, item)
