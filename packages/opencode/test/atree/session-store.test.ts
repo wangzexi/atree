@@ -4,6 +4,7 @@ import os from "os"
 import path from "path"
 import {
   appendSessionJsonl,
+  findSessionStore,
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
@@ -139,6 +140,31 @@ describe("atree session store", () => {
     expect(session?.title).toBe("Lookup")
     expect(session?.metadata).toEqual({ icon: "🧭" })
     expect(await readSessionStore(directory, "ses_missing" as any)).toBeUndefined()
+  })
+
+  test("finds a session metadata store under a nested atree root", async () => {
+    const root = await tempdir()
+    const node = path.join(root, "projects", "alpha")
+    await fs.mkdir(node, { recursive: true })
+    await fs.mkdir(path.join(root, "node_modules", "ignored"), { recursive: true })
+
+    await writeSessionStore({
+      id: "ses_nested_lookup",
+      slug: "nested-lookup",
+      version: "test",
+      projectID: "proj_test",
+      directory: node,
+      path: "projects/alpha",
+      title: "Nested lookup",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+    } as any)
+
+    const found = await findSessionStore(root, "ses_nested_lookup" as any)
+    expect(found?.directory).toBe(await fs.realpath(node))
+    expect(found?.title).toBe("Nested lookup")
+    expect(await findSessionStore(root, "ses_missing" as any)).toBeUndefined()
   })
 
   test("treats the containing directory as authoritative when a session store is copied", async () => {

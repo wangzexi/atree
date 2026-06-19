@@ -1,6 +1,7 @@
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
+import { Global } from "@opencode-ai/core/global"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -25,6 +26,7 @@ import {
   readSessionStore,
   writeSessionStore,
 } from "@/atree/session-store"
+import { writeWorkspaceRoot } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
 
 const it = testEffect(
@@ -387,6 +389,30 @@ describe("Session", () => {
       expect(loaded.directory).toBe(info.directory)
       expect(loaded.title).toBe("authoritative-file-title")
       expect(loaded.metadata).toEqual({ icon: "🧭" })
+    }),
+  )
+
+  it.instance("locates a nested file-backed session from the persisted atree root without a database cache", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const data = yield* tmpdirScoped()
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const nodeDirectory = path.join(instance.directory, "nested", "node")
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      const info = yield* session.create({ title: "nested self-contained", directory: nodeDirectory })
+
+      const { db } = yield* Database.Service
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, info.id)).run().pipe(Effect.orDie)
+
+      const loaded = yield* session.get(info.id)
+      expect(loaded.id).toBe(info.id)
+      expect(loaded.directory).toBe(nodeDirectory)
+      expect(loaded.title).toBe("nested self-contained")
     }),
   )
 

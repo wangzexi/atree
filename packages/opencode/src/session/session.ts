@@ -18,12 +18,14 @@ import {
   appendSessionJsonl,
   deleteSessionStore,
   ensureSessionStore,
+  findSessionStore,
   readSessionJsonlProjection,
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
   writeSessionStore,
 } from "@/atree/session-store"
+import { readWorkspaceState } from "@/atree/state"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -693,6 +695,17 @@ export const layer: Layer.Layer<
       ]
       for (const candidate of directories) {
         const fileSession = yield* Effect.promise(() => readSessionStore(candidate, id))
+        if (fileSession) {
+          const merged = mergeFileSession(cached, localizeFileSession(fileSession, ctx))
+          yield* syncFileSessionCache(merged)
+          return merged
+        }
+      }
+      const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+        Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+      )
+      if (state.rootDirectory) {
+        const fileSession = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, id))
         if (fileSession) {
           const merged = mergeFileSession(cached, localizeFileSession(fileSession, ctx))
           yield* syncFileSessionCache(merged)

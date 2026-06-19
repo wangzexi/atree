@@ -84,6 +84,20 @@ function sessionRootByID(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID)
 }
 
+const FindMaxDepth = 8
+const FindMaxNodes = 2_000
+const IgnoredDirectories = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  ".next",
+  ".turbo",
+  ".cache",
+  "dist",
+  "build",
+])
+
 export async function writeSessionStore(info: SessionInfo) {
   await ensureAtreeDirectoryStore(info.directory)
   const root = sessionRoot(info)
@@ -383,6 +397,39 @@ export async function readSessionStore(directory: string, sessionID: SessionID) 
   })
   if (!raw) return
   return parseMeta(raw, directory)
+}
+
+export async function findSessionStore(rootDirectory: string, sessionID: SessionID) {
+  const root = await fs.realpath(rootDirectory)
+  const budget = { count: 0 }
+
+  async function walk(directory: string, depth: number): Promise<SessionInfo | undefined> {
+    if (budget.count++ >= FindMaxNodes) return
+    const found = await readSessionStore(directory, sessionID)
+    if (found) return found
+    if (depth >= FindMaxDepth) return
+
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "EACCES")
+      ) {
+        return []
+      }
+      throw error
+    })
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (IgnoredDirectories.has(entry.name)) continue
+      const result = await walk(path.join(directory, entry.name), depth + 1)
+      if (result) return result
+    }
+  }
+
+  return walk(root, 0)
 }
 
 export async function touchSessionStore(directory: string, sessionID: SessionID, updatedAt = Date.now()) {
