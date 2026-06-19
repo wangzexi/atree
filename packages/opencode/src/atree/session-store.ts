@@ -385,6 +385,18 @@ export async function readSessionStore(directory: string, sessionID: SessionID) 
   return parseMeta(raw, directory)
 }
 
+export async function touchSessionStore(directory: string, sessionID: SessionID, updatedAt = Date.now()) {
+  const current = await readSessionStore(directory, sessionID)
+  if (!current) return
+  await writeSessionStore({
+    ...current,
+    time: {
+      ...current.time,
+      updated: Math.max(updatedAt, current.time.updated + 1),
+    },
+  })
+}
+
 function parseValue(value: string) {
   const trimmed = value.trim()
   if (trimmed === "") return undefined

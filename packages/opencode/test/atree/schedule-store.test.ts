@@ -3,6 +3,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
+import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -96,6 +97,25 @@ describe("atree schedule store", () => {
       version: 1,
       schedules: [],
     })
+  })
+
+  test("touches session metadata when writing schedule state", async () => {
+    const directory = await tempdir()
+    await writeSessionStore({
+      id: "ses_touch" as never,
+      slug: "touch",
+      version: "test",
+      projectID: "proj_touch" as never,
+      directory,
+      title: "Touch",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 10, updated: 20 },
+    })
+
+    await writeSessionScheduleState(directory, "ses_touch", [])
+
+    expect((await readSessionStore(directory, "ses_touch" as never))?.time.updated).toBeGreaterThan(20)
   })
 
   test("falls back to legacy directory schedule state until the session is rewritten", async () => {

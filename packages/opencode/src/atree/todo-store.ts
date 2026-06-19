@@ -1,7 +1,8 @@
 import fs from "fs/promises"
 import path from "path"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import { ensureSessionPayloadFilesByID } from "./session-store"
+import { ensureSessionPayloadFilesByID, touchSessionStore } from "./session-store"
+import type { SessionID } from "@/session/schema"
 
 export type StoredTodo = {
   content: string
@@ -99,6 +100,7 @@ export async function writeSessionTodoState(directory: string, sessionID: string
     updatedAt: Date.now(),
     todos,
   })
+  await touchSessionStore(directory, sessionID as SessionID)
   await removeLegacySessionTodo(directory, sessionID)
 }
 
