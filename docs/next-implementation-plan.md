@@ -22,6 +22,45 @@
 
 下一阶段要继续收紧会话事实源边界，再处理接口收敛和核心替换。
 
+## 2026-06-20 审查结论
+
+另一个 AI 已经推进了一批目录自包含相关改动，其中一部分可以保留并继续沿用。
+
+当前已验证：
+
+- `packages/opencode` 的 session 服务会把会话元数据写入 `.agents/atree/sessions/<session-id>/meta.yaml`。
+- 旧版 message/part 事件会写入 `.agents/atree/sessions/<session-id>/session.jsonl`。
+- data URL 文件 part 会落盘到会话自己的 `assets/`，JSONL 中只保留相对路径。
+- `schedule.json` 和 `todo.json` 已经按会话落在同一个会话目录下。
+- 删除 SQLite 投影后，session metadata、message、part、assets、schedule、todo 可以从目录恢复。
+- `packages/core` 的 `SessionV2` 已能从当前目录或持久化 root 发现 file-backed sessions。
+- `SessionV2.messages/context/message` 已能读取目录内 `session.jsonl` 的用户/助手文本投影。
+- `SessionV2.prompt` 对 file-backed session 写入用户 prompt 到目录内 `session.jsonl`，不再只依赖 SQLite。
+
+已通过的护栏：
+
+- `packages/opencode/test/session/atree-self-contained.test.ts`
+- `packages/opencode/test/atree/schedule-store.test.ts`
+- `packages/core/test/atree-session-store.test.ts`
+- `packages/opencode/test/server/httpapi-session.test.ts` 中 file-backed v2 相关用例
+- `packages/app/e2e/atree/invariants.spec.ts`
+- `packages/app/e2e/atree/smoke.spec.ts`
+
+关键缺口：
+
+- OpenCode V1 session 服务和 core `SessionV2` 仍是两套读写入口。
+- SQLite 仍承担运行时投影、执行队列和部分兼容缓存；目前还不能删除。
+- core `SessionV2` 只对 JSONL 做了文本级兼容投影，工具调用、reasoning、文件资产等 v2 结构还没有完整投影。
+- 真正模型输出链路仍主要由 OpenCode 原有 projector/runtime 推动，目录 JSONL 目前是事实源化过程中的镜像与恢复层。
+
+下一步优先级：
+
+1. 继续补护栏测试，固定当前可用行为，尤其是直接打开 session URL、切换目录、归档、一次性 schedule 触发后清空 header。
+2. 把“会话读写事实源”集中到一个 atree session store 模块，减少 `packages/core/src/atree/session-store.ts` 和 `packages/opencode/src/atree/session-store.ts` 的重复逻辑。
+3. 扩展 core JSONL reader，让它能恢复更多 message 类型，而不是只恢复用户/助手文本。
+4. 等读写边界稳定后，再考虑收敛 HTTP facade；不要先删 OpenCode 接口，否则测试与回退路径会不够。
+5. Pi core 替换应新开分支做，保留当前 OpenCode spike 作为可运行对照。
+
 ## 阶段 0：固定当前可用版本
 
 目的：保证当前 demo 不再因为状态边界反复回归。
