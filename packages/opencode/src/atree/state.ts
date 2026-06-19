@@ -1,4 +1,5 @@
 import { Global } from "@opencode-ai/core/global"
+import { randomUUID } from "crypto"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
@@ -37,7 +38,7 @@ function stateFile() {
 
 async function atomicWriteJson(target: string, value: unknown) {
   await fs.mkdir(path.dirname(target), { recursive: true })
-  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
   await fs.writeFile(temp, JSON.stringify(value, null, 2))
   await fs.rename(temp, target)
 }

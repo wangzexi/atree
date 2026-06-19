@@ -1,5 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
+import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
 import { ensureSessionPayloadFilesByID, touchSessionStore } from "./session-store"
 import type { SessionID } from "@/session/schema"
@@ -65,7 +66,7 @@ async function readSessionState(target: string) {
 
 async function writeAtomic(target: string, value: TodoState | SessionTodoState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
-  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
   await fs.writeFile(temp, JSON.stringify(value, null, 2))
   await fs.rename(temp, target)
 }
