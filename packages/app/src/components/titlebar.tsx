@@ -32,7 +32,7 @@ import { WindowsAppMenu } from "./windows-app-menu"
 import { applyPath, backPath, forwardPath } from "./titlebar-history"
 import { useServerSync } from "@/context/server-sync"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { nextSessionMetadata, sessionEmoji, sessionEmojiOptions } from "@/pages/layout/helpers"
+import { nextSessionMetadata, sessionEmoji, sessionEmojiOptions, sortedRootSessions } from "@/pages/layout/helpers"
 import { makeEventListener } from "@solid-primitives/event-listener"
 import {
   notifySessionTabsRemoved,
@@ -376,24 +376,46 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
               return tab ? tabKey(tab) : undefined
             }
             const isCurrentTab = (tab: Tab) => currentTabKey() === tabKey(tab)
+            let restoreDirectoryRun = 0
             createEffect(() => {
               const route = layout.route()
               if (!tabs.ready()) return
+              if (route.type === "session") {
+                const currentServer = route.server ?? server.key
+                const group = tabs.directoryGroup()
+                if (group?.server === currentServer && pathKey(group.directory) === pathKey(route.dir)) return
+
+                const run = ++restoreDirectoryRun
+                void (async () => {
+                  await serverSync.project.loadSessions(route.dir)
+                  if (run !== restoreDirectoryRun) return
+
+                  const [directoryStore] = serverSync.child(route.dir, { bootstrap: false })
+                  const sync = serverSync.createDirSyncContext(route.dir)
+                  const routeSession = sync.session.get(route.sessionId)
+                  const sessionId = routeSession?.parentID ?? routeSession?.id ?? route.sessionId
+                  const sessions = sortedRootSessions(
+                    { session: directoryStore.session, path: { directory: route.dir } },
+                    Date.now(),
+                  )
+
+                  if (sessions.length > 0) {
+                    tabsStoreActions.replaceDirectorySessions(currentServer, route.dir, sessions)
+                    return
+                  }
+
+                  if (!routeSession) return
+                  tabsStoreActions.addSessionTab({
+                    server: currentServer,
+                    dirBase64: route.dirBase64,
+                    sessionId,
+                  })
+                })()
+                return
+              }
+
               const tab = currentTab()
               if (tab) return
-
-              if (route.type === "session") {
-                const sync = serverSync.createDirSyncContext(route.dir)
-                const session = sync.session.get(route.sessionId)
-                if (!session) return
-                const sessionId = session.parentID ?? session.id
-                const next = {
-                  server: route.server ?? server.key,
-                  dirBase64: route.dirBase64,
-                  sessionId,
-                }
-                tabsStoreActions.addSessionTab(next)
-              }
             })
 
             makeEventListener(window, SESSION_TABS_REMOVED_EVENT, (event) => {

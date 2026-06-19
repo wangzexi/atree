@@ -94,6 +94,47 @@ test.describe("atree invariants", () => {
     expect(errors).toEqual([])
   })
 
+  test("direct session URLs restore the full directory tab group", async ({ page }) => {
+    const errors = trackPageErrors(page)
+    const firstSession = {
+      id: "ses_direct_first",
+      slug: "direct-first",
+      projectID: project.id,
+      directory: child,
+      title: "Direct first",
+      version: "test",
+      metadata: { icon: "🦊" },
+      time: { created: 1700000000000, updated: 1700000000000 },
+    }
+    const secondSession = {
+      id: "ses_direct_second",
+      slug: "direct-second",
+      projectID: project.id,
+      directory: child,
+      title: "Direct second",
+      version: "test",
+      metadata: { icon: "🧭" },
+      time: { created: 1700000001000, updated: 1700000001000 },
+    }
+
+    await mockOpenCodeServer(page, {
+      directory: root,
+      project,
+      provider,
+      sessions: [firstSession, secondSession],
+      pageMessages: () => ({ items: [] }),
+      files: (directory) =>
+        directory === root ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }] : [],
+    })
+
+    await page.goto(`/${base64Encode(child)}/session/${firstSession.id}`)
+
+    await expect(page.locator(`[data-atree-session-tab][data-session-id="${firstSession.id}"]`)).toBeVisible()
+    await expect(page.locator(`[data-atree-session-tab][data-session-id="${secondSession.id}"]`)).toBeVisible()
+    await expect(page.locator("[data-atree-session-tab]")).toHaveCount(2)
+    expect(errors).toEqual([])
+  })
+
   test("archiving a session tab removes it and it does not revive after switching directories", async ({ page }) => {
     const errors = trackPageErrors(page)
 
