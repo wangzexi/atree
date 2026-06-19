@@ -195,6 +195,7 @@ some-directory/
           session.jsonl
           assets/
           schedule.json
+          todo.json
       extensions/
         ...
 ```
@@ -204,7 +205,7 @@ some-directory/
 - `.agents/` 是通用 Agent 目录。
 - `.agents/atree/` 是 atree 专属事实源。
 - `session.jsonl` 是会话原始事件流，不只是渲染后的聊天文本。
-- `schedule.json` 是当前 OpenCode spike 的过渡实现，用来先把自动化消息状态放回会话目录；长期可以折叠进 `meta.yaml` 或 session event。
+- `schedule.json`、`todo.json` 是当前 OpenCode spike 的过渡实现，用来先把会话工具状态放回会话目录；长期可以折叠进 `meta.yaml` 或 session event。
 - SQLite 只能作为可重建缓存，不应是唯一事实源。
 - `assets/` 保存会话长期材料，不使用绝对路径引用。
 

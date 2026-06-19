@@ -14,8 +14,18 @@ type TodoState = {
   sessions: Record<string, StoredTodo[]>
 }
 
-function statePath(directory: string) {
+type SessionTodoState = {
+  version: 1
+  updatedAt: number
+  todos: StoredTodo[]
+}
+
+function legacyStatePath(directory: string) {
   return path.join(directory, ".agents", "atree", "extensions", "todo", "state.json")
+}
+
+function sessionStatePath(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID, "todo.json")
 }
 
 async function readState(target: string): Promise<TodoState> {
@@ -35,7 +45,23 @@ async function readState(target: string): Promise<TodoState> {
   }
 }
 
-async function writeAtomic(target: string, value: TodoState) {
+async function readSessionState(target: string) {
+  try {
+    const raw = await fs.readFile(target, "utf8")
+    const parsed = JSON.parse(raw) as Partial<SessionTodoState>
+    return {
+      hasState: true,
+      todos: Array.isArray(parsed.todos) ? parsed.todos.filter(isStoredTodo) : [],
+    }
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
+      return { hasState: false, todos: [] as StoredTodo[] }
+    }
+    throw error
+  }
+}
+
+async function writeAtomic(target: string, value: TodoState | SessionTodoState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
   await fs.writeFile(temp, JSON.stringify(value, null, 2))
@@ -55,17 +81,30 @@ function isStoredTodo(value: unknown): value is StoredTodo {
   )
 }
 
-export async function writeSessionTodoState(directory: string, sessionID: string, todos: StoredTodo[]) {
-  await ensureAtreeDirectoryStore(directory)
-  const target = statePath(directory)
+async function removeLegacySessionTodo(directory: string, sessionID: string) {
+  const target = legacyStatePath(directory)
   const state = await readState(target)
+  if (!Object.hasOwn(state.sessions, sessionID)) return
+  delete state.sessions[sessionID]
   state.updatedAt = Date.now()
-  state.sessions[sessionID] = todos
   await writeAtomic(target, state)
 }
 
+export async function writeSessionTodoState(directory: string, sessionID: string, todos: StoredTodo[]) {
+  await ensureAtreeDirectoryStore(directory)
+  await writeAtomic(sessionStatePath(directory, sessionID), {
+    version: 1,
+    updatedAt: Date.now(),
+    todos,
+  })
+  await removeLegacySessionTodo(directory, sessionID)
+}
+
 export async function readSessionTodoProjection(directory: string, sessionID: string) {
-  const state = await readState(statePath(directory))
+  const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
+  if (sessionState.hasState) return sessionState
+
+  const state = await readState(legacyStatePath(directory))
   if (!Object.hasOwn(state.sessions, sessionID)) return { hasState: false, todos: [] as StoredTodo[] }
   const todos = state.sessions[sessionID]
   return { hasState: true, todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [] }
