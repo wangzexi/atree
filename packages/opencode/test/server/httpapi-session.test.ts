@@ -2,7 +2,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { afterEach, describe, expect } from "bun:test"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
-import { mkdir } from "node:fs/promises"
+import { cp, mkdir } from "node:fs/promises"
 import path from "node:path"
 import { Cause, Config, Effect, Exit, Layer } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter, HttpServer } from "effect/unstable/http"
@@ -635,6 +635,45 @@ describe("session HttpApi", () => {
       expect(assistant?.info.role === "assistant" ? assistant.info.path : undefined).toEqual({
         cwd: sessionDirectory,
         root: sessionDirectory,
+      })
+    }).pipe(Effect.provide(TestLLMServer.layer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+  )
+
+  it.live("uses the hinted file-backed directory for copied prompt requests", () =>
+    Effect.gen(function* () {
+      const llm = yield* TestLLMServer
+      yield* llm.text("ok", { usage: { input: 1, output: 1 } })
+
+      const config = testProviderConfig(llm.url)
+      const source = yield* tmpdirScoped({ git: true, config })
+      const target = yield* tmpdirScoped({ git: true, config })
+      const session = yield* createSession({ title: "copied prompt directory" }).pipe(provideInstanceEffect(source))
+      yield* Effect.promise(() => cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+
+      const response = yield* request(pathFor(SessionPaths.prompt, { sessionID: session.id }), {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-opencode-directory": target,
+        },
+        body: JSON.stringify({
+          agent: "build",
+          model: { providerID: "test", modelID: "test-model" },
+          parts: [{ type: "text", text: "write to target" }],
+        }),
+      })
+
+      expect(response.status).toBe(200)
+      yield* responseJson(response)
+
+      const targetMessages = yield* Session.use.messages({ sessionID: session.id, directory: target }).pipe(Effect.orDie)
+      const sourceMessages = yield* Session.use.messages({ sessionID: session.id, directory: source }).pipe(Effect.orDie)
+      const assistant = targetMessages.find((message) => message.info.role === "assistant")
+      expect(targetMessages.find((message) => message.info.role === "user")).toBeDefined()
+      expect(sourceMessages).toHaveLength(0)
+      expect(assistant?.info.role === "assistant" ? assistant.info.path : undefined).toEqual({
+        cwd: target,
+        root: target,
       })
     }).pipe(Effect.provide(TestLLMServer.layer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
   )

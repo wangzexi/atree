@@ -517,7 +517,7 @@ export interface Interface {
   }) => Effect.Effect<Info>
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void>
-  readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
+  readonly get: (id: SessionID, options?: DirectoryOption) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string } & DirectoryOption) => Effect.Effect<void>
   readonly setArchived: (input: { sessionID: SessionID; time?: number | null } & DirectoryOption) => Effect.Effect<void>
   readonly setMetadata: (input: typeof SetMetadataInput.Type & DirectoryOption) => Effect.Effect<void>
@@ -668,6 +668,7 @@ export const layer: Layer.Layer<
     })
 
     const getWithDirectory = Effect.fn("Session.getWithDirectory")(function* (id: SessionID, directoryHint?: string) {
+      if (!id) return yield* Effect.fail(new NotFoundError({ message: "Session not found" }))
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
       const cached = row ? fromRow(row) : undefined
       const ctx = yield* InstanceState.context.pipe(
@@ -689,8 +690,8 @@ export const layer: Layer.Layer<
       return cached
     })
 
-    const get = Effect.fn("Session.get")(function* (id: SessionID) {
-      return yield* getWithDirectory(id)
+    const get = Effect.fn("Session.get")(function* (id: SessionID, options?: DirectoryOption) {
+      return yield* getWithDirectory(id, options?.directory)
     })
 
     const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (
@@ -1236,6 +1237,7 @@ export const layer: Layer.Layer<
       predicate,
       options,
     ) {
+      if (!sessionID) return Option.none<SessionV1.WithParts>()
       const session = yield* getWithDirectory(sessionID, options?.directory)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
       if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) {

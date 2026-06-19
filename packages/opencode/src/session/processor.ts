@@ -108,6 +108,7 @@ export const layer = Layer.effect(
     const database = yield* Database.Service
 
     const create = Effect.fn("SessionProcessor.create")(function* (input: Input) {
+      const currentSession = yield* session.get(input.sessionID).pipe(Effect.orDie)
       // Pre-capture snapshot before the LLM stream starts. The AI SDK
       // may execute tools internally before emitting start-step events,
       // so capturing inside the event handler can be too late.
@@ -176,6 +177,7 @@ export const layer = Layer.effect(
           partID: call.partID,
           messageID: call.messageID,
           sessionID: call.sessionID,
+          directory: currentSession.directory,
         })
         if (!part || part.type !== "tool") {
           delete ctx.toolcalls[toolCallID]
@@ -190,7 +192,7 @@ export const layer = Layer.effect(
       ) {
         const match = yield* readToolCall(toolCallID)
         if (!match) return undefined
-        const part = yield* session.updatePart(update(match.part))
+        const part = yield* session.updatePart(update(match.part), { directory: currentSession.directory })
         ctx.toolcalls[toolCallID] = {
           ...match.call,
           partID: part.id,
@@ -211,33 +213,39 @@ export const layer = Layer.effect(
       ) {
         const match = yield* readToolCall(toolCallID)
         if (!match || match.part.state.status !== "running") return
-        yield* session.updatePart({
-          ...match.part,
-          state: {
-            status: "completed",
-            input: match.part.state.input,
-            output: output.output,
-            metadata: output.metadata,
-            title: output.title,
-            time: { start: match.part.state.time.start, end: Date.now() },
-            attachments: output.attachments,
+        yield* session.updatePart(
+          {
+            ...match.part,
+            state: {
+              status: "completed",
+              input: match.part.state.input,
+              output: output.output,
+              metadata: output.metadata,
+              title: output.title,
+              time: { start: match.part.state.time.start, end: Date.now() },
+              attachments: output.attachments,
+            },
           },
-        })
+          { directory: currentSession.directory },
+        )
         yield* settleToolCall(toolCallID)
       })
 
       const failToolCall = Effect.fn("SessionProcessor.failToolCall")(function* (toolCallID: string, error: unknown) {
         const match = yield* readToolCall(toolCallID)
         if (!match || match.part.state.status !== "running") return false
-        yield* session.updatePart({
-          ...match.part,
-          state: {
-            status: "error",
-            input: match.part.state.input,
-            error: errorMessage(error),
-            time: { start: match.part.state.time.start, end: Date.now() },
+        yield* session.updatePart(
+          {
+            ...match.part,
+            state: {
+              status: "error",
+              input: match.part.state.input,
+              error: errorMessage(error),
+              time: { start: match.part.state.time.start, end: Date.now() },
+            },
           },
-        })
+          { directory: currentSession.directory },
+        )
         if (error instanceof PermissionV1.RejectedError || error instanceof Question.RejectedError) {
           ctx.blocked = ctx.shouldBreak
         }

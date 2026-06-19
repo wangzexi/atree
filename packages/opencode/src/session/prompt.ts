@@ -232,7 +232,7 @@ export const layer = Layer.effect(
       if (!cleaned) return
       const t = cleaned.length > 100 ? cleaned.substring(0, 97) + "..." : cleaned
       yield* sessions
-        .setTitle({ sessionID: input.session.id, title: t })
+        .setTitle({ sessionID: input.session.id, directory: input.session.directory, title: t })
         .pipe(Effect.catchCause((cause) => Effect.logError("failed to generate title", { error: Cause.squash(cause) })))
     })
 
@@ -450,7 +450,7 @@ export const layer = Layer.effect(
               yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
               throw error
             }
-            const model = input.model ?? agent.model ?? (yield* currentModel(input.sessionID))
+            const model = input.model ?? agent.model ?? (yield* currentModel(session))
             const userMsg: SessionV1.User = {
               id: input.messageID ?? MessageID.ascending(),
               sessionID: input.sessionID,
@@ -612,28 +612,37 @@ export const layer = Layer.effect(
       return yield* Effect.die(err)
     })
 
-    const currentModel = Effect.fnUntraced(function* (sessionID: SessionID) {
+    const currentModel = Effect.fnUntraced(function* (session: Session.Info) {
       const current = yield* db
-        .select({ model: SessionTable.model })
+        .select({ directory: SessionTable.directory, model: SessionTable.model })
         .from(SessionTable)
-        .where(eq(SessionTable.id, sessionID))
+        .where(eq(SessionTable.id, session.id))
         .get()
         .pipe(Effect.orDie)
-      if (current?.model) {
+      if (current?.model && current.directory === session.directory) {
         return {
           providerID: ProviderV2.ID.make(current.model.providerID),
           modelID: ModelV2.ID.make(current.model.id),
           ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
         }
       }
+      if (session.model) {
+        return {
+          providerID: session.model.providerID,
+          modelID: session.model.id,
+          ...(session.model.variant && session.model.variant !== "default" ? { variant: session.model.variant } : {}),
+        }
+      }
       const match = yield* sessions
-        .findMessage(sessionID, (m) => m.info.role === "user" && !!m.info.model)
+        .findMessage(session.id, (m) => m.info.role === "user" && !!m.info.model, { directory: session.directory })
         .pipe(Effect.orDie)
       if (Option.isSome(match) && match.value.info.role === "user") return match.value.info.model
       return yield* provider.defaultModel().pipe(Effect.orDie)
     })
 
-    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (input: PromptInput) {
+    const createUserMessage = Effect.fn("SessionPrompt.createUserMessage")(function* (
+      input: PromptInput & { session: Session.Info },
+    ) {
       const agentName = input.agent
       const ag = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
       if (!ag) {
@@ -645,12 +654,14 @@ export const layer = Layer.effect(
       }
 
       const current = yield* db
-        .select({ agent: SessionTable.agent, model: SessionTable.model })
+        .select({ directory: SessionTable.directory, agent: SessionTable.agent, model: SessionTable.model })
         .from(SessionTable)
         .where(eq(SessionTable.id, input.sessionID))
         .get()
         .pipe(Effect.orDie)
-      const model = input.model ?? ag.model ?? (yield* currentModel(input.sessionID))
+      const currentAgent = current?.directory === input.session.directory ? current.agent : input.session.agent
+      const currentModelValue = current?.directory === input.session.directory ? current.model : input.session.model
+      const model = input.model ?? ag.model ?? (yield* currentModel(input.session))
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
         !input.variant && ag.variant && same
@@ -676,7 +687,7 @@ export const layer = Layer.effect(
         format: input.format,
       }
 
-      if (current?.agent !== info.agent) {
+      if (currentAgent !== info.agent) {
         yield* events.publish(SessionEvent.AgentSwitched, {
           sessionID: input.sessionID,
           messageID: SessionMessage.ID.create(),
@@ -684,11 +695,12 @@ export const layer = Layer.effect(
           agent: info.agent,
         })
       }
-      if (
-        current?.model?.providerID !== info.model.providerID ||
-        current.model.id !== info.model.modelID ||
-        (current.model.variant === "default" ? undefined : current.model.variant) !== info.model.variant
-      ) {
+      const currentModelChanged =
+        !currentModelValue ||
+        currentModelValue.providerID !== info.model.providerID ||
+        currentModelValue.id !== info.model.modelID ||
+        (currentModelValue.variant === "default" ? undefined : currentModelValue.variant) !== info.model.variant
+      if (currentModelChanged) {
         yield* events.publish(SessionEvent.ModelSwitched, {
           sessionID: input.sessionID,
           messageID: SessionMessage.ID.create(),
@@ -1026,8 +1038,8 @@ export const layer = Layer.effect(
         })
       }
 
-      yield* sessions.updateMessage(info)
-      for (const part of parts) yield* sessions.updatePart(part)
+      yield* sessions.updateMessage(info, { directory: input.session.directory })
+      for (const part of parts) yield* sessions.updatePart(part, { directory: input.session.directory })
       const nextPrompt = parts.reduce(
         (result, part) => {
           if (part.type === "text") {
@@ -1107,7 +1119,7 @@ export const layer = Layer.effect(
     )(function* (input: PromptInput) {
       const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
       yield* revert.cleanup(session)
-      const message = yield* createUserMessage(input)
+      const message = yield* createUserMessage({ ...input, session })
       yield* sessions.touch(input.sessionID, { directory: session.directory })
 
       const permissions: PermissionV1.Rule[] = []
@@ -1466,6 +1478,7 @@ export const layer = Layer.effect(
         template = template.replace(bashRegex, () => results[index++])
       }
       template = template.trim()
+      const commandSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
@@ -1474,7 +1487,7 @@ export const layer = Layer.effect(
           if (cmdAgent?.model) return cmdAgent.model
         }
         if (input.model) return Provider.parseModel(input.model)
-        return yield* currentModel(input.sessionID)
+        return yield* currentModel(commandSession)
       })
 
       yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
@@ -1513,7 +1526,7 @@ export const layer = Layer.effect(
       const userModel = isSubtask
         ? input.model
           ? Provider.parseModel(input.model)
-          : yield* currentModel(input.sessionID)
+          : yield* currentModel(commandSession)
         : taskModel
 
       yield* plugin.trigger(

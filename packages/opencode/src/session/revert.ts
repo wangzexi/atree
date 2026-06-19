@@ -101,7 +101,7 @@ export const layer = Layer.effect(
     const cleanup = Effect.fn("SessionRevert.cleanup")(function* (session: Session.Info) {
       if (!session.revert) return
       const sessionID = session.id
-      const msgs = yield* sessions.messages({ sessionID }).pipe(Effect.orDie)
+      const msgs = yield* sessions.messages({ sessionID, directory: session.directory }).pipe(Effect.orDie)
       const messageID = session.revert.messageID
       const remove = [] as SessionV1.WithParts[]
       let target: SessionV1.WithParts | undefined
@@ -118,7 +118,7 @@ export const layer = Layer.effect(
         remove.push(msg)
       }
       for (const msg of remove) {
-        yield* sessions.removeMessage({ sessionID, messageID: msg.info.id })
+        yield* sessions.removeMessage({ sessionID, directory: session.directory, messageID: msg.info.id })
       }
       if (session.revert.partID && target) {
         const partID = session.revert.partID
@@ -127,7 +127,7 @@ export const layer = Layer.effect(
           const removeParts = target.parts.slice(idx)
           target.parts = target.parts.slice(0, idx)
           for (const part of removeParts) {
-            yield* sessions.removePart({ sessionID, messageID: target.info.id, partID: part.id })
+            yield* sessions.removePart({ sessionID, directory: session.directory, messageID: target.info.id, partID: part.id })
           }
         }
       }

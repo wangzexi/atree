@@ -115,7 +115,7 @@ export const layer = Layer.effect(
       })
       yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: [] })
       if ((yield* config.get()).snapshot === false) return
-      const all = yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)
+      const all = yield* sessions.messages({ sessionID: input.sessionID, directory: current.directory }).pipe(Effect.orDie)
       if (!all.length) return
 
       const messages = all.filter(
@@ -125,12 +125,13 @@ export const layer = Layer.effect(
       if (!target || target.info.role !== "user") return
       const msgDiffs = yield* computeDiff({ messages })
       target.info.summary = { ...target.info.summary, diffs: msgDiffs }
-      yield* sessions.updateMessage(target.info)
+      yield* sessions.updateMessage(target.info, { directory: current.directory })
     })
 
     const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
       if (!input.messageID) return []
-      const message = (yield* sessions.messages({ sessionID: input.sessionID }).pipe(Effect.orDie)).find(
+      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const message = (yield* sessions.messages({ sessionID: input.sessionID, directory: current.directory }).pipe(Effect.orDie)).find(
         (item) => item.info.id === input.messageID,
       )
       if (!message || message.info.role !== "user") return []
