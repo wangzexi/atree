@@ -5,10 +5,13 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { expect } from "bun:test"
 import { tool } from "ai"
 import { Cause, Effect, Exit, Fiber, Layer, Stream } from "effect"
+import { eq } from "drizzle-orm"
 import path from "path"
 import z from "zod"
 import type { Agent } from "../../src/agent/agent"
 import { Provider } from "@/provider/provider"
+import { Permission } from "@/permission"
+import { PartTable } from "@opencode-ai/core/session/sql"
 
 import { Session } from "@/session/session"
 import { LLM } from "../../src/session/llm"
@@ -104,9 +107,9 @@ function defer<T>() {
   return { promise, resolve }
 }
 
-const waitFor = <A>(check: Effect.Effect<A | undefined>, message: string) =>
+const waitFor = <A>(check: Effect.Effect<A | undefined>, message: string, timeout = 500) =>
   Effect.gen(function* () {
-    const stop = Date.now() + 500
+    const stop = Date.now() + timeout
     while (Date.now() < stop) {
       const value = yield* check
       if (value !== undefined) return value
@@ -173,6 +176,7 @@ const root = LayerNode.group([
   Provider.node,
   Database.node,
   EventV2Bridge.node,
+  Permission.node,
   SessionStatus.node,
   CrossSpawnSpawner.node,
 ])
@@ -227,6 +231,30 @@ const fragmentFailureEnv = LayerNode.buildLayer(root, {
   replacements: [...replacements, LayerNode.replace(LLM.node, fragmentFailureLLM)],
 })
 const itFragmentFailure = testEffect(fragmentFailureEnv)
+
+const doomLoopLLM = Layer.succeed(
+  LLM.Service,
+  LLM.Service.of({
+    stream: () => Stream.make(LLMEvent.toolCall({ id: "call-3", name: "lookup", input: {} })),
+  }),
+)
+const doomLoopPermissionRequests: unknown[] = []
+const doomLoopPermission = Layer.succeed(
+  Permission.Service,
+  Permission.Service.of({
+    ask: (input) => Effect.sync(() => doomLoopPermissionRequests.push(input)),
+    reply: () => Effect.void,
+    list: () => Effect.succeed([]),
+  }),
+)
+const doomLoopEnv = LayerNode.buildLayer(root, {
+  replacements: [
+    ...replacements,
+    LayerNode.replace(LLM.node, doomLoopLLM),
+    LayerNode.replace(Permission.node, doomLoopPermission),
+  ],
+})
+const itDoomLoop = testEffect(doomLoopEnv)
 
 const boot = Effect.fn("test.boot")(function* () {
   const processors = yield* SessionProcessor.Service
@@ -284,6 +312,79 @@ it.live("session.processor effect tests capture llm input cleanly", () =>
         expect(parts.some((part) => part.type === "text" && part.text === "hello")).toBe(true)
       }),
     { config: (url) => providerCfg(url) },
+  ),
+)
+
+itDoomLoop.live("session.processor detects repeated tool calls from directory message history without part rows", () =>
+  provideTmpdirInstance(
+    (dir) =>
+      Effect.gen(function* () {
+        doomLoopPermissionRequests.splice(0)
+        const database = yield* Database.Service
+        const { processors, session, provider } = yield* boot()
+
+        const chat = yield* session.create({})
+        const parent = yield* user(chat.id, "hi")
+        const msg = yield* assistant(chat.id, parent.id, path.resolve(dir))
+        for (const callID of ["call-1", "call-2"]) {
+          yield* session.updatePart({
+            id: PartID.ascending(),
+            messageID: msg.id,
+            sessionID: chat.id,
+            type: "tool",
+            tool: "lookup",
+            callID,
+            state: {
+              status: "completed",
+              input: {},
+              output: "ok",
+              title: "Lookup",
+              metadata: {},
+              time: { start: Date.now(), end: Date.now() },
+            },
+          } satisfies SessionV1.ToolPart)
+        }
+        yield* database.db.delete(PartTable).where(eq(PartTable.message_id, msg.id)).run().pipe(Effect.orDie)
+
+        const mdl = yield* provider.getModel(ref.providerID, ref.modelID)
+        const handle = yield* processors.create({
+          assistantMessage: msg,
+          sessionID: chat.id,
+          model: mdl,
+        })
+        const fiber = yield* handle
+          .process({
+            user: {
+              id: parent.id,
+              sessionID: chat.id,
+              role: "user",
+              time: parent.time,
+              agent: parent.agent,
+              model: { providerID: ref.providerID, modelID: ref.modelID },
+            } satisfies SessionV1.User,
+            sessionID: chat.id,
+            model: mdl,
+            agent: agent(),
+            system: [],
+            messages: [{ role: "user", content: "hi" }],
+            tools: {},
+          } satisfies LLM.StreamInput)
+          .pipe(Effect.forkScoped)
+
+        const request = yield* waitFor(
+          Effect.sync(() =>
+            doomLoopPermissionRequests.find(
+              (item): item is { permission: string; patterns: string[] } =>
+                typeof item === "object" && item !== null && "permission" in item && item.permission === "doom_loop",
+            ),
+          ),
+          "timed out waiting for doom loop permission",
+          3_000,
+        )
+        expect(request.patterns).toEqual(["lookup"])
+        yield* Fiber.interrupt(fiber)
+      }),
+    { config: cfg },
   ),
 )
 
