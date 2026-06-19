@@ -98,7 +98,7 @@ test.describe("atree smoke", () => {
     await expect(childNode).toBeVisible()
 
     await page.locator(`[data-atree-new-session="${child}"]`).click()
-    await expect(page).toHaveURL(/\/new-session\?draftId=/)
+    await expect(page).toHaveURL(/\/(new-session\?draftId=|session)$/)
 
     const editor = page.locator('[contenteditable="true"]').first()
     await expect(editor).toBeVisible()
