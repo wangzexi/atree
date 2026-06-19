@@ -29,6 +29,8 @@ function metaYaml(info: SessionInfo) {
     `id: ${yamlString(info.id)}`,
     `slug: ${yamlString(info.slug)}`,
     `sessionVersion: ${yamlString(info.version)}`,
+    `projectID: ${yamlString(info.projectID)}`,
+    `workspaceID: ${yamlString(info.workspaceID)}`,
     `path: ${yamlString(info.path)}`,
     `parentID: ${yamlString(info.parentID)}`,
     `title: ${yamlString(info.title)}`,
@@ -36,6 +38,7 @@ function metaYaml(info: SessionInfo) {
     `model: ${yamlValue(info.model)}`,
     `createdAt: ${info.time.created}`,
     `updatedAt: ${info.time.updated}`,
+    `compactingAt: ${yamlValue(info.time.compacting)}`,
     `archivedAt: ${yamlValue(info.time.archived)}`,
     `cost: ${yamlValue(info.cost)}`,
     `tokens: ${yamlValue(info.tokens)}`,
@@ -396,6 +399,7 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefi
   const directory = fallbackDirectory
   const created = typeof data.createdAt === "number" ? data.createdAt : 0
   const updated = typeof data.updatedAt === "number" ? data.updatedAt : created
+  const compacting = typeof data.compactingAt === "number" ? data.compactingAt : undefined
   const archived = typeof data.archivedAt === "number" ? data.archivedAt : undefined
   const metadata =
     data.metadata && typeof data.metadata === "object" && Object.keys(data.metadata).length > 0
@@ -427,6 +431,7 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefi
     time: {
       created,
       updated,
+      ...(compacting !== undefined ? { compacting } : {}),
       ...(archived !== undefined ? { archived } : {}),
     },
   }

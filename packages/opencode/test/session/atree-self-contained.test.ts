@@ -5,10 +5,11 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { MessageTable, PartTable, SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { and, eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { readSessionScheduleState } from "@/atree/schedule-store"
-import { readSessionStore } from "@/atree/session-store"
+import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { readSessionTodoState } from "@/atree/todo-store"
 import { BackgroundJob } from "@/background/job"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -42,6 +43,38 @@ const it = testEffect(
 )
 
 describe("atree directory self-contained state", () => {
+  it.instance("persists session identity fields in directory metadata without SQLite cache", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const workspaceID = WorkspaceV2.ID.ascending("wrk_atree_identity")
+
+      const session = yield* sessions.create({
+        title: "metadata identity",
+        workspaceID,
+        metadata: { icon: "🧭" },
+      })
+      const cached = yield* sessions.get(session.id)
+      const compactingAt = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          ...cached,
+          time: {
+            ...cached.time,
+            compacting: compactingAt,
+          },
+        }),
+      )
+
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, session.id))
+      expect(stored?.projectID).toBe(cached.projectID)
+      expect(stored?.workspaceID).toBe(workspaceID)
+      expect(stored?.time.compacting).toBe(compactingAt)
+      expect(stored?.metadata).toEqual({ icon: "🧭" })
+    }),
+  )
+
   it.instance("recovers session state, messages, schedules, and todos after SQLite projections are removed", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
