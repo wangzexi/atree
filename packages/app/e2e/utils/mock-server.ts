@@ -28,6 +28,10 @@ export interface MockServerConfig {
 
 export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
   let sessions = [...config.sessions]
+  // Schedule ids removed via DELETE so archive flows can clear automations.
+  // GET still re-evaluates config.schedules (which may be time-dependent) and
+  // filters out the removed ids.
+  const deletedSchedules = new Set<string>()
   const workspaceState = config.workspace ?? { rootDirectory: config.directory }
   const staticRoutes: Record<string, unknown> = {
     "/api/workspace": { version: 1, rootDirectory: workspaceState.rootDirectory, updatedAt: 1 },
@@ -140,7 +144,25 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     }
 
     const scheduleMatch = path.match(/^\/session\/([^/]+)\/schedule$/)
-    if (scheduleMatch) return json(route, config.schedules?.(scheduleMatch[1]) ?? [])
+    if (scheduleMatch) {
+      if (route.request().method() === "DELETE") {
+        for (const item of config.schedules?.(scheduleMatch[1]) ?? []) {
+          const id = (item as { id?: string }).id
+          if (id) deletedSchedules.add(id)
+        }
+        return json(route, true)
+      }
+      const live = (config.schedules?.(scheduleMatch[1]) ?? []).filter(
+        (item) => !deletedSchedules.has((item as { id?: string }).id ?? ""),
+      )
+      return json(route, live)
+    }
+
+    const scheduleItemMatch = path.match(/^\/session\/([^/]+)\/schedule\/([^/]+)$/)
+    if (scheduleItemMatch && route.request().method() === "DELETE") {
+      deletedSchedules.add(scheduleItemMatch[2])
+      return json(route, true)
+    }
 
     if (/^\/session\/[^/]+\/(children|todo|diff)$/.test(path)) return json(route, [])
 
