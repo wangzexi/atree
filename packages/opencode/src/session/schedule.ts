@@ -111,6 +111,7 @@ export interface Interface {
     expression?: string
     runAt?: number
     message: string
+    directory?: string
   }) => Effect.Effect<Info, InvalidExpression | InvalidRunAt | IntervalTooShort | LimitExceeded>
   readonly delete: (scheduleID: ID) => Effect.Effect<void, NotFound>
   /** Manually fire the tick for a schedule (publishes Triggered). */
@@ -787,6 +788,7 @@ export const layer = Layer.effect(
       expression?: string
       runAt?: number
       message: string
+      directory?: string
     }) {
       const kind = input.kind ?? "recurring"
       const expression = kind === "recurring" ? input.expression?.trim() : input.expression?.trim() || ""
@@ -797,7 +799,7 @@ export const layer = Layer.effect(
         }
         yield* validateExpression(expression)
       }
-      yield* restoreStoredSchedules(input.sessionID)
+      yield* restoreStoredSchedules(input.sessionID, input.directory)
       yield* cleanupCompletedOnceForSession(input.sessionID)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })

@@ -343,6 +343,54 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "creates a schedule for an explicit directory without a database session row",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_explicit_create_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-create-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit create schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          directory,
+          kind: "once",
+          runAt: now + 60_000,
+          message: "created with explicit directory",
+        }),
+      )
+
+      expect(created).toMatchObject({ sessionID, kind: "once", message: "created with explicit directory" })
+      const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
+      expect(stored).toHaveLength(1)
+      expect(stored[0]).toMatchObject({ id: created.id, message: "created with explicit directory" })
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, created.id as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
   it.instance(
     "rejects a second schedule when a file-backed session already has directory schedule state",
     Effect.gen(function* () {
