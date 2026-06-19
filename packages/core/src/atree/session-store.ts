@@ -10,6 +10,7 @@ import { ProviderV2 } from "../provider"
 import { AbsolutePath, RelativePath } from "../schema"
 import type { SessionInput } from "../session/input"
 import { SessionMessage } from "../session/message"
+import { FileAttachment } from "../session/prompt"
 import { SessionSchema } from "../session/schema"
 import { WorkspaceV2 } from "../workspace"
 
@@ -172,6 +173,11 @@ type V1Part = {
   messageID: string
   type: string
   text?: string
+  url?: string
+  mime?: string
+  filename?: string
+  name?: string
+  description?: string
 }
 
 function sessionRoot(info: SessionSchema.Info) {
@@ -203,20 +209,55 @@ function textParts(parts: V1Part[]) {
   return result
 }
 
+function assetURL(value: string) {
+  return !path.isAbsolute(value) && value.split(/[\\/]/)[0] === "assets"
+}
+
+async function resolveFilePart(info: SessionSchema.Info, part: V1Part) {
+  if (part.type !== "file" || typeof part.url !== "string" || typeof part.mime !== "string") return
+  let uri = part.url
+  if (assetURL(uri)) {
+    const root = sessionRoot(info)
+    const assetsRoot = path.resolve(root, "assets")
+    const assetPath = path.resolve(root, uri)
+    if (assetPath === assetsRoot || !assetPath.startsWith(`${assetsRoot}${path.sep}`)) return
+    const buffer = await fs.readFile(assetPath).catch((error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+      throw error
+    })
+    if (!buffer) return
+    uri = `data:${part.mime};base64,${buffer.toString("base64")}`
+  }
+  return new FileAttachment({
+    uri,
+    mime: part.mime,
+    name: part.filename ?? part.name,
+    description: part.description,
+  })
+}
+
 function appendPartDelta(part: V1Part, field: string, delta: string) {
   const record = part as unknown as Record<string, unknown>
   const current = record[field]
   record[field] = typeof current === "string" ? current + delta : delta
 }
 
-function toV2Message(message: V1Message, parts: V1Part[]): SessionMessage.Message | undefined {
+async function toV2Message(
+  info: SessionSchema.Info,
+  message: V1Message,
+  parts: V1Part[],
+): Promise<SessionMessage.Message | undefined> {
   const id = SessionMessage.ID.make(message.id)
   const created = DateTime.makeUnsafe(messageCreated(message, 0))
   if (message.role === "user") {
+    const files = (await Promise.all(parts.map((part) => resolveFilePart(info, part)))).filter(
+      (file): file is FileAttachment => file !== undefined,
+    )
     return new SessionMessage.User({
       id,
       type: "user",
       text: textParts(parts).join("\n"),
+      files: files.length > 0 ? files : undefined,
       time: { created },
     })
   }
@@ -308,17 +349,20 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
     }
   }
 
-  return [...messages.values()]
+  const replayed = [...messages.values()]
     .filter((message) => !removed.has(message.info.id))
     .map((message) => ({
       ...message,
       parts: message.parts.filter((part) => !removedParts.has(`${message.info.id}:${part.id}`)),
     }))
     .sort((a, b) => messageCreated(a.info, index) - messageCreated(b.info, index) || a.info.id.localeCompare(b.info.id))
-    .flatMap((message) => {
-      const converted = toV2Message(message.info, message.parts)
-      return converted ? [converted] : []
-    })
+
+  const converted: SessionMessage.Message[] = []
+  for (const message of replayed) {
+    const item = await toV2Message(info, message.info, message.parts)
+    if (item) converted.push(item)
+  }
+  return converted
 }
 
 export async function appendPromptJsonl(info: SessionSchema.Info, admitted: SessionInput.Admitted) {

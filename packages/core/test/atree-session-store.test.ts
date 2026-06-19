@@ -375,4 +375,78 @@ describe("atree file-backed SessionV2 discovery", () => {
       })
     }),
   )
+
+  it.effect("restores user file parts from file-backed session assets", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_asset",
+          title: "Core asset",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        mkdir(path.join(node, ".agents", "atree", "sessions", "ses_core_asset", "assets"), { recursive: true }),
+      )
+      yield* Effect.promise(() =>
+        writeFile(
+          path.join(node, ".agents", "atree", "sessions", "ses_core_asset", "assets", "hello.txt"),
+          "hello asset",
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_asset", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_asset",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_asset_text",
+              messageID: "msg_core_asset",
+              type: "text",
+              text: "asset attached",
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_asset_file",
+              messageID: "msg_core_asset",
+              type: "file",
+              mime: "text/plain",
+              filename: "hello.txt",
+              url: "assets/hello.txt",
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({ sessionID: SessionV2.ID.make("ses_core_asset"), order: "asc" })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_asset",
+        type: "user",
+        text: "asset attached",
+        files: [{ uri: "data:text/plain;base64,aGVsbG8gYXNzZXQ=", mime: "text/plain", name: "hello.txt" }],
+      })
+    }),
+  )
 })
