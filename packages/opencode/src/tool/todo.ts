@@ -1,6 +1,7 @@
 import { Effect, Schema } from "effect"
 import * as Tool from "./tool"
 import DESCRIPTION_WRITE from "./todowrite.txt"
+import { Session } from "@/session/session"
 import { Todo } from "../session/todo"
 
 // Todo.Info is still a zod schema (session/todo.ts). Inline the field shape
@@ -22,16 +23,18 @@ type Metadata = {
   todos: Todo.Info[]
 }
 
-export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Service>(
+export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Service | Session.Service>(
   "todowrite",
   Effect.gen(function* () {
     const todo = yield* Todo.Service
+    const session = yield* Session.Service
 
     return {
       description: DESCRIPTION_WRITE,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
+          const info = yield* session.get(ctx.sessionID)
           yield* ctx.ask({
             permission: "todowrite",
             patterns: ["*"],
@@ -42,6 +45,7 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
           yield* todo.update({
             sessionID: ctx.sessionID,
             todos: params.todos,
+            directory: info.directory,
           })
 
           return {
@@ -51,7 +55,7 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
               todos: params.todos,
             },
           }
-        }),
+        }).pipe(Effect.orDie),
     } satisfies Tool.DefWithoutID<typeof Parameters, Metadata>
   }),
 )
