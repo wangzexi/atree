@@ -880,6 +880,21 @@ export const layer: Layer.Layer<
         return part
       }).pipe(Effect.withSpan("Session.updatePart"))
 
+    const canUseMessageProjectionCache = Effect.fn("Session.canUseMessageProjectionCache")(function* (session: Info) {
+      const row = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, session.id))
+        .get()
+        .pipe(Effect.orDie)
+      return row?.directory === session.directory
+    })
+
+    const hasDirectorySessionStore = Effect.fn("Session.hasDirectorySessionStore")(function* (session: Info) {
+      const stored = yield* Effect.promise(() => readSessionStore(session.directory, session.id))
+      return stored !== undefined
+    })
+
     const getPart: Interface["getPart"] = Effect.fn("Session.getPart")(function* (input) {
       const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(
         Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
@@ -893,7 +908,10 @@ export const layer: Layer.Layer<
           .find((message) => message.info.id === input.messageID)
           ?.parts.find((part) => part.id === input.partID)
         if (filePart) return filePart
+        if (!projection.hasEvents && (yield* hasDirectorySessionStore(session))) return
       }
+
+      if (session && !(yield* canUseMessageProjectionCache(session))) return
 
       const row = yield* db
         .select()
@@ -1127,6 +1145,9 @@ export const layer: Layer.Layer<
       if (fileProjection.messages.length > 0) {
         return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
       }
+      if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) return []
+
+      if (!(yield* canUseMessageProjectionCache(session))) return []
 
       if (input.limit) {
         const page = yield* MessageV2.page({ sessionID: input.sessionID, limit: input.limit }).pipe(
@@ -1217,22 +1238,28 @@ export const layer: Layer.Layer<
     ) {
       const session = yield* getWithDirectory(sessionID, options?.directory)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
+      if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) {
+        return Option.none<SessionV1.WithParts>()
+      }
+      const canUseCache = yield* canUseMessageProjectionCache(session)
       const size = 50
       let before: string | undefined
-      while (true) {
-        const page = yield* MessageV2.page({ sessionID, limit: size, before }).pipe(
-          Effect.provideService(Database.Service, database),
-          Effect.catchIf(NotFoundError.isInstance, () =>
-            Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
-          ),
-        )
-        if (page.items.length === 0) break
-        for (let i = page.items.length - 1; i >= 0; i--) {
-          const item = filterRemovedProjection(page.items[i] ? [page.items[i]] : [], fileProjection)[0]
-          if (item && predicate(item)) return Option.some(item)
+      if (canUseCache) {
+        while (true) {
+          const page = yield* MessageV2.page({ sessionID, limit: size, before }).pipe(
+            Effect.provideService(Database.Service, database),
+            Effect.catchIf(NotFoundError.isInstance, () =>
+              Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
+            ),
+          )
+          if (page.items.length === 0) break
+          for (let i = page.items.length - 1; i >= 0; i--) {
+            const item = filterRemovedProjection(page.items[i] ? [page.items[i]] : [], fileProjection)[0]
+            if (item && predicate(item)) return Option.some(item)
+          }
+          if (!page.more || !page.cursor) break
+          before = page.cursor
         }
-        if (!page.more || !page.cursor) break
-        before = page.cursor
       }
       for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
         const item = fileProjection.messages[i]

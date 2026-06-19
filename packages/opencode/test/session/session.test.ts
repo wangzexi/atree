@@ -646,6 +646,79 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("writes copied file-backed session metadata to the explicit target directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* tmpdirScoped({ git: true })
+      const info = yield* session.create({ title: "copied metadata source", metadata: { icon: "🦊" } })
+
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* session.setTitle({ sessionID: info.id, directory: target, title: "copied metadata target" })
+      yield* session.setMetadata({ sessionID: info.id, directory: target, metadata: { icon: "🧭" } })
+
+      const targetStore = yield* Effect.promise(() => readSessionStore(target, info.id))
+      const sourceStore = yield* Effect.promise(() => readSessionStore(source.directory, info.id))
+      expect(targetStore?.directory).toBe(target)
+      expect(targetStore?.title).toBe("copied metadata target")
+      expect(targetStore?.metadata).toEqual({ icon: "🧭" })
+      expect(sourceStore?.directory).toBe(source.directory)
+      expect(sourceStore?.title).toBe("copied metadata source")
+      expect(sourceStore?.metadata).toEqual({ icon: "🦊" })
+    }),
+  )
+
+  it.instance("appends copied file-backed messages to the explicit target directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* tmpdirScoped({ git: true })
+      const info = yield* session.create({ title: "copied message source" })
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* session.updateMessage(
+        {
+          id: messageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "user",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as SessionV1.Info,
+        { directory: target },
+      )
+      yield* session.updatePart(
+        {
+          id: partID,
+          messageID,
+          sessionID: info.id,
+          type: "text",
+          text: "message written to copied target",
+        },
+        { directory: target },
+      )
+
+      const targetMessages = yield* session.messages({ sessionID: info.id, directory: target, limit: 10 })
+      const sourceMessages = yield* session.messages({ sessionID: info.id, directory: source.directory, limit: 10 })
+      expect(targetMessages.find((message) => message.info.id === messageID)?.parts[0]).toMatchObject({
+        id: partID,
+        type: "text",
+        text: "message written to copied target",
+      })
+      expect(sourceMessages.find((message) => message.info.id === messageID)).toBeUndefined()
+    }),
+  )
+
   it.instance("prefers archived file metadata over stale cached child sessions", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
