@@ -29,7 +29,7 @@ import { logFailure } from "./session/logging"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
-import { readSessionJsonlMessages, readSessionStores } from "./atree/session-store"
+import { appendPromptJsonl, readSessionJsonlMessages, readSessionStores } from "./atree/session-store"
 
 // get project -> project.locations
 //
@@ -429,12 +429,45 @@ export const layer = Layer.effect(
       prompt: Effect.fn("V2Session.prompt")((input) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
-            yield* result.get(input.sessionID)
+            const session = yield* result.get(input.sessionID)
+            const sessionRow = yield* db
+              .select({ id: SessionTable.id })
+              .from(SessionTable)
+              .where(eq(SessionTable.id, input.sessionID))
+              .get()
+              .pipe(Effect.orDie)
+            const messageID = input.id ?? SessionMessage.ID.create()
+            if (!sessionRow) {
+              const existing = (yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
+                Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+              )).find((message) => message.id === messageID)
+              if (existing) {
+                if (existing.type !== "user" || existing.text !== input.prompt.text)
+                  return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+                return new SessionInput.Admitted({
+                  admittedSeq: 0,
+                  id: messageID,
+                  sessionID: input.sessionID,
+                  prompt: input.prompt,
+                  delivery: input.delivery ?? "steer",
+                  timeCreated: existing.time.created,
+                })
+              }
+              const admitted = new SessionInput.Admitted({
+                admittedSeq: 0,
+                id: messageID,
+                sessionID: input.sessionID,
+                prompt: input.prompt,
+                delivery: input.delivery ?? "steer",
+                timeCreated: yield* DateTime.now,
+              })
+              yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
+              return admitted
+            }
             const returnPrompt = Effect.fnUntraced(function* (admitted: SessionInput.Admitted) {
               if (input.resume !== false) yield* enqueueWake(admitted)
               return admitted
             }, Effect.uninterruptible)
-            const messageID = input.id ?? SessionMessage.ID.create()
             const delivery = input.delivery ?? "steer"
             const expected = { sessionID: input.sessionID, messageID, prompt: input.prompt, delivery }
             const admitted = yield* SessionInput.admit(db, events, {
@@ -451,6 +484,7 @@ export const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+            yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
             return yield* returnPrompt(admitted)
           }),
         ),

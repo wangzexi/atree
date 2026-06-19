@@ -8,6 +8,7 @@ import { ModelV2 } from "../model"
 import { ProjectV2 } from "../project"
 import { ProviderV2 } from "../provider"
 import { AbsolutePath, RelativePath } from "../schema"
+import type { SessionInput } from "../session/input"
 import { SessionMessage } from "../session/message"
 import { SessionSchema } from "../session/schema"
 import { WorkspaceV2 } from "../workspace"
@@ -177,6 +178,19 @@ function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
 
+function sessionJsonl(info: SessionSchema.Info) {
+  return path.join(sessionRoot(info), "session.jsonl")
+}
+
+function promptPartID(messageID: SessionMessage.ID) {
+  return `prt_${messageID.replace(/^msg_?/, "")}_text`
+}
+
+async function appendJsonl(target: string, entries: Record<string, unknown>[]) {
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  await fs.appendFile(target, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n")
+}
+
 function messageCreated(message: V1Message, fallback: number) {
   return typeof message.time?.created === "number" ? message.time.created : fallback
 }
@@ -225,7 +239,7 @@ function toV2Message(message: V1Message, parts: V1Part[]): SessionMessage.Messag
 }
 
 export async function readSessionJsonlMessages(info: SessionSchema.Info) {
-  const target = path.join(sessionRoot(info), "session.jsonl")
+  const target = sessionJsonl(info)
   const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
     throw error
@@ -272,4 +286,29 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const converted = toV2Message(message.info, message.parts)
       return converted ? [converted] : []
     })
+}
+
+export async function appendPromptJsonl(info: SessionSchema.Info, admitted: SessionInput.Admitted) {
+  const created = DateTime.toEpochMillis(admitted.timeCreated)
+  await appendJsonl(sessionJsonl(info), [
+    {
+      type: "message.updated",
+      message: {
+        id: admitted.id,
+        sessionID: admitted.sessionID,
+        role: "user",
+        time: { created },
+      },
+    },
+    {
+      type: "message.part.updated",
+      part: {
+        id: promptPartID(admitted.id),
+        sessionID: admitted.sessionID,
+        messageID: admitted.id,
+        type: "text",
+        text: admitted.prompt.text,
+      },
+    },
+  ])
 }

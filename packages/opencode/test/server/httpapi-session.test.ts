@@ -750,6 +750,61 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "records v2 prompts into file-backed session JSONL",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const directory = path.join(test.directory, "inbox")
+        const sessionID = SessionID.descending()
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "v2-file-backed-prompt",
+            version: "test",
+            projectID: ctx.project.id,
+            directory,
+            path: "inbox",
+            title: "V2 file backed prompt",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 10, updated: 20 },
+          } as any),
+        )
+
+        const admitted = yield* requestJson<{ data: { id: string; sessionID: string; prompt: { text: string } } }>(
+          `/api/session/${sessionID}/prompt`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              id: "msg_v2_file_prompt",
+              prompt: { text: "record via v2 http" },
+              resume: false,
+            }),
+          },
+        )
+        const messages = yield* requestJson<{ data: Array<{ id: string; type: string; text?: string }> }>(
+          `/api/session/${sessionID}/message`,
+          { headers },
+        )
+
+        expect(admitted.data).toMatchObject({
+          id: "msg_v2_file_prompt",
+          sessionID,
+          prompt: { text: "record via v2 http" },
+        })
+        expect(messages.data).toMatchObject([
+          { id: "msg_v2_file_prompt", type: "user", text: "record via v2 http" },
+        ])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
     "serves file-backed todo state when database cache is missing",
     () =>
       Effect.gen(function* () {

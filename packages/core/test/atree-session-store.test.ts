@@ -6,7 +6,9 @@ import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { DateTime, Effect, Layer } from "effect"
 import { mkdir, mkdtemp, realpath, writeFile } from "fs/promises"
@@ -196,6 +198,42 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(messages).toHaveLength(1)
       expect(messages[0]).toMatchObject({ id: "msg_core_user", type: "user", text: "hello from session.jsonl" })
       expect(context.map((message) => message.id)).toEqual([messages[0]!.id])
+    }),
+  )
+
+  it.effect("records v2 prompts into file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_prompt",
+          title: "Core prompt",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_prompt")
+      const admitted = yield* sessions.prompt({
+        sessionID,
+        id: SessionMessage.ID.make("msg_core_prompt"),
+        prompt: new Prompt({ text: "record this prompt" }),
+        resume: false,
+      })
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+
+      expect(admitted.id).toBe(SessionMessage.ID.make("msg_core_prompt"))
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({ id: "msg_core_prompt", type: "user", text: "record this prompt" })
     }),
   )
 })
