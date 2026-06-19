@@ -9,6 +9,7 @@ import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { SessionMessageTable, SessionTable } from "./sql"
 import { fromRow } from "./info"
+import { findSessionStore, readWorkspaceRoot } from "../atree/session-store"
 
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
@@ -33,7 +34,14 @@ export const layer = Layer.effect(
     return Service.of({
       get: Effect.fn("SessionStore.get")(function* (sessionID) {
         const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
-        return row ? fromRow(row) : undefined
+        if (row) return fromRow(row)
+        const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+          Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+        )
+        if (!root) return
+        return yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
+        )
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
         return yield* SessionHistory.load(db, sessionID)

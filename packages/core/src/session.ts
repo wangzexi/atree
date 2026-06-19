@@ -29,6 +29,7 @@ import { logFailure } from "./session/logging"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
+import { readSessionStores } from "./atree/session-store"
 
 // get project -> project.locations
 //
@@ -196,6 +197,29 @@ export const layer = Layer.effect(
         ),
       )
 
+    function sessionTimeCreated(info: SessionSchema.Info) {
+      return DateTime.toEpochMillis(info.time.created)
+    }
+
+    function matchesListInput(info: SessionSchema.Info, input: ListInput, order: "asc" | "desc") {
+      if ("directory" in input && info.location.directory !== input.directory) return false
+      if (input.workspaceID && info.location.workspaceID !== input.workspaceID) return false
+      if ("project" in input && info.projectID !== input.project) return false
+      if (input.search && !info.title.includes(input.search)) return false
+      if (input.anchor) {
+        const created = sessionTimeCreated(info)
+        const anchor = input.anchor
+        if (order === "asc") {
+          if (created < anchor.time) return false
+          if (created === anchor.time && info.id <= anchor.id) return false
+        } else {
+          if (created > anchor.time) return false
+          if (created === anchor.time && info.id >= anchor.id) return false
+        }
+      }
+      return true
+    }
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
@@ -291,7 +315,24 @@ export const layer = Layer.effect(
         const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
           Effect.orDie,
         )
-        return (direction === "previous" ? rows.toReversed() : rows).map((row) => fromRow(row))
+        const byID = new Map<string, SessionSchema.Info>()
+        for (const row of rows) byID.set(row.id, fromRow(row))
+        if ("directory" in input) {
+          const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
+            Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+          )
+          for (const fileSession of fileSessions) {
+            byID.delete(fileSession.id)
+            if (!matchesListInput(fileSession, input, order)) continue
+            byID.set(fileSession.id, fileSession)
+          }
+        }
+        const sessions = [...byID.values()].sort((a, b) => {
+          const diff = sessionTimeCreated(a) - sessionTimeCreated(b) || a.id.localeCompare(b.id)
+          return order === "asc" ? diff : -diff
+        })
+        const limited = input.limit === undefined ? sessions : sessions.slice(0, input.limit)
+        return direction === "previous" ? limited.toReversed() : limited
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
         yield* result.get(input.sessionID)

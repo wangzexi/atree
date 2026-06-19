@@ -1,4 +1,5 @@
 import { Database } from "@opencode-ai/core/database/database"
+import { findSessionStore, readWorkspaceRoot } from "@opencode-ai/core/atree/session-store"
 import { LocationServiceMap } from "@opencode-ai/core/location-layer"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -47,7 +48,17 @@ export const sessionLocationLayer = Layer.effect(
           .where(eq(SessionTable.id, sessionID))
           .get()
           .pipe(Effect.orDie)
-        if (!row)
+        const fileSession = row
+          ? undefined
+          : yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+              Effect.flatMap((root) =>
+                root ? Effect.promise(() => findSessionStore(root, sessionID)) : Effect.succeed(undefined),
+              ),
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+        const directory = row?.directory ?? fileSession?.location.directory
+        const workspaceID = row?.workspaceID ?? fileSession?.location.workspaceID
+        if (!directory)
           return yield* new SessionNotFoundError({
             sessionID,
             message: `Session not found: ${sessionID}`,
@@ -57,8 +68,8 @@ export const sessionLocationLayer = Layer.effect(
           Effect.provide(
             locations.get(
               Location.Ref.make({
-                directory: AbsolutePath.make(row.directory),
-                workspaceID: row.workspaceID ? WorkspaceV2.ID.make(row.workspaceID) : undefined,
+                directory: AbsolutePath.make(directory),
+                workspaceID: workspaceID ? WorkspaceV2.ID.make(workspaceID) : undefined,
               }),
             ),
           ),

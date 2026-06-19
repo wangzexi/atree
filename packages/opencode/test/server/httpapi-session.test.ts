@@ -671,6 +671,48 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "serves v2 file-backed sessions when the database cache is missing",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const directory = path.join(test.directory, "inbox")
+        const sessionID = SessionID.descending()
+        const headers = { "x-opencode-directory": test.directory }
+        yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "v2-file-backed",
+            version: "test",
+            projectID: ctx.project.id,
+            directory,
+            path: "inbox",
+            title: "V2 file backed",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 10, updated: 20 },
+          } as any),
+        )
+
+        const loaded = yield* requestJson<{ data: { id: string; title: string; location: { directory: string } } }>(
+          `/api/session/${sessionID}`,
+          { headers },
+        )
+        const messages = yield* requestJson<{ data: unknown[] }>(`/api/session/${sessionID}/message`, { headers })
+
+        expect(loaded.data).toMatchObject({
+          id: sessionID,
+          title: "V2 file backed",
+          location: { directory },
+        })
+        expect(messages.data).toEqual([])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
     "serves file-backed todo state when database cache is missing",
     () =>
       Effect.gen(function* () {
