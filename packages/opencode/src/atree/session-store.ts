@@ -1,6 +1,6 @@
 import fs from "fs/promises"
 import path from "path"
-import { createHash } from "crypto"
+import { createHash, randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
 import type { SessionID } from "@/session/schema"
 import type { Session } from "@/session/session"
@@ -53,7 +53,7 @@ function metaYaml(info: SessionInfo) {
 
 async function writeAtomic(target: string, content: string) {
   await fs.mkdir(path.dirname(target), { recursive: true })
-  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
   await fs.writeFile(temp, content)
   await fs.rename(temp, target)
 }
