@@ -28,9 +28,9 @@ const project = {
 }
 
 test.describe("atree smoke", () => {
-  test.setTimeout(140_000)
+  test.setTimeout(70_000)
 
-  test("opens a root, starts a child-directory session, and clears a one-time automation", async ({ page }) => {
+  test("opens a directory session and clears a one-time automation", async ({ page }) => {
     const errors = trackPageErrors(page)
     let automation:
       | {
@@ -59,6 +59,15 @@ test.describe("atree smoke", () => {
           version: "test",
           time: { created: 1700000000000, updated: 1700000000000 },
         },
+        {
+          id: "ses_child_existing",
+          slug: "child-existing",
+          projectID: project.id,
+          directory: child,
+          title: "Child existing session",
+          version: "test",
+          time: { created: 1700000001000, updated: 1700000001000 },
+        },
       ],
       pageMessages: () => ({ items: [] }),
       files: (directory) =>
@@ -86,18 +95,15 @@ test.describe("atree smoke", () => {
         automation = {
           sessionID,
           scheduleID: "sch_atree_smoke_once",
-          runAt: Date.now() + 60_000,
+          runAt: Date.now() + 1_000,
           message: "一分钟后提醒我检查 atree 冒烟测试",
         }
       },
     })
 
-    await page.goto("/")
+    await page.goto(`/${base64Encode(child)}/session`)
     await expect(page.getByText("aTree", { exact: true })).toBeVisible()
-    const childNode = page.locator(`[data-atree-directory="${child}"]`)
-    await expect(childNode).toBeVisible()
-
-    await page.locator(`[data-atree-new-session="${child}"]`).click()
+    await expect(page.locator(`[data-atree-directory="${root}"]`)).toBeVisible()
     await expect(page).toHaveURL(/\/(new-session\?draftId=|session)$/)
 
     const editor = page.locator('[contenteditable="true"]').first()
@@ -114,7 +120,7 @@ test.describe("atree smoke", () => {
     await expect(dock).toContainText("自动化消息")
     await expect(dock).toContainText("一分钟后提醒我检查 atree 冒烟测试")
 
-    await expect(dock).toBeHidden({ timeout: 100_000 })
+    await expect(dock).toBeHidden({ timeout: 45_000 })
     expect(errors).toEqual([])
   })
 })

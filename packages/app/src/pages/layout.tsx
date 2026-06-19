@@ -2547,6 +2547,8 @@ export default function Layout(props: ParentProps) {
           path: node.path,
           absolute: node.absolute,
         }))
+    const responseData = <T,>(value: T[] | { data?: T[] } | undefined) =>
+      Array.isArray(value) ? value : (value?.data ?? [])
     const fetchSessionSchedules = async (session: Session) => {
       const state = tree.schedule[session.id]
       if (state?.loading) return
@@ -2586,15 +2588,16 @@ export default function Layout(props: ParentProps) {
                 .createClient({ directory: child.absolute, throwOnError: true })
                 .session.list({ directory: child.absolute, roots: true }),
             ])
-            const childChildren = toDirectoryNodes(files.data)
+            const childSessions = responseData<Session>(sessions)
+            const childChildren = toDirectoryNodes(responseData(files))
             setTree("directory", childKey, (prev) => ({
               ...prev,
               loaded: true,
               loading: false,
               children: childChildren,
-              sessions: sessions.data ?? [],
+              sessions: childSessions,
             }))
-            preloadSessionSchedules(sessions.data ?? [])
+            preloadSessionSchedules(childSessions)
             for (const grandchild of childChildren) ensureDirectory(grandchild.absolute)
           } catch {
             // Keep tree browsing usable even if a child directory cannot expose sessions or files.
@@ -2634,16 +2637,17 @@ export default function Layout(props: ParentProps) {
           sessionClient.session.list({ directory, roots: true }),
         ])
         if (!isCurrentDirectoryLoad(key, version)) return
-        const children = toDirectoryNodes(files.data)
+        const sessionsData = responseData<Session>(sessions)
+        const children = toDirectoryNodes(responseData(files))
         setTree("directory", key, (prev) => ({
           ...prev,
           loaded: true,
           loading: false,
           children,
-          sessions: sessions.data ?? [],
+          sessions: sessionsData,
         }))
         if (!isCurrentDirectoryLoad(key, version)) return
-        preloadSessionSchedules(sessions.data ?? [])
+        preloadSessionSchedules(sessionsData)
         for (const child of children) ensureDirectory(child.absolute)
         await probeChildDirectories(children)
         if (!isCurrentDirectoryLoad(key, version)) return
@@ -2788,8 +2792,18 @@ export default function Layout(props: ParentProps) {
     createEffect(() => {
       const root = rootProject()?.worktree
       if (!root) return
-      ensureDirectory(root)
-      void loadDirectory(root, root)
+      untrack(() => {
+        ensureDirectory(root)
+        void loadDirectory(root, root, { probeChildren: true })
+      })
+    })
+
+    createEffect(() => {
+      const root = rootProject()?.worktree
+      if (!root) return
+      const state = directoryState(root)
+      if (!state?.loaded || state.loading || state.childrenProbed) return
+      untrack(() => void loadDirectory(root, root, { probeChildren: true }))
     })
 
     const DirectoryRow = (props: { root: string; directory: string; depth: number; name: string }) => {
@@ -2800,6 +2814,12 @@ export default function Layout(props: ParentProps) {
       const dimmed = () => props.depth > 0 && !isSessionNode(props.directory)
       const primaryScheduledSession = createMemo(() => scheduledSessions(props.directory)[0])
       const trailingScheduledSessions = createMemo(() => scheduledSessions(props.directory).slice(1))
+
+      createEffect(() => {
+        const current = state()
+        if (current?.loaded || current?.loading) return
+        untrack(() => void loadDirectory(props.root, props.directory, { probeChildren: props.depth === 0 }))
+      })
 
       return (
         <div class="min-w-0">
