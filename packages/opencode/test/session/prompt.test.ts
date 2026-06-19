@@ -2243,6 +2243,46 @@ it.instance(
   3_000,
 )
 
+it.instance(
+  "persists partial assistant text to session.jsonl after cancellation",
+  () =>
+    Effect.gen(function* () {
+      const { llm } = yield* useServerConfig(providerCfg)
+      const events = yield* EventV2Bridge.Service
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const chat = yield* sessions.create({ title: "Partial stream persistence" })
+      const partial = "This partial response must survive cancellation."
+      const streamed = yield* Deferred.make<void>()
+      const off = yield* events.listen((event) => {
+        if (event.type !== MessageV2.Event.PartDelta.type) return Effect.void
+        const data = event.data as { sessionID: SessionID; delta: string }
+        if (data.sessionID !== chat.id || data.delta !== partial) return Effect.void
+        return Deferred.succeed(streamed, void 0).pipe(Effect.ignore)
+      })
+
+      yield* llm.push(reply().text(partial).hang())
+      const fiber = yield* prompt
+        .prompt({
+          sessionID: chat.id,
+          agent: "build",
+          parts: [{ type: "text", text: "Start a response, then wait." }],
+        })
+        .pipe(Effect.forkChild)
+
+      yield* llm.wait(1)
+      yield* awaitWithTimeout(Deferred.await(streamed), "streamed assistant text never appeared in the event bus")
+      yield* prompt.cancel(chat.id)
+      yield* Fiber.await(fiber)
+      yield* off
+
+      const stored = yield* Effect.promise(() => readSessionJsonlMessages(chat))
+      const assistant = stored.findLast((message) => message.info.role === "assistant")
+      expect(assistant?.parts).toEqual(expect.arrayContaining([expect.objectContaining({ type: "text", text: partial })]))
+    }),
+  5_000,
+)
+
 // Agent variant
 
 noLLMServer.instance(
