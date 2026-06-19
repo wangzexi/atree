@@ -622,8 +622,9 @@ export const layer: Layer.Layer<
       const directory = yield* InstanceState.directory.pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
-      if (directory) {
-        const fileSession = yield* Effect.promise(() => readSessionStore(directory, id))
+      const directories = [...new Set([directory, cached?.directory].filter((item): item is string => !!item))]
+      for (const candidate of directories) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(candidate, id))
         if (fileSession) {
           const merged = mergeFileSession(cached, fileSession)
           yield* syncFileSessionCache(merged)

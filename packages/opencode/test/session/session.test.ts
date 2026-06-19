@@ -283,6 +283,30 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers file metadata from the cached session directory when the current instance differs", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const otherDir = yield* tmpdirScoped({ git: true })
+      const info = yield* Effect.acquireRelease(session.create({ title: "stale-cache-title" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          ...info,
+          title: "authoritative-file-title",
+          metadata: { icon: "🧭" },
+          time: { ...info.time, updated: info.time.updated + 100 },
+        } as any),
+      )
+
+      const loaded = yield* provideInstance(otherDir)(session.get(info.id))
+      expect(loaded.directory).toBe(info.directory)
+      expect(loaded.title).toBe("authoritative-file-title")
+      expect(loaded.metadata).toEqual({ icon: "🧭" })
+    }),
+  )
+
   it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
