@@ -245,10 +245,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       const current = yield* requireSession(ctx.params.sessionID)
       if (ctx.payload.title !== undefined) {
-        yield* session.setTitle({ sessionID: ctx.params.sessionID, title: ctx.payload.title })
+        yield* session.setTitle({ sessionID: ctx.params.sessionID, directory: current.directory, title: ctx.payload.title })
       }
       if (ctx.payload.metadata !== undefined) {
-        yield* session.setMetadata({ sessionID: ctx.params.sessionID, metadata: ctx.payload.metadata })
+        yield* session.setMetadata({
+          sessionID: ctx.params.sessionID,
+          directory: current.directory,
+          metadata: ctx.payload.metadata,
+        })
       }
       if (ctx.payload.permission !== undefined) {
         yield* session.setPermission({
@@ -260,7 +264,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         if (ctx.payload.time.archived !== null) {
           yield* scheduleSvc.clear(ctx.params.sessionID, { directory: current.directory })
         }
-        yield* session.setArchived({ sessionID: ctx.params.sessionID, time: ctx.payload.time.archived })
+        yield* session.setArchived({
+          sessionID: ctx.params.sessionID,
+          directory: current.directory,
+          time: ctx.payload.time.archived,
+        })
       }
       return yield* requireSession(ctx.params.sessionID)
     })

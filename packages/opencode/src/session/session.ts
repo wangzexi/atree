@@ -51,7 +51,7 @@ import type { Provider } from "@/provider/provider"
 import { Permission } from "@/permission"
 import { Global } from "@opencode-ai/core/global"
 import { Effect, Layer, Option, Context, Schema, Types } from "effect"
-import { NonNegativeInt, optionalOmitUndefined } from "@opencode-ai/core/schema"
+import { AbsolutePath, NonNegativeInt, optionalOmitUndefined } from "@opencode-ai/core/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -501,6 +501,8 @@ export class BusyError extends Schema.TaggedErrorClass<BusyError>()("SessionBusy
 
 export type NotFound = NotFoundError
 
+type DirectoryOption = { directory?: string }
+
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly listGlobal: (input?: GlobalListInput) => Effect.Effect<GlobalInfo[]>
@@ -516,9 +518,9 @@ export interface Interface {
   readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID) => Effect.Effect<void>
   readonly get: (id: SessionID) => Effect.Effect<Info, NotFound>
-  readonly setTitle: (input: { sessionID: SessionID; title: string }) => Effect.Effect<void>
-  readonly setArchived: (input: { sessionID: SessionID; time?: number | null }) => Effect.Effect<void>
-  readonly setMetadata: (input: typeof SetMetadataInput.Type) => Effect.Effect<void>
+  readonly setTitle: (input: { sessionID: SessionID; title: string } & DirectoryOption) => Effect.Effect<void>
+  readonly setArchived: (input: { sessionID: SessionID; time?: number | null } & DirectoryOption) => Effect.Effect<void>
+  readonly setMetadata: (input: typeof SetMetadataInput.Type & DirectoryOption) => Effect.Effect<void>
   readonly setPermission: (input: { sessionID: SessionID; permission: PermissionV1.Ruleset }) => Effect.Effect<void>
   readonly setRevert: (input: {
     sessionID: SessionID
@@ -623,7 +625,33 @@ export const layer: Layer.Layer<
       return result
     })
 
+    const ensureFileSessionProject = Effect.fn("Session.ensureFileSessionProject")(function* (fileSession: Info) {
+      const existing = yield* db
+        .select({ id: ProjectTable.id })
+        .from(ProjectTable)
+        .where(eq(ProjectTable.id, fileSession.projectID))
+        .get()
+        .pipe(Effect.orDie)
+      if (existing) return
+      const now = Date.now()
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: fileSession.projectID,
+          worktree: AbsolutePath.make(fileSession.directory),
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as typeof ProjectTable.$inferInsert)
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+    })
+
     const syncFileSessionCache = Effect.fn("Session.syncFileSessionCache")(function* (fileSession: Info) {
+      yield* ensureFileSessionProject(fileSession)
       const row = toRow(fileSession)
       yield* db
         .insert(SessionTable)
@@ -633,14 +661,16 @@ export const layer: Layer.Layer<
         .pipe(Effect.orDie)
     })
 
-    const get = Effect.fn("Session.get")(function* (id: SessionID) {
+    const getWithDirectory = Effect.fn("Session.getWithDirectory")(function* (id: SessionID, directoryHint?: string) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
       const cached = row ? fromRow(row) : undefined
       const ctx = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
       const directory = ctx?.directory
-      const directories = [...new Set([directory, cached?.directory].filter((item): item is string => !!item))]
+      const directories = [
+        ...new Set([directoryHint, directory, cached?.directory].filter((item): item is string => !!item)),
+      ]
       for (const candidate of directories) {
         const fileSession = yield* Effect.promise(() => readSessionStore(candidate, id))
         if (fileSession) {
@@ -651,6 +681,10 @@ export const layer: Layer.Layer<
       }
       if (!cached) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
       return cached
+    })
+
+    const get = Effect.fn("Session.get")(function* (id: SessionID) {
+      return yield* getWithDirectory(id)
     })
 
     const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (
@@ -937,9 +971,9 @@ export const layer: Layer.Layer<
       return session
     })
 
-    const patch = (sessionID: SessionID, info: Patch) =>
+    const patch = (sessionID: SessionID, info: Patch, options?: DirectoryOption) =>
       Effect.gen(function* () {
-        const current = yield* get(sessionID)
+        const current = yield* getWithDirectory(sessionID, options?.directory)
         const time = info.time ? { ...current.time, ...info.time } : current.time
         if (info.time && "archived" in info.time && info.time.archived === null) delete time.archived
         const next = {
@@ -960,16 +994,24 @@ export const layer: Layer.Layer<
       yield* patch(sessionID, { time: { updated: Date.now() } }).pipe(Effect.orDie)
     })
 
-    const setTitle = Effect.fn("Session.setTitle")(function* (input: { sessionID: SessionID; title: string }) {
-      yield* patch(input.sessionID, { title: input.title }).pipe(Effect.orDie)
+    const setTitle = Effect.fn("Session.setTitle")(function* (
+      input: { sessionID: SessionID; title: string } & DirectoryOption,
+    ) {
+      yield* patch(input.sessionID, { title: input.title }, { directory: input.directory }).pipe(Effect.orDie)
     })
 
-    const setArchived = Effect.fn("Session.setArchived")(function* (input: { sessionID: SessionID; time?: number | null }) {
-      yield* patch(input.sessionID, { time: { archived: input.time } }).pipe(Effect.orDie)
+    const setArchived = Effect.fn("Session.setArchived")(function* (
+      input: { sessionID: SessionID; time?: number | null } & DirectoryOption,
+    ) {
+      yield* patch(input.sessionID, { time: { archived: input.time } }, { directory: input.directory }).pipe(
+        Effect.orDie,
+      )
     })
 
-    const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type) {
-      yield* patch(input.sessionID, { metadata: input.metadata, time: { updated: Date.now() } }).pipe(Effect.orDie)
+    const setMetadata = Effect.fn("Session.setMetadata")(function* (input: typeof SetMetadataInput.Type & DirectoryOption) {
+      yield* patch(input.sessionID, { metadata: input.metadata, time: { updated: Date.now() } }, {
+        directory: input.directory,
+      }).pipe(Effect.orDie)
     })
 
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {

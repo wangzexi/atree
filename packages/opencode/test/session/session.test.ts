@@ -484,6 +484,46 @@ describe("Session", () => {
     }),
   )
 
+  it.effect("patches file-backed session metadata with an explicit directory and no instance", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const directory = yield* tmpdirScoped()
+      const now = Date.now()
+      const sessionID = "ses_explicit_patch_metadata" as SessionID
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-patch-metadata",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Before patch",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* session.setTitle({ sessionID, directory, title: "Explicit patched title" })
+      yield* session.setMetadata({ sessionID, directory, metadata: { icon: "🧪" } })
+      yield* session.setArchived({ sessionID, directory, time: 1234 })
+
+      const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      expect(stored?.title).toBe("Explicit patched title")
+      expect(stored?.metadata).toEqual({ icon: "🧪" })
+      expect(stored?.time.archived).toBe(1234)
+
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+      expect(row?.directory).toBe(directory)
+      expect(row?.title).toBe("Explicit patched title")
+      expect(row?.metadata).toEqual({ icon: "🧪" })
+      expect(row?.time_archived).toBe(1234)
+    }),
+  )
+
   it.instance("prefers archived file metadata over stale cached child sessions", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
