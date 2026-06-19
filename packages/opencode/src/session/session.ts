@@ -538,15 +538,17 @@ export interface Interface {
   >
   readonly children: (parentID: SessionID, options?: DirectoryOption) => Effect.Effect<Info[]>
   readonly remove: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void, NotFound>
-  readonly updateMessage: <T extends SessionV1.Info>(msg: T) => Effect.Effect<T>
-  readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<MessageID>
-  readonly removePart: (input: { sessionID: SessionID; messageID: MessageID; partID: PartID }) => Effect.Effect<PartID>
+  readonly updateMessage: <T extends SessionV1.Info>(msg: T, options?: DirectoryOption) => Effect.Effect<T>
+  readonly removeMessage: (input: { sessionID: SessionID; messageID: MessageID } & DirectoryOption) => Effect.Effect<MessageID>
+  readonly removePart: (
+    input: { sessionID: SessionID; messageID: MessageID; partID: PartID } & DirectoryOption,
+  ) => Effect.Effect<PartID>
   readonly getPart: (input: {
     sessionID: SessionID
     messageID: MessageID
     partID: PartID
   } & DirectoryOption) => Effect.Effect<SessionV1.Part | undefined>
-  readonly updatePart: <T extends SessionV1.Part>(part: T) => Effect.Effect<T>
+  readonly updatePart: <T extends SessionV1.Part>(part: T, options?: DirectoryOption) => Effect.Effect<T>
   readonly updatePartDelta: (input: {
     sessionID: SessionID
     messageID: MessageID
@@ -694,8 +696,9 @@ export const layer: Layer.Layer<
     const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (
       sessionID: SessionID,
       entry: Record<string, unknown>,
+      options?: DirectoryOption,
     ) {
-      const session = yield* get(sessionID).pipe(Effect.orDie)
+      const session = yield* getWithDirectory(sessionID, options?.directory).pipe(Effect.orDie)
       yield* Effect.promise(() => appendSessionJsonl(session, entry)).pipe(Effect.orDie)
     })
 
@@ -855,16 +858,16 @@ export const layer: Layer.Layer<
       }
     })
 
-    const updateMessage = <T extends SessionV1.Info>(msg: T): Effect.Effect<T> =>
+    const updateMessage = <T extends SessionV1.Info>(msg: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg })
+        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg }, options)
         yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
-    const updatePart = <T extends SessionV1.Part>(part: T): Effect.Effect<T> =>
+    const updatePart = <T extends SessionV1.Part>(part: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part })
+        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part }, options)
         yield* events.publish(SessionV1.Event.PartUpdated, {
           sessionID: part.sessionID,
           part: structuredClone(part),
@@ -1130,8 +1133,9 @@ export const layer: Layer.Layer<
     const removeMessage = Effect.fn("Session.removeMessage")(function* (input: {
       sessionID: SessionID
       messageID: MessageID
+      directory?: string
     }) {
-      yield* appendSessionEvent(input.sessionID, { type: "message.removed", messageID: input.messageID })
+      yield* appendSessionEvent(input.sessionID, { type: "message.removed", messageID: input.messageID }, input)
       yield* events.publish(SessionV1.Event.MessageRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
@@ -1143,12 +1147,17 @@ export const layer: Layer.Layer<
       sessionID: SessionID
       messageID: MessageID
       partID: PartID
+      directory?: string
     }) {
-      yield* appendSessionEvent(input.sessionID, {
-        type: "message.part.removed",
-        messageID: input.messageID,
-        partID: input.partID,
-      })
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "message.part.removed",
+          messageID: input.messageID,
+          partID: input.partID,
+        },
+        input,
+      )
       yield* events.publish(SessionV1.Event.PartRemoved, {
         sessionID: input.sessionID,
         messageID: input.messageID,
