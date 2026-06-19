@@ -22,12 +22,15 @@ export interface MockServerConfig {
   files?: (directory: string) => unknown[]
   schedules?: (sessionID: string) => unknown[]
   onPromptAsync?: (sessionID: string) => void
+  /** Override the server workspace state. Defaults to `{ rootDirectory: directory }`. */
+  workspace?: { rootDirectory: string | null }
 }
 
 export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
   let sessions = [...config.sessions]
+  const workspaceState = config.workspace ?? { rootDirectory: config.directory }
   const staticRoutes: Record<string, unknown> = {
-    "/api/workspace": { version: 1, rootDirectory: config.directory, updatedAt: 1 },
+    "/api/workspace": { version: 1, rootDirectory: workspaceState.rootDirectory, updatedAt: 1 },
     "/api/tree": {
       rootDirectory: config.directory,
       tree: {
@@ -119,8 +122,17 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
         } catch {
           payload = undefined
         }
-        if (payload && typeof payload === "object" && "metadata" in payload) {
-          Object.assign(session, { metadata: (payload as { metadata?: unknown }).metadata })
+        if (payload && typeof payload === "object") {
+          const patch = payload as Record<string, unknown>
+          // Reflect the same fields the real server persists so the UI can
+          // observe archived/restored state and metadata changes.
+          if ("metadata" in patch) Object.assign(session, { metadata: patch.metadata })
+          if ("title" in patch) Object.assign(session, { title: patch.title })
+          if ("time" in patch && patch.time && typeof patch.time === "object") {
+            const time = { ...(session.time as Record<string, unknown>), ...(patch.time as Record<string, unknown>) }
+            if (time.archived === null) delete time.archived
+            Object.assign(session, { time, updated: Date.now() })
+          }
         }
         return json(route, session)
       }
