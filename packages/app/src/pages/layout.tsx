@@ -2721,19 +2721,12 @@ export default function Layout(props: ParentProps) {
         })
       }
 
-      const cachedSessions = directorySessions(directory)
-      const cachedKey = sessionListKey(cachedSessions)
-      let switchedWithCache = false
-      if (directoryState(directory)?.loaded) {
-        switchToSessions(cachedSessions)
-        switchedWithCache = true
-      }
+      // Clear previous directory tabs first to avoid stale sessions showing during directory switch.
+      switchToSessions([])
 
       await loadDirectory(root, directory, { force: true, probeChildren: true })
       if (run !== openDirectoryRun) return
-      const sessions = directorySessions(directory, Date.now())
-      if (switchedWithCache && cachedKey === sessionListKey(sessions)) return
-      switchToSessions(sessions)
+      switchToSessions(directorySessions(directory, Date.now()))
     }
     const rootProject = createMemo(() => layout.projects.list()[0])
     const knownSession = (sessionID: string) => {
@@ -2747,8 +2740,7 @@ export default function Layout(props: ParentProps) {
       const run = ++routeDirectoryGroupRun
       const root = rootProject()?.worktree
       const directory = currentDir()
-      const sessionID = params.id
-      if (!root || !directory || !sessionID) return
+      if (!root || !directory) return
       const group = sessionTabs.directoryGroup()
       if (group?.server === server.key && pathKey(group.directory) === pathKey(directory)) return
 
