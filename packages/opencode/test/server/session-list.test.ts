@@ -4,7 +4,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { Session as SessionNs } from "@/session/session"
 import { disposeAllInstances, provideInstance, TestInstance } from "../fixture/fixture"
-import { mkdir } from "fs/promises"
+import { cp, mkdir } from "fs/promises"
 import path from "path"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
@@ -95,6 +95,36 @@ describe("session.list", () => {
         expect(ids).not.toContain(parent.id)
         expect(ids).toContain(current.id)
         expect(ids).not.toContain(sibling.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "loads copied directory session stores as belonging to the target directory",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const source = path.join(test.directory, "source")
+        const target = path.join(test.directory, "target")
+        yield* Effect.promise(() => mkdir(source, { recursive: true }))
+        yield* Effect.promise(() => mkdir(target, { recursive: true }))
+
+        const created = yield* withSession({ title: "copied-directory-session", metadata: { icon: "🧭" } }).pipe(
+          provideInstance(source),
+        )
+        yield* Effect.promise(() => cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+
+        const targetSessions = yield* SessionNs.Service.use((session) =>
+          provideInstance(target)(session.list({ directory: target, roots: true })),
+        )
+        const copied = targetSessions.find((item) => item.id === created.id)
+        expect(copied?.directory).toBe(target)
+        expect(copied?.title).toBe("copied-directory-session")
+        expect(copied?.metadata).toEqual({ icon: "🧭" })
+
+        const loaded = yield* SessionNs.Service.use((session) => provideInstance(target)(session.get(created.id)))
+        expect(loaded.directory).toBe(target)
+        expect(loaded.title).toBe("copied-directory-session")
       }),
     { git: true },
   )
