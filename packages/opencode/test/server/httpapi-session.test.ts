@@ -971,6 +971,20 @@ describe("session HttpApi", () => {
         })
         expect(created.title).toBe("created")
 
+        const nodeDirectory = path.join(test.directory, "node-create")
+        yield* Effect.promise(() => mkdir(nodeDirectory, { recursive: true }))
+        const createdInNode = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ title: "created in node", directory: nodeDirectory }),
+        })
+        expect(createdInNode.directory).toBe(nodeDirectory)
+        expect(yield* Effect.promise(() => readSessionStore(nodeDirectory, createdInNode.id))).toMatchObject({
+          id: createdInNode.id,
+          title: "created in node",
+          directory: nodeDirectory,
+        })
+
         const updated = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID: created.id }), {
           method: "PATCH",
           headers,
