@@ -700,6 +700,10 @@ export const layer: Layer.Layer<
     ) {
       const session = yield* getWithDirectory(sessionID, options?.directory).pipe(Effect.orDie)
       yield* Effect.promise(() => appendSessionJsonl(session, entry)).pipe(Effect.orDie)
+      const updated = Math.max(Date.now(), session.time.updated + 1)
+      const next = { ...session, time: { ...session.time, updated } }
+      yield* Effect.promise(() => writeSessionStore(next)).pipe(Effect.orDie)
+      yield* syncFileSessionCache(next)
     })
 
     const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (

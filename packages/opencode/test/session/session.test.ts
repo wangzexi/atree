@@ -334,6 +334,33 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("advances directory session metadata when appending message events", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* session.create({ title: "message-touch-source" })
+      const messageID = MessageID.ascending()
+      const before = (yield* Effect.promise(() => readSessionStore(instance.directory, info.id)))?.time.updated ?? 0
+
+      yield* Effect.sleep("2 millis")
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+
+      const after = (yield* Effect.promise(() => readSessionStore(instance.directory, info.id)))?.time.updated ?? 0
+      expect(after).toBeGreaterThan(before)
+
+      yield* session.remove(info.id)
+    }),
+  )
+
   it.instance("prefers file metadata from the cached session directory when the current instance differs", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
@@ -737,6 +764,7 @@ describe("Session", () => {
       const sourceID = "ses_file_fork_source" as SessionID
       const messageID = MessageID.ascending()
       const partID = PartID.ascending()
+      const filePartID = PartID.ascending()
       const source = {
         id: sourceID,
         slug: "file-fork-source",
@@ -779,18 +807,38 @@ describe("Session", () => {
           },
         }),
       )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, {
+          type: "message.part.updated",
+          part: {
+            id: filePartID,
+            sessionID: sourceID,
+            messageID,
+            type: "file",
+            mime: "image/png",
+            filename: "fork-source.png",
+            url: "data:image/png;base64,Zm9yay1hc3NldA==",
+          },
+        }),
+      )
 
       const fork = yield* Effect.acquireRelease(session.fork({ sessionID: sourceID }), (info) =>
         session.remove(info.id).pipe(Effect.ignore),
       )
       const forkMessages = yield* Effect.promise(() => readSessionJsonlMessages(fork as any))
       const forkText = JSON.stringify(forkMessages)
+      const forkAssetsRoot = path.join(instance.directory, ".agents", "atree", "sessions", fork.id, "assets")
+      const forkAssets = yield* Effect.promise(() => fs.readdir(forkAssetsRoot))
+      const forkAsset = yield* Effect.promise(() => fs.readFile(path.join(forkAssetsRoot, forkAssets[0]!)))
 
       expect(fork.directory).toBe(instance.directory)
       expect(fork.metadata).toEqual({ icon: "🧭" })
       expect(forkText).toContain("copy me from jsonl")
+      expect(forkText).toContain("data:image/png;base64,Zm9yay1hc3NldA==")
       expect(forkText).toContain(String(fork.id))
       expect(forkText).not.toContain(String(sourceID))
+      expect(forkAssets).toHaveLength(1)
+      expect(forkAsset.toString("utf8")).toBe("fork-asset")
     }),
   )
 
