@@ -1,4 +1,5 @@
 import { Effect, Schema } from "effect"
+import { Session } from "@/session/session"
 import { Schedule } from "../session/schedule"
 import { buildScheduleCreateInput } from "../session/schedule-input"
 import * as Tool from "./tool"
@@ -28,7 +29,8 @@ const AtValue = Schema.Union([Schema.Number, Schema.String])
 
 export const Parameters = Schema.Struct({
   action: Schema.Literals(["create", "delete", "list"]).annotate({
-    description: "Which operation to perform. 'create' requires type+message; 'delete' requires id; 'list' takes no extra fields.",
+    description:
+      "Which operation to perform. 'create' requires type+message; 'delete' requires id; 'list' takes no extra fields.",
   }),
   type: Schema.optional(Schema.Literals(["cron", "at"])).annotate({
     description: "Schedule type for action='create'. Use 'cron' for recurring tasks or 'at' for one-time tasks.",
@@ -72,15 +74,18 @@ function serialize(info: Schedule.Info) {
   }
 }
 
-export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Service>(
+export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Service | Session.Service>(
   "schedule",
   Effect.gen(function* () {
     const schedule = yield* Schedule.Service
+    const session = yield* Session.Service
     return {
       description: DESCRIPTION,
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
+          const info = yield* session.get(ctx.sessionID)
+          const directory = info.directory
           switch (params.action) {
             case "create": {
               const resolved = buildScheduleCreateInput(params)
@@ -97,42 +102,42 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
               }
               const message = params.message
               return yield* schedule
-                .create({ sessionID: ctx.sessionID, kind: resolved.kind, expression, runAt, message })
+                .create({ sessionID: ctx.sessionID, kind: resolved.kind, expression, runAt, message, directory })
                 .pipe(
-                Effect.map((info) => ({
-                  title: info.kind === "once" ? "Scheduled at" : `Scheduled: ${info.expression}`,
-                  output: JSON.stringify(serialize(info), null, 2),
-                  metadata: { action: "create" as const, scheduleID: info.id } satisfies Metadata,
-                })),
-                Effect.catchTag("ScheduleInvalidExpression", (e) =>
-                  Effect.succeed({
-                    title: "Invalid cron expression",
-                    output: `Invalid cron expression "${e.expression}": ${e.reason}. Use a standard 5-field cron expression like "*/10 * * * *" (every 10 minutes) or "0 9 * * *" (daily at 9 AM). Do not pass natural language.`,
-                    metadata: { action: "create" } satisfies Metadata,
-                  }),
-                ),
-                Effect.catchTag("ScheduleInvalidRunAt", (e) =>
-                  Effect.succeed({
-                    title: "Invalid at",
-                    output: `Invalid one-time at value "${e.runAt}": ${e.reason}. Use an ISO datetime string or Unix millisecond timestamp in the future.`,
-                    metadata: { action: "create" } satisfies Metadata,
-                  }),
-                ),
-                Effect.catchTag("ScheduleIntervalTooShort", (e) =>
-                  Effect.succeed({
-                    title: "Interval too short",
-                    output: `Cron expression "${e.expression}" fires every ${Math.round(e.intervalMs / 1000)} seconds. Minimum is 60 seconds. Pick a longer cadence.`,
-                    metadata: { action: "create" } satisfies Metadata,
-                  }),
-                ),
-                Effect.catchTag("ScheduleLimitExceeded", (e) =>
-                  Effect.succeed({
-                    title: "Schedule already exists",
-                    output: `This session already has an automation message. Use schedule({action:"list"}) to find it, then schedule({action:"delete",id:"..."}) before creating a new one.`,
-                    metadata: { action: "create" } satisfies Metadata,
-                  }),
-                ),
-              )
+                  Effect.map((info) => ({
+                    title: info.kind === "once" ? "Scheduled at" : `Scheduled: ${info.expression}`,
+                    output: JSON.stringify(serialize(info), null, 2),
+                    metadata: { action: "create" as const, scheduleID: info.id } satisfies Metadata,
+                  })),
+                  Effect.catchTag("ScheduleInvalidExpression", (e) =>
+                    Effect.succeed({
+                      title: "Invalid cron expression",
+                      output: `Invalid cron expression "${e.expression}": ${e.reason}. Use a standard 5-field cron expression like "*/10 * * * *" (every 10 minutes) or "0 9 * * *" (daily at 9 AM). Do not pass natural language.`,
+                      metadata: { action: "create" } satisfies Metadata,
+                    }),
+                  ),
+                  Effect.catchTag("ScheduleInvalidRunAt", (e) =>
+                    Effect.succeed({
+                      title: "Invalid at",
+                      output: `Invalid one-time at value "${e.runAt}": ${e.reason}. Use an ISO datetime string or Unix millisecond timestamp in the future.`,
+                      metadata: { action: "create" } satisfies Metadata,
+                    }),
+                  ),
+                  Effect.catchTag("ScheduleIntervalTooShort", (e) =>
+                    Effect.succeed({
+                      title: "Interval too short",
+                      output: `Cron expression "${e.expression}" fires every ${Math.round(e.intervalMs / 1000)} seconds. Minimum is 60 seconds. Pick a longer cadence.`,
+                      metadata: { action: "create" } satisfies Metadata,
+                    }),
+                  ),
+                  Effect.catchTag("ScheduleLimitExceeded", (e) =>
+                    Effect.succeed({
+                      title: "Schedule already exists",
+                      output: `This session already has an automation message. Use schedule({action:"list"}) to find it, then schedule({action:"delete",id:"..."}) before creating a new one.`,
+                      metadata: { action: "create" } satisfies Metadata,
+                    }),
+                  ),
+                )
             }
             case "delete": {
               const id = params.id
@@ -143,7 +148,7 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
                   metadata: { action: "delete" as const } satisfies Metadata,
                 }
               }
-              return yield* schedule.delete(id as Schedule.ID).pipe(
+              return yield* schedule.delete(id as Schedule.ID, { directory }).pipe(
                 Effect.map(() => ({
                   title: "Schedule deleted",
                   output: `Deleted schedule ${id}.`,
@@ -159,7 +164,7 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
               )
             }
             case "list": {
-              const items = yield* schedule.list(ctx.sessionID)
+              const items = yield* schedule.list(ctx.sessionID, { directory })
               const payload = items.map(serialize)
               return {
                 title: items.length === 0 ? "No schedules" : `${items.length} schedule${items.length === 1 ? "" : "s"}`,
@@ -168,7 +173,7 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
               }
             }
           }
-        }),
+        }).pipe(Effect.orDie),
     } satisfies Tool.DefWithoutID<typeof Parameters, Metadata>
   }),
 )
