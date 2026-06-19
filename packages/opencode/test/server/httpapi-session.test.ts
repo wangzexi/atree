@@ -2,6 +2,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { afterEach, describe, expect } from "bun:test"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
+import { Global } from "@opencode-ai/core/global"
 import { cp, mkdir } from "node:fs/promises"
 import path from "node:path"
 import { Cause, Config, Effect, Exit, Layer } from "effect"
@@ -27,6 +28,7 @@ import { MessageID, PartID, SessionID, type SessionID as SessionIDType } from ".
 import { MessageV2 } from "../../src/session/message-v2"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { appendSessionJsonl, readSessionStore, writeSessionStore } from "../../src/atree/session-store"
+import { writeWorkspaceRoot } from "../../src/atree/state"
 import { writeSessionTodoState } from "../../src/atree/todo-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
@@ -947,6 +949,37 @@ describe("session HttpApi", () => {
 
         expect(response.status).toBe(200)
         expect((yield* json<Session.Info>(response)).summary?.diffs).toEqual([{ additions: 1, deletions: 0 }])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "serves a nested file-backed session from the persisted atree root without a database cache",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const data = yield* tmpdirScoped()
+        const previousData = Global.Path.data
+        ;(Global.Path as { data: string }).data = data
+        yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+        const nodeDirectory = path.join(test.directory, "nested", "http-node")
+        yield* Effect.promise(() => mkdir(nodeDirectory, { recursive: true }))
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+        const created = yield* createSession({ title: "http nested", directory: nodeDirectory })
+        const { db } = yield* Database.Service
+        yield* db.delete(SessionTable).where(eq(SessionTable.id, created.id)).run().pipe(Effect.orDie)
+
+        const response = yield* request(pathFor(SessionPaths.get, { sessionID: created.id }), {
+          headers: { "x-opencode-directory": test.directory },
+        })
+
+        expect(response.status).toBe(200)
+        expect(yield* json<Session.Info>(response)).toMatchObject({
+          id: created.id,
+          title: "http nested",
+          directory: nodeDirectory,
+        })
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
