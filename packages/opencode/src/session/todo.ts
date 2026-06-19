@@ -77,40 +77,41 @@ export const layer = Layer.effect(
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
       const projectID = instance?.project.id ?? session.projectID
       yield* ensureFileSessionProject({ ...session, projectID })
+      const row = {
+        id: session.id,
+        project_id: projectID,
+        workspace_id: session.workspaceID ?? null,
+        parent_id: session.parentID ?? null,
+        slug: session.slug,
+        directory: session.directory,
+        path: session.path ?? null,
+        title: session.title,
+        agent: session.agent ?? null,
+        model: session.model ?? null,
+        version: session.version,
+        share_url: session.share?.url ?? null,
+        summary_additions: session.summary?.additions ?? null,
+        summary_deletions: session.summary?.deletions ?? null,
+        summary_files: session.summary?.files ?? null,
+        summary_diffs: session.summary?.diffs ?? null,
+        revert: session.revert ?? null,
+        metadata: session.metadata ?? null,
+        permission: session.permission ?? null,
+        cost: session.cost,
+        tokens_input: tokens.input,
+        tokens_output: tokens.output,
+        tokens_reasoning: tokens.reasoning,
+        tokens_cache_read: tokens.cache.read,
+        tokens_cache_write: tokens.cache.write,
+        time_created: session.time.created,
+        time_updated: session.time.updated,
+        time_compacting: session.time.compacting ?? null,
+        time_archived: session.time.archived ?? null,
+      } as typeof SessionTable.$inferInsert
       yield* db
         .insert(SessionTable)
-        .values({
-          id: session.id,
-          project_id: projectID,
-          workspace_id: session.workspaceID ?? null,
-          parent_id: session.parentID ?? null,
-          slug: session.slug,
-          directory: session.directory,
-          path: session.path ?? null,
-          title: session.title,
-          agent: session.agent ?? null,
-          model: session.model ?? null,
-          version: session.version,
-          share_url: session.share?.url ?? null,
-          summary_additions: session.summary?.additions ?? null,
-          summary_deletions: session.summary?.deletions ?? null,
-          summary_files: session.summary?.files ?? null,
-          summary_diffs: session.summary?.diffs ?? null,
-          revert: session.revert ?? null,
-          metadata: session.metadata ?? null,
-          permission: session.permission ?? null,
-          cost: session.cost,
-          tokens_input: tokens.input,
-          tokens_output: tokens.output,
-          tokens_reasoning: tokens.reasoning,
-          tokens_cache_read: tokens.cache.read,
-          tokens_cache_write: tokens.cache.write,
-          time_created: session.time.created,
-          time_updated: session.time.updated,
-          time_compacting: session.time.compacting ?? null,
-          time_archived: session.time.archived ?? null,
-        } as typeof SessionTable.$inferInsert)
-        .onConflictDoNothing()
+        .values(row)
+        .onConflictDoUpdate({ target: SessionTable.id, set: row })
         .run()
         .pipe(Effect.orDie)
     })
@@ -119,6 +120,14 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
+      if (fallbackDirectory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(fallbackDirectory, sessionID))
+        if (fileSession) {
+          yield* upsertFileSessionCache(fileSession)
+          return fileSession.directory
+        }
+      }
+
       const row = yield* db
         .select({ directory: SessionTable.directory })
         .from(SessionTable)
@@ -126,11 +135,6 @@ export const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (row?.directory) return row.directory
-
-      if (fallbackDirectory) {
-        const fileSession = yield* Effect.promise(() => readSessionStore(fallbackDirectory, sessionID))
-        if (fileSession) return fileSession.directory
-      }
 
       const instance = yield* InstanceRef
       if (!instance) return

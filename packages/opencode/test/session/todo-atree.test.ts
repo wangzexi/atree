@@ -173,4 +173,37 @@ describe("atree todo state", () => {
       expect(sessionRow?.directory).toBe(directory)
     }),
   )
+
+  it.instance("writes copied file-backed todo state to the explicit target directory", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const todo = yield* Todo.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-copy-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const session = yield* sessions.create({ title: "copied-todo" })
+
+      yield* Effect.promise(() =>
+        writeSessionTodoState(source.directory, session.id, [
+          { content: "source todo", status: "pending", priority: "low" },
+        ]),
+      )
+      yield* Effect.promise(() => fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }))
+
+      yield* todo.update({
+        sessionID: session.id,
+        directory: target,
+        todos: [{ content: "target todo", status: "in_progress", priority: "high" }],
+      })
+
+      expect(yield* Effect.promise(() => readSessionTodoState(target, session.id))).toEqual([
+        { content: "target todo", status: "in_progress", priority: "high" },
+      ])
+      expect(yield* Effect.promise(() => readSessionTodoState(source.directory, session.id))).toEqual([
+        { content: "source todo", status: "pending", priority: "low" },
+      ])
+    }),
+  )
 })

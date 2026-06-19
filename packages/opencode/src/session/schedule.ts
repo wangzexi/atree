@@ -405,6 +405,14 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
+      if (fallbackDirectory) {
+        const session = yield* Effect.promise(() => readSessionStore(fallbackDirectory, sessionID))
+        if (session) {
+          yield* upsertFileSessionCache(session)
+          return session.directory
+        }
+      }
+
       const row = yield* db
         .select({ directory: SessionTable.directory })
         .from(SessionTable)
@@ -421,8 +429,7 @@ export const layer = Layer.effect(
       }
 
       const directory =
-        fallbackDirectory ??
-        (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
+        yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)))
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
@@ -434,6 +441,14 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
+      if (fallbackDirectory) {
+        const session = yield* Effect.promise(() => readSessionStore(fallbackDirectory, sessionID))
+        if (session) {
+          yield* upsertFileSessionCache(session)
+          return { directory: session.directory, archived: session.time.archived !== undefined }
+        }
+      }
+
       const row = yield* db
         .select({ directory: SessionTable.directory, archived: SessionTable.time_archived })
         .from(SessionTable)
@@ -450,8 +465,7 @@ export const layer = Layer.effect(
       }
 
       const directory =
-        fallbackDirectory ??
-        (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
+        yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)))
       if (!directory) return
       const session = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       if (!session) return
