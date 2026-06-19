@@ -355,6 +355,57 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers session.jsonl part updates over stale cached parts", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const info = yield* Effect.acquireRelease(session.create({ title: "jsonl-part-update-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: partID,
+        messageID,
+        sessionID: info.id,
+        type: "text",
+        text: "stale cached part",
+      })
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "message.part.updated",
+          part: {
+            id: partID,
+            messageID,
+            sessionID: info.id,
+            type: "text",
+            text: "authoritative jsonl part",
+          },
+        }),
+      )
+
+      const part = yield* session.getPart({ sessionID: info.id, messageID, partID })
+      expect(part).toMatchObject({ id: partID, type: "text", text: "authoritative jsonl part" })
+
+      const found = yield* session.findMessage(info.id, (message) => message.info.id === messageID)
+      expect(Option.isSome(found) ? found.value.parts[0] : undefined).toMatchObject({
+        id: partID,
+        type: "text",
+        text: "authoritative jsonl part",
+      })
+    }),
+  )
+
   it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

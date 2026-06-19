@@ -809,6 +809,10 @@ export const layer: Layer.Layer<
         projection = yield* Effect.promise(() => readSessionJsonlProjection(session))
         const partKey = `${input.messageID}:${input.partID}`
         if (projection.removedMessageIDs.has(input.messageID) || projection.removedPartIDs.has(partKey)) return
+        const filePart = projection.messages
+          .find((message) => message.info.id === input.messageID)
+          ?.parts.find((part) => part.id === input.partID)
+        if (filePart) return filePart
       }
 
       const row = yield* db
@@ -992,13 +996,18 @@ export const layer: Layer.Layer<
     const filterRemovedProjection = (
       items: SessionV1.WithParts[],
       projection: Awaited<ReturnType<typeof readSessionJsonlProjection>>,
-    ) =>
-      items
+    ) => {
+      const fileMessages = new Map(projection.messages.map((item) => [item.info.id, item]))
+      return items
         .filter((item) => !projection.removedMessageIDs.has(item.info.id))
-        .map((item) => ({
-          ...item,
-          parts: item.parts.filter((part) => !projection.removedPartIDs.has(`${item.info.id}:${part.id}`)),
-        }))
+        .map((item) => {
+          const current = fileMessages.get(item.info.id) ?? item
+          return {
+            ...current,
+            parts: current.parts.filter((part) => !projection.removedPartIDs.has(`${current.info.id}:${part.id}`)),
+          }
+        })
+    }
 
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
       const session = yield* get(input.sessionID)
