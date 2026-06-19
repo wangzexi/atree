@@ -177,6 +177,8 @@ assets/
 
 不要写绝对路径。
 
+当前 OpenCode spike 中，data URL 文件 part 会先写入 `assets/`，再把 `session.jsonl` 里的 part URL 改成 `assets/...`。读取投影时会从相对路径恢复成 data URL，以兼容现有 UI 和 LLM 输入链路。
+
 ## `.agents/atree/meta.yaml` 的职责
 
 `.agents/atree/meta.yaml` 只描述目录级信息。

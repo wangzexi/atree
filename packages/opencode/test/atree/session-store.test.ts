@@ -181,6 +181,10 @@ describe("atree session store", () => {
 
     await writeSessionStore(session)
     await appendSessionJsonl(session, {
+      type: "message.updated",
+      message: { id: "msg_asset", sessionID: "ses_asset", role: "user", time: { created: 1 } },
+    })
+    await appendSessionJsonl(session, {
       type: "message.part.updated",
       part: {
         id: "prt_asset",
@@ -197,7 +201,11 @@ describe("atree session store", () => {
       path.join(directory, ".agents", "atree", "sessions", "ses_asset", "session.jsonl"),
       "utf8",
     )
-    const line = JSON.parse(raw.trim())
+    const lines = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    const line = lines[1]
     expect(line.assets).toHaveLength(1)
     expect(line.assets[0]).toMatchObject({
       partID: "prt_asset",
@@ -207,11 +215,20 @@ describe("atree session store", () => {
       size: 3,
     })
     expect(line.assets[0].path).toStartWith("assets/prt_asset-")
+    expect(line.part.url).toBe(line.assets[0].path)
+    expect(raw).not.toContain("data:image/png;base64")
 
     const asset = await fs.readFile(
       path.join(directory, ".agents", "atree", "sessions", "ses_asset", line.assets[0].path),
     )
     expect(asset.toString("utf8")).toBe("foo")
+
+    const messages = await readSessionJsonlMessages(session)
+    expect(messages[0]?.parts[0]).toMatchObject({
+      id: "prt_asset",
+      type: "file",
+      url: "data:image/png;base64,Zm9v",
+    })
   })
 
   test("replays session.jsonl into messages with parts", async () => {

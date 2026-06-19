@@ -114,6 +114,11 @@ type SessionAsset = {
   size: number
 }
 
+type MaterializedAssets = {
+  entry: Record<string, unknown>
+  assets: SessionAsset[]
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -156,57 +161,100 @@ function safeAssetStem(value: string | undefined) {
   return (value ?? "asset").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "asset"
 }
 
-function collectFileRecords(value: unknown, output: Record<string, unknown>[] = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectFileRecords(item, output)
-    return output
-  }
-  if (!isRecord(value)) return output
-  if (value.type === "file" && typeof value.url === "string" && value.url.startsWith("data:")) output.push(value)
-  for (const item of Object.values(value)) collectFileRecords(item, output)
-  return output
+function assetURL(value: string) {
+  return !path.isAbsolute(value) && value.split(/[\\/]/)[0] === "assets"
 }
 
-async function materializeDataURLAssets(info: SessionInfo, entry: Record<string, unknown>) {
+async function materializeFileRecord(
+  root: string,
+  assetsRoot: string,
+  file: Record<string, unknown>,
+): Promise<{ file: Record<string, unknown>; asset?: SessionAsset }> {
+  if (typeof file.url !== "string" || !file.url.startsWith("data:")) return { file }
+  const decoded = decodeDataURL(file.url)
+  if (!decoded) return { file }
+  const mime = typeof file.mime === "string" ? file.mime : decoded.mime
+  const filename = typeof file.filename === "string" ? file.filename : undefined
+  const partID = typeof file.id === "string" ? file.id : undefined
+  const messageID = typeof file.messageID === "string" ? file.messageID : undefined
+  const sha256 = createHash("sha256").update(decoded.buffer).digest("hex")
+  const stem = safeAssetStem(partID ?? filename)
+  const relative = path.join("assets", `${stem}-${sha256.slice(0, 16)}${extensionFor(mime, filename)}`)
+  const target = path.join(root, relative)
+  await fs.mkdir(assetsRoot, { recursive: true })
+  await writeBufferIfMissing(target, decoded.buffer)
+  const asset = {
+    partID,
+    messageID,
+    filename,
+    mime,
+    path: relative.split(path.sep).join("/"),
+    sha256,
+    size: decoded.buffer.byteLength,
+  } satisfies SessionAsset
+  return {
+    file: {
+      ...file,
+      mime,
+      url: asset.path,
+    },
+    asset,
+  }
+}
+
+async function materializeValue(value: unknown, root: string, assetsRoot: string, assets: SessionAsset[]): Promise<unknown> {
+  if (Array.isArray(value)) {
+    return Promise.all(value.map((item) => materializeValue(item, root, assetsRoot, assets)))
+  }
+  if (!isRecord(value)) return value
+  if (value.type === "file") {
+    const materialized = await materializeFileRecord(root, assetsRoot, value)
+    if (materialized.asset) assets.push(materialized.asset)
+    return materialized.file
+  }
+  const next: Record<string, unknown> = {}
+  for (const [key, child] of Object.entries(value)) {
+    next[key] = await materializeValue(child, root, assetsRoot, assets)
+  }
+  return next
+}
+
+async function materializeDataURLAssets(info: SessionInfo, entry: Record<string, unknown>): Promise<MaterializedAssets> {
   const root = sessionRoot(info)
   const assetsRoot = path.join(root, "assets")
   const assets: SessionAsset[] = []
-  for (const file of collectFileRecords(entry)) {
-    const decoded = decodeDataURL(file.url as string)
-    if (!decoded) continue
-    const mime = typeof file.mime === "string" ? file.mime : decoded.mime
-    const filename = typeof file.filename === "string" ? file.filename : undefined
-    const partID = typeof file.id === "string" ? file.id : undefined
-    const messageID = typeof file.messageID === "string" ? file.messageID : undefined
-    const sha256 = createHash("sha256").update(decoded.buffer).digest("hex")
-    const stem = safeAssetStem(partID ?? filename)
-    const relative = path.join("assets", `${stem}-${sha256.slice(0, 16)}${extensionFor(mime, filename)}`)
-    const target = path.join(root, relative)
-    await fs.mkdir(assetsRoot, { recursive: true })
-    await writeBufferIfMissing(target, decoded.buffer)
-    assets.push({
-      partID,
-      messageID,
-      filename,
-      mime,
-      path: relative.split(path.sep).join("/"),
-      sha256,
-      size: decoded.buffer.byteLength,
-    })
-  }
-  return assets
+  const materialized = await materializeValue(entry, root, assetsRoot, assets)
+  return { entry: materialized as Record<string, unknown>, assets }
 }
 
 export async function appendSessionJsonl(info: SessionInfo, entry: Record<string, unknown>) {
   await ensureSessionPayloadFiles(info)
-  const assets = await materializeDataURLAssets(info, entry)
+  const materialized = await materializeDataURLAssets(info, entry)
   const line = JSON.stringify({
     version: 1,
     at: Date.now(),
-    ...entry,
-    ...(assets.length > 0 ? { assets } : {}),
+    ...materialized.entry,
+    ...(materialized.assets.length > 0 ? { assets: materialized.assets } : {}),
   })
   await fs.appendFile(path.join(sessionRoot(info), "session.jsonl"), `${line}\n`)
+}
+
+async function resolveAssetURL(info: SessionInfo, part: SessionV1.Part) {
+  if (part.type !== "file") return part
+  if (!assetURL(part.url)) return part
+  const root = sessionRoot(info)
+  const assetsRoot = path.resolve(root, "assets")
+  const assetPath = path.resolve(root, part.url)
+  if (assetPath !== assetsRoot && !assetPath.startsWith(`${assetsRoot}${path.sep}`)) return part
+  const buffer = await fs.readFile(assetPath).catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+    throw error
+  })
+  if (!buffer) return part
+  return {
+    ...part,
+    url: `data:${part.mime};base64,${buffer.toString("base64")}`,
+  } satisfies SessionV1.FilePart
 }
 
 function upsertPart(parts: SessionV1.Part[], part: SessionV1.Part) {
@@ -257,7 +305,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     }
 
     if (entry.type === "message.part.updated" && entry.part && typeof entry.part === "object") {
-      const part = entry.part as SessionV1.Part
+      const part = await resolveAssetURL(info, entry.part as SessionV1.Part)
       const message = messages.get(part.messageID)
       if (message) {
         upsertPart(message.parts, part)

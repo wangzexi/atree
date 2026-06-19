@@ -56,6 +56,7 @@ describe("atree directory self-contained state", () => {
 
       const messageID = MessageID.ascending()
       const partID = PartID.ascending()
+      const filePartID = PartID.ascending()
       yield* sessions.updateMessage({
         id: messageID,
         sessionID: active.id,
@@ -72,6 +73,15 @@ describe("atree directory self-contained state", () => {
         sessionID: active.id,
         type: "text",
         text: "message restored from session.jsonl",
+      })
+      yield* sessions.updatePart({
+        id: filePartID,
+        messageID,
+        sessionID: active.id,
+        type: "file",
+        mime: "image/png",
+        filename: "self-contained.png",
+        url: "data:image/png;base64,c2VsZi1jb250YWluZWQ=",
       })
 
       const schedule = yield* schedules.create({
@@ -90,6 +100,10 @@ describe("atree directory self-contained state", () => {
       expect((yield* Effect.promise(() => fs.stat(path.join(activeRoot, "session.jsonl")))).isFile()).toBe(true)
       expect((yield* Effect.promise(() => fs.stat(path.join(activeRoot, "schedule.json")))).isFile()).toBe(true)
       expect((yield* Effect.promise(() => fs.stat(path.join(activeRoot, "todo.json")))).isFile()).toBe(true)
+      expect(yield* Effect.promise(() => fs.readdir(path.join(activeRoot, "assets")))).toHaveLength(1)
+      expect(yield* Effect.promise(() => fs.readFile(path.join(activeRoot, "session.jsonl"), "utf8"))).not.toContain(
+        "data:image/png;base64",
+      )
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, active.id))).toHaveLength(1)
       expect(yield* Effect.promise(() => readSessionTodoState(instance.directory, active.id))).toHaveLength(1)
 
@@ -125,6 +139,11 @@ describe("atree directory self-contained state", () => {
       const messages = yield* sessions.messages({ sessionID: active.id })
       expect(messages).toHaveLength(1)
       expect(messages[0]?.parts[0]).toMatchObject({ id: partID, text: "message restored from session.jsonl" })
+      expect(messages[0]?.parts[1]).toMatchObject({
+        id: filePartID,
+        type: "file",
+        url: "data:image/png;base64,c2VsZi1jb250YWluZWQ=",
+      })
 
       const restoredSchedules = yield* schedules.list(active.id)
       expect(restoredSchedules).toHaveLength(1)

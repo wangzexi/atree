@@ -206,6 +206,7 @@ some-directory/
 - `.agents/atree/` 是 atree 专属事实源。
 - `session.jsonl` 是会话原始事件流，不只是渲染后的聊天文本。
 - `schedule.json`、`todo.json` 是当前 OpenCode spike 的过渡实现，用来先把会话工具状态放回会话目录；长期可以折叠进 `meta.yaml` 或 session event。
+- data URL 文件 part 已经会落盘到 `assets/`，`session.jsonl` 只保留 `assets/...` 相对路径；读取投影会按需恢复成现有 UI/LLM 链路可用的 data URL。
 - SQLite 只能作为可重建缓存，不应是唯一事实源。
 - `assets/` 保存会话长期材料，不使用绝对路径引用。
 
