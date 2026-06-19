@@ -32,7 +32,7 @@ export const Event = {
 
 export interface Interface {
   readonly update: (input: { sessionID: SessionID; todos: Info[] }) => Effect.Effect<void>
-  readonly get: (sessionID: SessionID) => Effect.Effect<Info[]>
+  readonly get: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<Info[]>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionTodo") {}
@@ -43,7 +43,10 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const { db } = yield* Database.Service
 
-    const sessionDirectory = Effect.fn("Todo.sessionDirectory")(function* (sessionID: SessionID) {
+    const sessionDirectory = Effect.fn("Todo.sessionDirectory")(function* (
+      sessionID: SessionID,
+      fallbackDirectory?: string,
+    ) {
       const row = yield* db
         .select({ directory: SessionTable.directory })
         .from(SessionTable)
@@ -51,6 +54,11 @@ export const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (row?.directory) return row.directory
+
+      if (fallbackDirectory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(fallbackDirectory, sessionID))
+        if (fileSession) return fileSession.directory
+      }
 
       const instance = yield* InstanceRef
       if (!instance) return
@@ -84,8 +92,8 @@ export const layer = Layer.effect(
       yield* events.publish(Event.Updated, input)
     })
 
-    const get = Effect.fn("Todo.get")(function* (sessionID: SessionID) {
-      const directory = yield* sessionDirectory(sessionID)
+    const get = Effect.fn("Todo.get")(function* (sessionID: SessionID, options?: { directory?: string }) {
+      const directory = yield* sessionDirectory(sessionID, options?.directory)
       if (directory) {
         const projection = yield* Effect.promise(() => readSessionTodoProjection(directory, sessionID))
         if (projection.hasState) return projection.todos

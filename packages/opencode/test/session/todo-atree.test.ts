@@ -1,4 +1,7 @@
 import { describe, expect } from "bun:test"
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
 import { Database } from "@opencode-ai/core/database/database"
 import { TodoTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
@@ -86,6 +89,42 @@ describe("atree todo state", () => {
 
       expect(yield* todo.get(sessionID)).toEqual([
         { content: "restore file todo", status: "in_progress", priority: "medium" },
+      ])
+    }),
+  )
+
+  it.effect("reads todo state from an explicit directory without an instance context", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-explicit-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const sessionID = "ses_explicit_todo" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-todo",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit todo",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionTodoState(directory, sessionID, [
+          { content: "restore explicit todo", status: "pending", priority: "high" },
+        ]),
+      )
+
+      expect(yield* todo.get(sessionID, { directory })).toEqual([
+        { content: "restore explicit todo", status: "pending", priority: "high" },
       ])
     }),
   )
