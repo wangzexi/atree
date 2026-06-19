@@ -252,7 +252,11 @@ archived_at: 2026-06-15T10:30:00+08:00
 
 删除才可以移除整个会话目录。
 
-MVP 可以先不做真正删除，只做归档。
+当前 OpenCode spike 已经实现真删除的核心语义：
+
+- 删除 session 时移除 `.agents/atree/sessions/<session-id>/`。
+- 删除 session 时清理该 session 的 schedule runtime/cache。
+- 归档仍然只更新 `archived_at`，不删除会话目录。
 
 ## 与当前实现的关系
 
