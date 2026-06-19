@@ -115,10 +115,12 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
 
-      const session = params.task_id
-        ? yield* sessions.get(SessionID.make(params.task_id)).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-        : undefined
       const parent = yield* sessions.get(ctx.sessionID)
+      const session = params.task_id
+        ? yield* sessions
+            .get(SessionID.make(params.task_id), { directory: parent.directory })
+            .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+        : undefined
       const childPermission = deriveSubagentSessionPermission({
         parentSessionPermission: parent.permission ?? [],
         subagent: next,
@@ -142,6 +144,7 @@ export const TaskTool = Tool.define(
           parentID: ctx.sessionID,
           title: params.description + ` (@${next.name} subagent)`,
           agent: next.name,
+          directory: parent.directory,
           permission: [
             ...childPermission,
             ...childToolDenies.filter(
@@ -155,7 +158,7 @@ export const TaskTool = Tool.define(
         }))
 
       const found = yield* sessions
-        .findMessage(ctx.sessionID, (message) => message.info.id === ctx.messageID)
+        .findMessage(ctx.sessionID, (message) => message.info.id === ctx.messageID, { directory: parent.directory })
         .pipe(Effect.orDie)
       if (Option.isNone(found)) return yield* Effect.fail(new Error("Message not found"))
       const msg = found.value
@@ -201,7 +204,7 @@ export const TaskTool = Tool.define(
         state: "completed" | "error",
         text: string,
       ) {
-        const currentParent = yield* sessions.get(ctx.sessionID)
+        const currentParent = yield* sessions.get(ctx.sessionID, { directory: parent.directory })
         yield* ops
           .prompt({
             sessionID: ctx.sessionID,

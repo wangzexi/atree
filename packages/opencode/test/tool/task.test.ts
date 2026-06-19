@@ -2,6 +2,8 @@ import { afterEach, describe, expect } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
+import fs from "fs/promises"
+import path from "path"
 import { Agent } from "../../src/agent/agent"
 import { BackgroundJob } from "@/background/job"
 import { EventV2Bridge } from "@/event-v2-bridge"
@@ -18,10 +20,11 @@ import { TaskTool, type TaskPromptOps } from "../../src/tool/task"
 import { Truncate } from "@/tool/truncate"
 import { ToolRegistry } from "@/tool/registry"
 import { RuntimeFlags } from "@/effect/runtime-flags"
-import { disposeAllInstances } from "../fixture/fixture"
+import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { readSessionStore } from "@/atree/session-store"
 
 afterEach(async () => {
   await disposeAllInstances()
@@ -245,6 +248,69 @@ describe("tool.task", () => {
       expect(result.output).toContain(`<task id="${child.id}" state="completed">`)
       expect(seen?.sessionID).toBe(child.id)
       expect(seen?.variant).toBe("xhigh")
+    }),
+  )
+
+  it.instance("execute creates child sessions in the parent session directory", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const nodeDirectory = path.join(instance.directory, "node-a")
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      const chat = yield* sessions.create({ title: "Node parent", directory: nodeDirectory })
+      const user = yield* sessions.updateMessage(
+        {
+          id: MessageID.ascending(),
+          role: "user",
+          sessionID: chat.id,
+          agent: "build",
+          model: ref,
+          time: { created: Date.now() },
+        },
+        { directory: nodeDirectory },
+      )
+      const assistant: SessionV1.Assistant = {
+        id: MessageID.ascending(),
+        role: "assistant",
+        parentID: user.id,
+        sessionID: chat.id,
+        mode: "build",
+        agent: "build",
+        cost: 0,
+        path: { cwd: nodeDirectory, root: instance.directory },
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        modelID: ref.modelID,
+        providerID: ref.providerID,
+        variant: "xhigh",
+        time: { created: Date.now() },
+      }
+      yield* sessions.updateMessage(assistant, { directory: nodeDirectory })
+
+      const tool = yield* TaskTool
+      const def = yield* tool.init()
+      const result = yield* def.execute(
+        {
+          description: "inspect node",
+          prompt: "inspect this node",
+          subagent_type: "general",
+        },
+        {
+          sessionID: chat.id,
+          messageID: assistant.id,
+          agent: "build",
+          abort: new AbortController().signal,
+          extra: { promptOps: stubOps() },
+          messages: [],
+          metadata: () => Effect.void,
+          ask: () => Effect.void,
+        },
+      )
+
+      const childID = result.metadata.sessionId as SessionID
+      const child = yield* sessions.get(childID, { directory: nodeDirectory })
+      expect(child.parentID).toBe(chat.id)
+      expect(child.directory).toBe(nodeDirectory)
+      expect(yield* Effect.promise(() => readSessionStore(nodeDirectory, childID))).toBeDefined()
     }),
   )
 
