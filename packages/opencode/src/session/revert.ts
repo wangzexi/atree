@@ -12,6 +12,7 @@ import { SessionSummary } from "./summary"
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
+  directory: Schema.optional(Schema.String),
   messageID: MessageID,
   partID: Schema.optional(PartID),
 })
@@ -19,7 +20,7 @@ export type RevertInput = Schema.Schema.Type<typeof RevertInput>
 
 export interface Interface {
   readonly revert: (input: RevertInput) => Effect.Effect<Session.Info, Session.BusyError>
-  readonly unrevert: (input: { sessionID: SessionID }) => Effect.Effect<Session.Info, Session.BusyError>
+  readonly unrevert: (input: { sessionID: SessionID; directory?: string }) => Effect.Effect<Session.Info, Session.BusyError>
   readonly cleanup: (session: Session.Info) => Effect.Effect<void>
 }
 
@@ -37,7 +38,7 @@ export const layer = Layer.effect(
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
       yield* state.assertNotBusy(input.sessionID)
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       const all = yield* sessions
         .messages({ sessionID: input.sessionID, directory: session.directory })
         .pipe(Effect.orDie)
@@ -90,10 +91,10 @@ export const layer = Layer.effect(
       return yield* sessions.get(input.sessionID, { directory: session.directory }).pipe(Effect.orDie)
     })
 
-    const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID }) {
+    const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID; directory?: string }) {
       yield* Effect.logInfo("unreverting", { sessionID: input.sessionID })
       yield* state.assertNotBusy(input.sessionID)
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       if (!session.revert) return session
       if (session.revert.snapshot) yield* snap.restore(session.revert.snapshot)
       yield* sessions.clearRevert(input.sessionID, { directory: session.directory })

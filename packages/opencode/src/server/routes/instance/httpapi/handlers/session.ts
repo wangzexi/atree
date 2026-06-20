@@ -446,13 +446,15 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof RevertPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(revertSvc.revert({ sessionID: ctx.params.sessionID, ...ctx.payload }))
+      const info = yield* requireSession(ctx.params.sessionID)
+      return yield* SessionError.mapBusy(
+        revertSvc.revert({ sessionID: ctx.params.sessionID, directory: info.directory, ...ctx.payload }),
+      )
     })
 
     const unrevert = Effect.fn("SessionHttpApi.unrevert")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID }))
+      const info = yield* requireSession(ctx.params.sessionID)
+      return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID, directory: info.directory }))
     })
 
     const permissionRespond = Effect.fn("SessionHttpApi.permissionRespond")(function* (ctx: {
