@@ -220,6 +220,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - todo/schedule 的无显式目录解析不再直接信任 SQLite 中缓存的 `SessionTable.directory`；只有该目录仍能读到对应 `meta.yaml` 时才接受，否则继续从当前 instance 或持久化 root 查找真实 file-backed session。
 - opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、仍有效的 SQLite 缓存目录、持久化 atree root 扫描。复制或移动 `.agents/atree/` 后，如果旧 SQLite 目录已经失效，相关读写会继续定位到当前目录事实源。
 - core `ToolOutputStore` 在能通过 `SessionStore` 定位到 file-backed session 时，会把超长工具输出写入该会话的 `assets/tool-output/`；不能定位会话目录时仍回退到全局 `tool-output`，保持旧链路兼容。
+- 非 VCS 项目的 plan 文件不再写入全局 `plans/`，而是写入当前会话的 `assets/plans/`；git 项目仍保留原有 `.opencode/plans/` 行为。plan agent 默认权限已经允许编辑会话内 `assets/plans/*.md`。
 - schedule 执行后的 `lastRanAt`、`lastRunStatus` 会回写到目录 `schedule.json`，重启后可以恢复运行状态。
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。
 - schedule 的运行 timer 会携带创建/恢复时的目录上下文；一次性自动化消息触发后，会在同一个目录的 `schedule.json` 中清空，不再依赖全局 SQLite session cache 推断目录。
@@ -231,7 +232,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 全局 SQLite 仍然存在，并且仍承担运行时投影和部分 OpenCode 兼容链路。
 - `EventV2` 的 durable event log 还没有完整迁移到每个目录的 `session.jsonl`；当前 core reader 已能恢复 prompted 用户消息和 assistant step/text/reasoning/tool，但 permission/question 等结构仍待补齐。
 - projector、部分 CLI/旧同步导出仍以 SQLite 为中心；`MessageV2.page/get/parts` 和 session/todo/schedule 的常用读取链路已经会先尝试 file-backed session resolver。
-- 非 VCS plan 文件、snapshot/worktree 等派生产物仍会落到全局 data dir；它们需要后续单独设计迁移路径，不能在没有 session/location 上下文的情况下直接搬进目录。
+- snapshot/worktree 等派生产物仍会落到全局 data dir；它们需要后续单独设计迁移路径，不能在没有 session/location 上下文的情况下直接搬进目录。
 - `schedule.json`、`todo.json` 仍是 OpenCode spike 的过渡文件，长期应折叠进 Pi/core session 事件或更清晰的 atree 扩展协议。
 
 ## `.agents/atree/meta.yaml` 的职责

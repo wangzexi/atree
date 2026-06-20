@@ -1,4 +1,4 @@
-import { describe, expect } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
@@ -54,6 +54,59 @@ const awaitDeferred = <T>(deferred: Deferred.Deferred<T>, message: string) =>
   )
 
 const remove = (id: SessionID) => SessionNs.use.remove(id)
+
+describe("Session.plan", () => {
+  test("stores non-VCS plans inside the session assets directory", () => {
+    const sessionID = "ses_plan_assets" as SessionID
+    const plan = SessionNs.plan(
+      { id: sessionID, slug: "daily-plan", time: { created: 123 } },
+      {
+        directory: "/workspace/node",
+        worktree: "/",
+        project: {
+          id: "global" as never,
+          worktree: "/",
+          vcs: undefined,
+          sandboxes: [],
+          time: { created: 1, updated: 1 },
+        },
+      },
+    )
+
+    expect(plan).toBe(
+      path.join(
+        "/workspace/node",
+        ".agents",
+        "atree",
+        "sessions",
+        sessionID,
+        "assets",
+        "plans",
+        "123-daily-plan.md",
+      ),
+    )
+  })
+
+  test("keeps git project plans in the worktree .opencode directory", () => {
+    const sessionID = "ses_plan_git" as SessionID
+    const plan = SessionNs.plan(
+      { id: sessionID, slug: "git-plan", time: { created: 456 } },
+      {
+        directory: "/workspace/repo/packages/app",
+        worktree: "/workspace/repo",
+        project: {
+          id: "proj_git" as never,
+          worktree: "/workspace/repo",
+          vcs: "git",
+          sandboxes: [],
+          time: { created: 1, updated: 1 },
+        },
+      },
+    )
+
+    expect(plan).toBe(path.join("/workspace/repo", ".opencode", "plans", "456-git-plan.md"))
+  })
+})
 
 describe("session.created event", () => {
   it.instance("should emit session.created event when session is created", () =>
