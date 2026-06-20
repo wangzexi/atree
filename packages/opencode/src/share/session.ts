@@ -8,8 +8,8 @@ import { ShareNext } from "./share-next"
 
 export interface Interface {
   readonly create: (input?: Session.CreateInput) => Effect.Effect<Session.Info>
-  readonly share: (sessionID: SessionID) => Effect.Effect<{ url: string }, unknown>
-  readonly unshare: (sessionID: SessionID) => Effect.Effect<void, unknown>
+  readonly share: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<{ url: string }, unknown>
+  readonly unshare: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void, unknown>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionShare") {}
@@ -23,18 +23,18 @@ export const layer = Layer.effect(
     const scope = yield* Scope.Scope
     const flags = yield* RuntimeFlags.Service
 
-    const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID) {
+    const share = Effect.fn("SessionShare.share")(function* (sessionID: SessionID, options?: { directory?: string }) {
       const conf = yield* cfg.get()
       if (conf.share === "disabled") throw new Error("Sharing is disabled in configuration")
-      const current = yield* session.get(sessionID)
+      const current = yield* session.get(sessionID, { directory: options?.directory })
       const result = yield* shareNext.create(sessionID)
       yield* session.setShare({ sessionID, directory: current.directory, share: { url: result.url } })
       return result
     })
 
-    const unshare = Effect.fn("SessionShare.unshare")(function* (sessionID: SessionID) {
+    const unshare = Effect.fn("SessionShare.unshare")(function* (sessionID: SessionID, options?: { directory?: string }) {
       yield* shareNext.remove(sessionID)
-      const current = yield* session.get(sessionID)
+      const current = yield* session.get(sessionID, { directory: options?.directory })
       yield* session.setShare({ sessionID, directory: current.directory, share: undefined })
     })
 
@@ -43,7 +43,7 @@ export const layer = Layer.effect(
       if (result.parentID) return result
       const conf = yield* cfg.get()
       if (!(flags.autoShare || conf.share === "auto")) return result
-      yield* share(result.id).pipe(Effect.ignore, Effect.forkIn(scope))
+      yield* share(result.id, { directory: result.directory }).pipe(Effect.ignore, Effect.forkIn(scope))
       return result
     })
 

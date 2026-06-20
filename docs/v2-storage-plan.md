@@ -197,6 +197,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - HTTP prompt、promptAsync、command、shell、init、summarize/loop 入口会先解析当前 session 的目录，并把目录上下文显式传给执行链路，减少模型执行写回旧 SQLite/cache 目录的可能。
 - Summary diff/summarize 读取和写入也接受目录上下文；HTTP diff 会用解析出的当前 session 目录读取消息摘要，避免同 session id 的旧缓存目录影响 diff 展示。
 - Revert/unrevert 也接受目录上下文；HTTP revert/unrevert 会把当前 session 目录传给回滚链路，让 revert 状态、message/part 清理继续落在目录会话内。
+- Share/unshare 写入 share 元数据时也接受目录上下文；HTTP share/unshare 会把当前 session 目录传给 metadata 写入链路。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
 - plan/reminder 相关 synthetic 消息和 part 写入开始携带当前 session 目录上下文，避免 plan agent 切换、plan_exit 工具产生的内部消息落到错误目录。
 - processor 的重复工具调用检测会从目录会话历史读取 assistant tool parts；即使全局 SQLite `part` 投影被删除，只要 `session.jsonl` 仍在，doom-loop 检测仍可工作。
