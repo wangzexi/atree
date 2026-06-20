@@ -2,7 +2,7 @@ export * as SessionTodo from "./todo"
 
 import { asc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
-import { findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
+import { appendSessionJsonl, findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "../atree/todo-store"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
@@ -91,7 +91,23 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(Effect.orDie)
-      if (session) yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
+      if (session) {
+        yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
+        yield* Effect.promise(() =>
+          appendSessionJsonl(session, {
+            type: "todo.updated",
+            sessionID: input.sessionID,
+            todos: input.todos,
+          }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append todo event to atree session log", {
+              sessionID: input.sessionID,
+              cause,
+            }),
+          ),
+        )
+      }
       yield* events.publish(Event.Updated, input)
     })
 

@@ -30,6 +30,10 @@ function sessionStatePath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "todo.json")
 }
 
+function sessionJsonlPath(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
+}
+
 async function writeAtomic(target: string, value: SessionTodoState | LegacyTodoState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
@@ -52,6 +56,31 @@ async function readLegacyState(target: string): Promise<LegacyTodoState> {
     }
     throw error
   }
+}
+
+async function readSessionJsonlProjection(directory: string, sessionID: string) {
+  const raw = await fs.readFile(sessionJsonlPath(directory, sessionID), "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  let hasState = false
+  let todos: StoredTodo[] = []
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (entry.type !== "todo.updated") continue
+    if (entry.sessionID !== sessionID) continue
+    hasState = true
+    todos = Array.isArray(entry.todos) ? entry.todos.filter(isStoredTodo) : []
+  }
+
+  return { hasState, todos }
 }
 
 function isStoredTodo(value: unknown): value is StoredTodo {
@@ -98,7 +127,7 @@ export async function readSessionTodoProjection(directory: string, sessionID: st
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
       const state = await readLegacyState(legacyStatePath(directory))
-      if (!Object.hasOwn(state.sessions, sessionID)) return { hasState: false, todos: [] as StoredTodo[] }
+      if (!Object.hasOwn(state.sessions, sessionID)) return readSessionJsonlProjection(directory, sessionID)
       const todos = state.sessions[sessionID]
       return { hasState: true, todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [] }
     }

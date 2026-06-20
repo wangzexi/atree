@@ -396,6 +396,10 @@ async function appendJsonl(target: string, entries: Record<string, unknown>[]) {
   await fs.appendFile(target, entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n")
 }
 
+export async function appendSessionJsonl(info: SessionSchema.Info, entry: Record<string, unknown>) {
+  await appendJsonl(sessionJsonl(info), [entry])
+}
+
 async function writeBufferIfMissing(target: string, content: Buffer) {
   try {
     await fs.writeFile(target, content, { flag: "wx" })

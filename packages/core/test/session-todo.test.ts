@@ -144,6 +144,13 @@ describe("SessionTodo", () => {
       })
 
       yield* db.delete(TodoTable).where(eq(TodoTable.session_id, fileSessionID)).run().pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        rm(path.join(directory, ".agents", "atree", "sessions", fileSessionID, "todo.json"), { force: true }),
+      )
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: true,
+        todos: state,
+      })
       expect(yield* todos.get(fileSessionID)).toEqual(state)
     }),
   )
