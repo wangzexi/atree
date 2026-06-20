@@ -260,6 +260,10 @@ function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
 
+function sessionRootByID(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID)
+}
+
 function sessionJsonl(info: SessionSchema.Info) {
   return path.join(sessionRoot(info), "session.jsonl")
 }
@@ -314,6 +318,30 @@ export async function writeSessionStore(info: SessionSchema.Info) {
   await fs.mkdir(path.join(root, "assets"), { recursive: true })
   await writeIfMissing(path.join(root, "session.jsonl"), "")
   await writeAtomic(path.join(root, "meta.yaml"), metaYaml(info))
+}
+
+export async function ensureSessionPayloadFilesByID(directory: string, sessionID: string) {
+  await writeIfMissing(path.join(directory, ".agents", "atree", "meta.yaml"), 'version: 1\nsource: "atree"\n')
+  const root = sessionRootByID(directory, sessionID)
+  await fs.mkdir(path.join(root, "assets"), { recursive: true })
+  await writeIfMissing(path.join(root, "session.jsonl"), "")
+}
+
+export async function touchSessionStore(
+  directory: string,
+  sessionID: SessionSchema.ID,
+  updatedAt = Date.now(),
+) {
+  const session = await readSessionStore(directory, sessionID)
+  if (!session) return false
+  await writeSessionStore({
+    ...session,
+    time: {
+      ...session.time,
+      updated: DateTime.makeUnsafe(updatedAt),
+    },
+  })
+  return true
 }
 
 function promptPartID(messageID: SessionMessage.ID) {
