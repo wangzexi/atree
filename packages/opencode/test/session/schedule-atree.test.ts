@@ -1156,6 +1156,21 @@ describe("atree schedule restore", () => {
       const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
       expect(schedules).toEqual([])
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "schedule.deleted",
+          scheduleID: "sch_archived_stale",
+          sessionID,
+          reason: "archived",
+        }),
+      )
     }),
   )
 
@@ -1224,6 +1239,21 @@ describe("atree schedule restore", () => {
       const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
       expect(schedules).toEqual([])
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "schedule.deleted",
+          scheduleID: "sch_stale_cache",
+          sessionID,
+          reason: "archived",
+        }),
+      )
 
       const row = yield* db
         .select({ title: SessionTable.title, archived: SessionTable.time_archived })

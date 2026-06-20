@@ -554,6 +554,27 @@ export const layer = Layer.effect(
         ),
       )
 
+    const clearArchivedScheduleState = Effect.fn("Schedule.clearArchivedScheduleState")(function* (
+      sessionID: SessionID,
+      directory: string,
+    ) {
+      const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
+      yield* clearRuntimeState(sessionID)
+      for (const schedule of stored) {
+        yield* appendScheduleSessionEventBestEffort(
+          sessionID,
+          {
+            type: "schedule.deleted",
+            scheduleID: schedule.id,
+            sessionID,
+            reason: "archived",
+          },
+          directory,
+        )
+      }
+      yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
+    })
+
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
       sessionID: SessionID,
       directoryHint?: string,
@@ -709,9 +730,7 @@ export const layer = Layer.effect(
       const archiveState = yield* sessionArchiveState(sessionID, directoryHint)
       if (!archiveState) return [] as Info[]
       if (archiveState.archived) {
-        stopSessionTimers(timers, sessionID)
-        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
-        yield* Effect.promise(() => writeSessionScheduleState(archiveState.directory, sessionID, []))
+        yield* clearArchivedScheduleState(sessionID, archiveState.directory)
         return [] as Info[]
       }
       const directory = archiveState.directory
@@ -766,9 +785,7 @@ export const layer = Layer.effect(
       const sessionID = row.session_id as SessionID
       const archiveState = yield* sessionArchiveState(sessionID)
       if (archiveState?.archived) {
-        stopSessionTimers(timers, sessionID)
-        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
-        yield* Effect.promise(() => writeSessionScheduleState(archiveState.directory, sessionID, []))
+        yield* clearArchivedScheduleState(sessionID, archiveState.directory)
         continue
       }
       const kind = (row.kind ?? "recurring") as Kind
@@ -807,9 +824,7 @@ export const layer = Layer.effect(
       const directoryHint = options?.directory
       const archiveState = yield* sessionArchiveState(sessionID, directoryHint)
       if (archiveState?.archived) {
-        stopSessionTimers(timers, sessionID)
-        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
-        yield* Effect.promise(() => writeSessionScheduleState(archiveState.directory, sessionID, []))
+        yield* clearArchivedScheduleState(sessionID, archiveState.directory)
         return [] as Info[]
       }
       const rows = yield* db
