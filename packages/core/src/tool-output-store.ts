@@ -5,7 +5,9 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 import { Config } from "./config"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
+import { ensureSessionPayloadFilesByID, readSessionStore } from "./atree/session-store"
 import { SessionSchema } from "./session/schema"
+import { SessionStore } from "./session/store"
 import { Identifier } from "./util/identifier"
 import type { ToolOutput } from "@opencode-ai/llm"
 
@@ -109,7 +111,8 @@ export const layer = Layer.effect(
     const fs = yield* FSUtil.Service
     const global = yield* Global.Service
     const config = yield* Effect.serviceOption(Config.Service)
-    const directory = path.join(global.data, MANAGED_DIRECTORY)
+    const sessions = yield* Effect.serviceOption(SessionStore.Service)
+    const globalDirectory = path.join(global.data, MANAGED_DIRECTORY)
     const limits = Effect.fn("ToolOutputStore.limits")(function* () {
       if (Option.isNone(config)) return { maxLines: MAX_LINES, maxBytes: MAX_BYTES }
       const entries = yield* config.value.entries().pipe(Effect.catch(() => Effect.succeed([] as Config.Entry[])))
@@ -120,7 +123,20 @@ export const layer = Layer.effect(
       return { maxLines: configured.max_lines ?? MAX_LINES, maxBytes: configured.max_bytes ?? MAX_BYTES }
     })
 
-    const write = Effect.fn("ToolOutputStore.write")(function* (content: string) {
+    const sessionDirectory = Effect.fn("ToolOutputStore.sessionDirectory")(function* (sessionID: SessionSchema.ID) {
+      if (Option.isNone(sessions)) return
+      const session = yield* sessions.value.get(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      if (!session) return
+      const fileSession = yield* Effect.promise(() => readSessionStore(session.location.directory, sessionID)).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+      if (!fileSession) return
+      yield* Effect.promise(() => ensureSessionPayloadFilesByID(fileSession.location.directory, sessionID))
+      return path.join(fileSession.location.directory, ".agents", "atree", "sessions", sessionID, "assets", MANAGED_DIRECTORY)
+    })
+
+    const write = Effect.fn("ToolOutputStore.write")(function* (content: string, sessionID: SessionSchema.ID) {
+      const directory = (yield* sessionDirectory(sessionID)) ?? globalDirectory
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
@@ -149,7 +165,7 @@ export const layer = Layer.effect(
           outputPaths: [],
         }
 
-      const outputPath = yield* write(contextual)
+      const outputPath = yield* write(contextual, input.sessionID)
       const marker = `... output truncated; full content saved to ${outputPath} ...`
 
       return {
@@ -168,11 +184,11 @@ export const layer = Layer.effect(
     })
 
     const cleanup = Effect.fn("ToolOutputStore.cleanup")(function* () {
-      const entries = yield* fs.readDirectory(directory).pipe(Effect.catch(() => Effect.succeed([])))
+      const entries = yield* fs.readDirectory(globalDirectory).pipe(Effect.catch(() => Effect.succeed([])))
       const cutoff = Date.now() - Duration.toMillis(RETENTION)
       for (const entry of entries) {
         if (!entry.startsWith("tool_")) continue
-        const file = path.join(directory, entry)
+        const file = path.join(globalDirectory, entry)
         const info = yield* fs.stat(file).pipe(Effect.catch(() => Effect.void))
         const modified = info?.mtime.pipe(
           Option.map((date) => date.getTime()),

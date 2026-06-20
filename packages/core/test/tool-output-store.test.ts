@@ -1,11 +1,15 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Cause, Effect, Exit, Fiber, Layer, Option } from "effect"
+import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { Config } from "@opencode-ai/core/config"
 import { ConfigToolOutput } from "@opencode-ai/core/config/tool-output"
+import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { Project } from "@opencode-ai/core/project"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionStore } from "@opencode-ai/core/session/store"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
@@ -78,6 +82,64 @@ describe("ToolOutputStore", () => {
         expect(JSON.parse(yield* fs.readFileString(result.outputPaths[0]))).toEqual(structured)
         expect(result.output.content).toHaveLength(1)
       }),
+    ),
+  )
+
+  it.live("stores oversized output inside a file-backed session assets directory", () =>
+    Effect.acquireUseRelease(
+      Effect.all({
+        data: Effect.promise(() => tmpdir()),
+        directory: Effect.promise(() => tmpdir()),
+      }),
+      ({ data, directory }) =>
+        Effect.gen(function* () {
+          const info = {
+            id: sessionID,
+            projectID: Project.ID.global,
+            title: "Tool output",
+            location: { directory: AbsolutePath.make(directory.path) },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }
+          yield* Effect.promise(() => writeSessionStore(info))
+
+          const sessions = Layer.succeed(
+            SessionStore.Service,
+            SessionStore.Service.of({
+              get: () => Effect.succeed(info),
+              context: () => Effect.succeed([]),
+              runnerContext: () => Effect.succeed([]),
+              message: () => Effect.succeed(undefined),
+            }),
+          )
+          const storeLayer = ToolOutputStore.layer.pipe(
+            Layer.provide(FSUtil.defaultLayer),
+            Layer.provide(Global.layerWith({ data: data.path })),
+            Layer.provide(sessions),
+          )
+          const result = yield* Effect.gen(function* () {
+            const store = yield* ToolOutputStore.Service
+            return yield* store.bound({
+              sessionID,
+              toolCallID: "call-session-assets",
+              output: { structured: {}, content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
+            })
+          }).pipe(Effect.provide(storeLayer))
+
+          expect(result.outputPaths).toHaveLength(1)
+          const outputPath = result.outputPaths[0]
+          expect(outputPath).toContain(
+            path.join(directory.path, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"),
+          )
+          expect(yield* Effect.promise(() => Bun.file(outputPath).text())).toBe("x".repeat(ToolOutputStore.MAX_BYTES + 1))
+          expect(yield* Effect.promise(() => Bun.file(path.join(data.path, "tool-output")).exists())).toBe(false)
+        }),
+      ({ data, directory }) =>
+        Effect.all([
+          Effect.promise(() => data[Symbol.asyncDispose]()),
+          Effect.promise(() => directory[Symbol.asyncDispose]()),
+        ]).pipe(Effect.ignore),
     ),
   )
 
