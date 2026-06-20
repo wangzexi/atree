@@ -303,6 +303,9 @@ export const layer = Layer.effect(
           )
           .pipe(Effect.orDie)
         yield* events.publish(Event.Ran, { scheduleID, sessionID, status: runStatus, ranAt })
+        const timer = timers.get(scheduleID)
+        const nextRun =
+          timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
         yield* appendScheduleSessionEventBestEffort(
           sessionID,
           {
@@ -311,6 +314,7 @@ export const layer = Layer.effect(
             sessionID,
             status: runStatus,
             ranAt,
+            nextRun,
           },
           options?.directory,
         )

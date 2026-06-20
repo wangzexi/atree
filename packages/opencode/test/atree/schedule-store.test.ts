@@ -178,6 +178,7 @@ describe("atree schedule store", () => {
       sessionID: "ses_jsonl",
       status: "ran",
       ranAt: 3,
+      nextRun: 4,
     })
 
     expect(await readSessionScheduleState(directory, "ses_jsonl")).toEqual([
@@ -185,6 +186,7 @@ describe("atree schedule store", () => {
         ...schedule,
         lastRanAt: 3,
         lastRunStatus: "ran",
+        nextRun: 4,
       },
     ])
     const realDirectory = await fs.realpath(directory)
@@ -196,6 +198,7 @@ describe("atree schedule store", () => {
           id: "sch_jsonl",
           lastRanAt: 3,
           lastRunStatus: "ran",
+          nextRun: 4,
         },
       ],
     })

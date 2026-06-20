@@ -139,6 +139,7 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
       const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
       const ranAt = typeof entry.ranAt === "number" ? entry.ranAt : undefined
       const status = entry.status === "ran" || entry.status === "skipped" ? entry.status : undefined
+      const nextRun = typeof entry.nextRun === "number" || entry.nextRun === null ? entry.nextRun : undefined
       if (!scheduleID || ranAt === undefined || !status) continue
       const schedule = schedules.get(scheduleID)
       if (!schedule) continue
@@ -146,6 +147,7 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
         ...schedule,
         lastRanAt: ranAt,
         lastRunStatus: status,
+        ...(nextRun !== undefined ? { nextRun } : {}),
       })
       continue
     }

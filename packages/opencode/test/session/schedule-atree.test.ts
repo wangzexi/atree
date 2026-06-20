@@ -805,6 +805,7 @@ describe("atree schedule restore", () => {
         message: "record schedule lifecycle in session.jsonl",
       })
       expect(entries[1]).toMatchObject({ scheduleID: created.id, sessionID, status: "ran", ranAt: now + 1_000 })
+      expect(typeof entries[1]?.nextRun === "number" || entries[1]?.nextRun === null).toBe(true)
       expect(entries[2]).toMatchObject({ scheduleID: created.id, sessionID, reason: "deleted" })
       expect(entries.every((entry) => typeof entry.at === "number")).toBe(true)
       const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
