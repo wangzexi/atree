@@ -18,6 +18,11 @@ function yamlValue(value: unknown) {
   return JSON.stringify(value ?? null)
 }
 
+function baseEventType(value: unknown) {
+  if (typeof value !== "string") return
+  return value.replace(/\.\d+$/, "")
+}
+
 function yamlMetadata(metadata: SessionInfo["metadata"]) {
   if (!metadata || Object.keys(metadata).length === 0) return "metadata: {}\n"
   return `metadata: ${JSON.stringify(metadata)}\n`
@@ -319,7 +324,9 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     }
     hasEvents = true
 
-    if (entry.type === "message.updated" && entry.message && typeof entry.message === "object") {
+    const type = baseEventType(entry.type)
+
+    if (type === "message.updated" && entry.message && typeof entry.message === "object") {
       const message = entry.message as SessionV1.Info
       const existing = messages.get(message.id)
       const parts = existing?.parts ?? orphanParts.get(message.id) ?? []
@@ -328,7 +335,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       continue
     }
 
-    if (entry.type === "message.part.updated" && entry.part && typeof entry.part === "object") {
+    if (type === "message.part.updated" && entry.part && typeof entry.part === "object") {
       const part = await resolveAssetURL(info, entry.part as SessionV1.Part)
       const message = messages.get(part.messageID)
       if (message) {
@@ -341,7 +348,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       continue
     }
 
-    if (entry.type === "message.part.delta") {
+    if (type === "message.part.delta") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       const partID = typeof entry.partID === "string" ? entry.partID : undefined
       const field = typeof entry.field === "string" ? entry.field : undefined
@@ -354,7 +361,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       continue
     }
 
-    if (entry.type === "message.removed") {
+    if (type === "message.removed") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       if (!messageID) continue
       removedMessageIDs.add(messageID)
@@ -363,7 +370,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       continue
     }
 
-    if (entry.type === "message.part.removed") {
+    if (type === "message.part.removed") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       const partID = typeof entry.partID === "string" ? entry.partID : undefined
       if (!messageID || !partID) continue
@@ -404,7 +411,7 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
     } catch {
       continue
     }
-    if (entry.type !== "session.updated" || !isRecord(entry.patch)) continue
+    if (baseEventType(entry.type) !== "session.updated" || !isRecord(entry.patch)) continue
     const patch = entry.patch
     const time = { ...next.time }
     if (isRecord(patch.time) && "archived" in patch.time) {

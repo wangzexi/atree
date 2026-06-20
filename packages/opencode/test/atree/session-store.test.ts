@@ -160,7 +160,7 @@ describe("atree session store", () => {
 
     await writeSessionStore(session)
     await appendSessionJsonl(session, {
-      type: "session.updated",
+      type: "session.updated.1",
       patch: { title: "JSONL title", metadata: { icon: "🧭" } },
     })
     await appendSessionJsonl(session, {
@@ -398,5 +398,48 @@ describe("atree session store", () => {
     expect(messages[0]?.info).toMatchObject({ id: "msg_one", role: "user" })
     expect(messages[0]?.parts).toHaveLength(1)
     expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_one", type: "text", text: "hello world" })
+  })
+
+  test("replays versioned session.jsonl message events", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_replay_versioned",
+      slug: "ses-replay-versioned",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Replay versioned",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "message.updated.1",
+      message: { id: "msg_versioned", sessionID: "ses_replay_versioned", role: "user", time: { created: 1 } },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated.1",
+      part: {
+        id: "prt_versioned",
+        sessionID: "ses_replay_versioned",
+        messageID: "msg_versioned",
+        type: "text",
+        text: "hello",
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.delta.1",
+      sessionID: "ses_replay_versioned",
+      messageID: "msg_versioned",
+      partID: "prt_versioned",
+      field: "text",
+      delta: " versioned",
+    })
+
+    const messages = await readSessionJsonlMessages(session)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_versioned", type: "text", text: "hello versioned" })
   })
 })
