@@ -1012,6 +1012,73 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("forks copied file-backed session history from the explicit target directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* tmpdirScoped({ git: true })
+      const original = yield* session.create({ title: "copied fork source", metadata: { icon: "🦊" } })
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(original, {
+          type: "message.updated",
+          message: {
+            id: messageID,
+            sessionID: original.id,
+            role: "user",
+            agent: "build",
+            model: { providerID: "test", modelID: "test" },
+            tools: {},
+            mode: "",
+            time: { created: 30 },
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(original, {
+          type: "message.part.updated",
+          part: {
+            id: partID,
+            sessionID: original.id,
+            messageID,
+            type: "text",
+            text: "source fork text",
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      yield* session.setTitle({ sessionID: original.id, directory: target, title: "copied fork target" })
+      yield* session.setMetadata({ sessionID: original.id, directory: target, metadata: { icon: "🧭" } })
+      yield* Effect.promise(() =>
+        appendSessionJsonl({ ...original, directory: target }, {
+          type: "message.part.updated",
+          part: {
+            id: partID,
+            sessionID: original.id,
+            messageID,
+            type: "text",
+            text: "target fork text",
+          },
+        }),
+      )
+
+      const fork = yield* Effect.acquireRelease(session.fork({ sessionID: original.id, directory: target }), (info) =>
+        session.remove(info.id, { directory: info.directory }).pipe(Effect.ignore),
+      )
+      const forkMessages = yield* Effect.promise(() => readSessionJsonlMessages(fork as any))
+      const forkText = JSON.stringify(forkMessages)
+
+      expect(fork.directory).toBe(target)
+      expect(fork.metadata).toEqual({ icon: "🧭" })
+      expect(forkText).toContain("target fork text")
+      expect(forkText).not.toContain("source fork text")
+    }),
+  )
+
   it.live("remove works without an instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

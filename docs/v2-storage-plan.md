@@ -192,6 +192,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - data URL 文件 part 会物化到会话自己的 `assets/`，fork 会话时也会复制到 fork 会话自己的 `assets/`。
 - 写入消息事件后会推进 `meta.yaml` 的 `updatedAt`，目录列表排序不会只依赖 SQLite 的更新时间。
 - 复制 `.agents/atree/` 到另一个目录后，显式传入目标目录的元数据、消息和 part 写入只落在目标目录；读取源目录时不会再被同一 session id 的全局 MessageV2 投影串入目标消息。
+- 复制 `.agents/atree/` 到另一个目录后，显式传入目标目录的 fork 会从目标目录读取历史，并把新 fork 会话写入目标目录。
 - HTTP prompt 路由在 `directory` hint 指向一个复制出来的 file-backed session 时，会优先使用该目标目录；如果 hint 目录没有对应 session，则回退到 session 自己持久化的目录。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
 - plan/reminder 相关 synthetic 消息和 part 写入开始携带当前 session 目录上下文，避免 plan agent 切换、plan_exit 工具产生的内部消息落到错误目录。

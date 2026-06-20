@@ -519,7 +519,7 @@ export interface Interface {
     workspaceID?: WorkspaceV2.ID
     directory?: string
   }) => Effect.Effect<Info>
-  readonly fork: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Info, NotFound>
+  readonly fork: (input: { sessionID: SessionID; messageID?: MessageID; directory?: string }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void>
   readonly get: (id: SessionID, options?: DirectoryOption) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string } & DirectoryOption) => Effect.Effect<void>
@@ -1000,9 +1000,13 @@ export const layer: Layer.Layer<
       })
     })
 
-    const fork = Effect.fn("Session.fork")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+    const fork = Effect.fn("Session.fork")(function* (input: {
+      sessionID: SessionID
+      messageID?: MessageID
+      directory?: string
+    }) {
       const ctx = yield* InstanceState.context
-      const original = yield* get(input.sessionID)
+      const original = yield* get(input.sessionID, { directory: input.directory })
       const title = getForkedTitle(original.title)
       const session = yield* createNext({
         directory: original.directory,
