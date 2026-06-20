@@ -215,7 +215,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
-- core `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名。
+- core `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名；todo/schedule 的 JSONL 投影读取也同样兼容版本化事件名。
 - core `session.jsonl` 读取会暂存先于 `message.updated` 到达的 orphan part，并在 message 到达后归并；delta/removal 也能作用到这类暂存 part，避免 JSONL 行顺序轻微乱序时丢消息内容。
 - core `SessionStore.context` 会先保持现有 SQLite 投影语义；当 SQLite 没有上下文消息、但能定位到 file-backed session 且 `session.jsonl` 可恢复出消息时，才从目录恢复上下文。这样可以覆盖“只有目录文件、没有全局投影”的恢复场景，同时不改变 runner 当前依赖的 pending/promotion/epoch 行为；`runnerContext` 的 baseline/compaction 语义暂时仍保持 SQLite 路径。
 - core `SessionStore.runnerContext` 也具备同样的无投影 fallback：SQLite runner 上下文为空时，会从目录 `session.jsonl` 恢复消息；当前 runner 主循环仍直接使用 SQLite `SessionHistory.entriesForRunner`，后续迁移需要单独处理 baseline/epoch。

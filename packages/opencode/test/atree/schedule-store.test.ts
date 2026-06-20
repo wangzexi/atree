@@ -238,4 +238,48 @@ describe("atree schedule store", () => {
     expect(await readSessionScheduleState(directory, "ses_jsonl_deleted")).toEqual([])
     expect(await findSessionScheduleState(directory, "sch_jsonl_deleted")).toBeUndefined()
   })
+
+  test("replays versioned schedule events from session jsonl", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_jsonl_versioned",
+      sessionID: "ses_jsonl_versioned",
+      kind: "recurring" as const,
+      expression: "*/5 * * * *",
+      runAt: null,
+      message: "recover from versioned session log",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    await writeSessionStore({
+      id: "ses_jsonl_versioned" as never,
+      slug: "jsonl-versioned",
+      version: "test",
+      projectID: "proj_jsonl_versioned" as never,
+      directory,
+      title: "JSONL versioned",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_versioned" as never))!
+    await appendSessionJsonl(session, { type: "schedule.created.1", schedule })
+    await appendSessionJsonl(session, {
+      type: "schedule.ran.1",
+      scheduleID: "sch_jsonl_versioned",
+      sessionID: "ses_jsonl_versioned",
+      status: "skipped",
+      ranAt: 5,
+    })
+
+    expect(await readSessionScheduleState(directory, "ses_jsonl_versioned")).toEqual([
+      {
+        ...schedule,
+        lastRanAt: 5,
+        lastRunStatus: "skipped",
+      },
+    ])
+  })
 })

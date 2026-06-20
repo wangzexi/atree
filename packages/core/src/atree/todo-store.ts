@@ -34,6 +34,11 @@ function sessionJsonlPath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
 }
 
+function baseEventType(value: unknown) {
+  if (typeof value !== "string") return
+  return value.replace(/\.\d+$/, "")
+}
+
 async function writeAtomic(target: string, value: SessionTodoState | LegacyTodoState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
@@ -74,7 +79,7 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
     } catch {
       continue
     }
-    if (entry.type !== "todo.updated") continue
+    if (baseEventType(entry.type) !== "todo.updated") continue
     if (entry.sessionID !== sessionID) continue
     hasState = true
     todos = Array.isArray(entry.todos) ? entry.todos.filter(isStoredTodo) : []

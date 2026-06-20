@@ -168,4 +168,30 @@ describe("atree todo store", () => {
     expect(await readSessionTodoProjection(directory, "ses_jsonl_empty")).toEqual({ hasState: true, todos: [] })
     expect(await readSessionTodoProjection(directory, "ses_missing")).toEqual({ hasState: false, todos: [] })
   })
+
+  test("replays versioned todo events from session jsonl", async () => {
+    const directory = await tempdir()
+    await writeSessionStore({
+      id: "ses_jsonl_versioned" as never,
+      slug: "jsonl-versioned",
+      version: "test",
+      projectID: "proj_jsonl_versioned" as never,
+      directory,
+      title: "JSONL versioned",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_versioned" as never))!
+    await appendSessionJsonl(session, {
+      type: "todo.updated.1",
+      sessionID: "ses_jsonl_versioned",
+      todos: [{ content: "versioned todo", status: "pending", priority: "medium" }],
+    })
+
+    expect(await readSessionTodoProjection(directory, "ses_jsonl_versioned")).toEqual({
+      hasState: true,
+      todos: [{ content: "versioned todo", status: "pending", priority: "medium" }],
+    })
+  })
 })

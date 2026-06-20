@@ -3,7 +3,7 @@ import { asc, eq } from "drizzle-orm"
 import { DateTime, Effect, Layer } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
-import { readSessionStore, writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { readSessionTodoProjection } from "@opencode-ai/core/atree/todo-store"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
@@ -215,6 +215,38 @@ describe("SessionTodo", () => {
       expect(legacyRaw.sessions[fileSessionID]).toBeUndefined()
       const touched = yield* Effect.promise(() => readSessionStore(directory, fileSessionID))
       expect(touched ? DateTime.toEpochMillis(touched.time.updated) : 0).toBeGreaterThan(20)
+    }),
+  )
+
+  it.effect("restores todo state from versioned session jsonl events", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-versioned-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_versioned")
+      const session = {
+        id: fileSessionID,
+        projectID: Project.ID.global,
+        title: "file todo versioned",
+        location: { directory: AbsolutePath.make(directory) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }
+      yield* Effect.promise(() => writeSessionStore(session))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "todo.updated.1",
+          sessionID: fileSessionID,
+          todos: [{ content: "versioned core todo", status: "pending", priority: "medium" }],
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: true,
+        todos: [{ content: "versioned core todo", status: "pending", priority: "medium" }],
+      })
     }),
   )
 })

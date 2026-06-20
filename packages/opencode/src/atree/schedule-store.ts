@@ -56,6 +56,11 @@ function sessionJsonlPath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
 }
 
+function baseEventType(value: unknown) {
+  if (typeof value !== "string") return
+  return value.replace(/\.\d+$/, "")
+}
+
 function isStoredSchedule(value: unknown): value is StoredSchedule {
   if (!value || typeof value !== "object") return false
   const schedule = value as Partial<StoredSchedule>
@@ -122,13 +127,15 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
       continue
     }
 
-    if (entry.type === "schedule.created" && isStoredSchedule(entry.schedule)) {
+    const type = baseEventType(entry.type)
+
+    if (type === "schedule.created" && isStoredSchedule(entry.schedule)) {
       if (entry.schedule.sessionID !== sessionID) continue
       schedules.set(entry.schedule.id, entry.schedule)
       continue
     }
 
-    if (entry.type === "schedule.ran") {
+    if (type === "schedule.ran") {
       const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
       const ranAt = typeof entry.ranAt === "number" ? entry.ranAt : undefined
       const status = entry.status === "ran" || entry.status === "skipped" ? entry.status : undefined
@@ -143,7 +150,7 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
       continue
     }
 
-    if (entry.type === "schedule.deleted") {
+    if (type === "schedule.deleted") {
       const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
       if (!scheduleID) continue
       schedules.delete(scheduleID)
