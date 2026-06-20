@@ -31,6 +31,7 @@ const sessionsLayer = SessionV2.layer.pipe(
   Layer.provide(projector),
 )
 const it = testEffect(Layer.mergeAll(database, events, projector, sessionsLayer))
+const storeIt = testEffect(Layer.mergeAll(database, SessionStore.layer.pipe(Layer.provide(database))))
 
 async function writeAtreeSession(input: {
   root: string
@@ -199,9 +200,13 @@ describe("atree file-backed SessionV2 discovery", () => {
 
   it.effect("prefers an explicit directory hint over the global SQLite session row", () =>
     Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-hint-data-")))
       const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-hint-root-")))
       const source = path.join(root, "source")
       const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
       yield* Effect.promise(() => mkdir(source, { recursive: true }))
       yield* Effect.promise(() => mkdir(target, { recursive: true }))
       const sessions = yield* SessionV2.Service
@@ -350,6 +355,59 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(messages).toHaveLength(1)
       expect(messages[0]).toMatchObject({ id: "msg_core_user", type: "user", text: "hello from session.jsonl" })
       expect(context.map((message) => message.id)).toEqual([messages[0]!.id])
+    }),
+  )
+
+  storeIt.effect("loads core SessionStore context from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_store_context",
+          title: "Core store context",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_store_context", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_store_context",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_context",
+              messageID: "msg_core_store_context",
+              type: "text",
+              text: "context from file-backed store",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      const context = yield* store.context(SessionV2.ID.make("ses_core_store_context"))
+
+      expect(context).toHaveLength(1)
+      expect(context[0]).toMatchObject({
+        id: "msg_core_store_context",
+        type: "user",
+        text: "context from file-backed store",
+      })
     }),
   )
 

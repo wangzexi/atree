@@ -9,7 +9,7 @@ import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { SessionMessageTable, SessionTable } from "./sql"
 import { fromRow } from "./info"
-import { findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
+import { findSessionStore, readSessionJsonlMessages, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
 
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
@@ -30,30 +30,42 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
+    const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (sessionID: SessionSchema.ID) {
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+      const cached = row ? fromRow(row) : undefined
+      if (cached) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(cached.location.directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (fileSession) return fileSession
+      }
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (root) {
+        const fileSession = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
+        )
+        if (fileSession) return fileSession
+      }
+      return cached
+    })
 
     return Service.of({
       get: Effect.fn("SessionStore.get")(function* (sessionID) {
-        const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
-        const cached = row ? fromRow(row) : undefined
-        if (cached) {
-          const fileSession = yield* Effect.promise(() => readSessionStore(cached.location.directory, sessionID)).pipe(
-            Effect.catchCause(() => Effect.succeed(undefined)),
-          )
-          if (fileSession) return fileSession
-        }
-        const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-          Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-        )
-        if (root) {
-          const fileSession = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
-            Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
-          )
-          if (fileSession) return fileSession
-        }
-        return cached
+        return yield* resolveFileSession(sessionID)
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
-        return yield* SessionHistory.load(db, sessionID)
+        const stored = yield* SessionHistory.load(db, sessionID)
+        if (stored.length > 0) return stored
+        const fileSession = yield* resolveFileSession(sessionID)
+        if (fileSession) {
+          const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
+            Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+          )
+          if (messages.length > 0) return messages
+        }
+        return stored
       }),
       runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq) {
         return yield* SessionHistory.loadForRunner(db, sessionID, baselineSeq)
