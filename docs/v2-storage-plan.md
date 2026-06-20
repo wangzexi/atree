@@ -205,6 +205,8 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - processor 会使用 assistant message 的 `path.cwd` 作为目录 hint 解析当前会话；流式文本、reasoning、step、patch、cleanup 等 assistant 写入都会显式落到该目录的 `session.jsonl`，复制 `.agents/atree/` 后不会把新回复写回源目录。
 - compaction 的 prune/create/process 会接受并传递目录 hint；压缩标记、summary assistant、replay/continue 用户消息和被裁剪 tool part 都会写入当前会话目录。
 - `MessageV2.page/stream/get/parts` 开始支持可选目录 hint；当目标目录存在对应 session store 时，会直接从该目录的 `session.jsonl` 投影读取，即使全局 SQLite message/part 投影被删除也能恢复。
+- core `SessionV2.get/messages/context/prompt` 开始支持可选目录 hint；当同一 session id 被复制到另一个目录时，显式传入目标目录会优先读取和写入目标目录的 `meta.yaml` / `session.jsonl`，而不是先命中全局 SQLite row。
+- server 包的 V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把 `SessionLocationMiddleware` 解析出的当前目录继续传给 core `SessionV2`。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名。

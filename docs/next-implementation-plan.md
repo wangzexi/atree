@@ -35,6 +35,7 @@
 - 删除 SQLite 投影后，session metadata、message、part、assets、schedule、todo 可以从目录恢复。
 - 显式读取某个目录的会话列表时，`sessions/*/meta.yaml` 是成员事实源；全局 SQLite 中残留但目录文件已不存在的缓存会话不会再出现在该目录的 active/archived 列表或 core `SessionV2.list({ directory })` 里。
 - `packages/core` 的 `SessionV2` 已能从当前目录或持久化 root 发现 file-backed sessions。
+- core `SessionV2.get/messages/context/prompt` 和 server 包 V2 session/message handler 已能传递目录 hint，复制 `.agents/atree/` 后可以显式读取目标目录的同 id 会话。
 - `SessionV2.messages/context/message` 已能读取目录内 `session.jsonl` 的用户/助手文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件投影。
 - `SessionV2.prompt` 对 file-backed session 写入用户 prompt 到目录内 `session.jsonl`，不再只依赖 SQLite。
 

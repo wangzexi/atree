@@ -1,5 +1,6 @@
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { Location } from "@opencode-ai/core/location"
 import { Effect, Schema } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { Api } from "../api"
@@ -31,6 +32,7 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
     return handlers.handle(
       "session.messages",
       Effect.fn(function* (ctx) {
+        const location = yield* Location.Service
         if (ctx.query.cursor && ctx.query.order !== undefined)
           return yield* new InvalidCursorError({ message: "Cursor cannot be combined with order" })
         const decoded = yield* Effect.try({
@@ -41,6 +43,7 @@ export const MessageHandler = HttpApiBuilder.group(Api, "server.message", (handl
         const messages = yield* session
           .messages({
             sessionID: ctx.params.sessionID,
+            directory: location.directory,
             limit: ctx.query.limit ?? DefaultMessagesLimit,
             order,
             cursor: decoded ? { id: decoded.id, direction: decoded.direction } : undefined,

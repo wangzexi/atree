@@ -197,6 +197,71 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("prefers an explicit directory hint over the global SQLite session row", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-hint-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      yield* Effect.promise(() => mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => mkdir(target, { recursive: true }))
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_directory_hint")
+      yield* sessions.create({
+        id: sessionID,
+        location: Location.Ref.make({ directory: AbsolutePath.make(source) }),
+      })
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target copy",
+          createdAt: 100,
+          updatedAt: 200,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_target_user",
+              role: "user",
+              time: { created: 210 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_target_user",
+              messageID: "msg_core_target_user",
+              type: "text",
+              text: "hello from target copy",
+            },
+          },
+        ]),
+      )
+
+      const hinted = yield* sessions.get(sessionID, { directory: AbsolutePath.make(target) })
+      const messages = yield* sessions.messages({
+        sessionID,
+        directory: AbsolutePath.make(target),
+        order: "asc",
+      })
+      const context = yield* sessions.context(sessionID, { directory: AbsolutePath.make(target) })
+
+      expect(hinted.title).toBe("Target copy")
+      expect(hinted.location.directory).toBe(AbsolutePath.make(target))
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_target_user",
+        type: "user",
+        text: "hello from target copy",
+      })
+      expect(context.map((message) => message.id)).toEqual([messages[0]!.id])
+    }),
+  )
+
   it.effect("reads file-backed session.jsonl messages through v2 APIs", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

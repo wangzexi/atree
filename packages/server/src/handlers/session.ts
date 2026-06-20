@@ -3,6 +3,7 @@ import { DateTime, Effect } from "effect"
 import { HttpApiBuilder, HttpApiSchema } from "effect/unstable/httpapi"
 import { Api } from "../api"
 import { SessionsCursor } from "../groups/session"
+import { Location } from "@opencode-ai/core/location"
 import {
   ConflictError,
   InvalidCursorError,
@@ -78,8 +79,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.get",
         Effect.fn(function* (ctx) {
+          const location = yield* Location.Service
           return {
-            data: yield* session.get(ctx.params.sessionID).pipe(
+            data: yield* session.get(ctx.params.sessionID, { directory: location.directory }).pipe(
               Effect.catchTag(
                 "Session.NotFoundError",
                 (error) =>
@@ -95,10 +97,12 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.prompt",
         Effect.fn(function* (ctx) {
+          const location = yield* Location.Service
           return {
             data: yield* session
               .prompt({
                 sessionID: ctx.params.sessionID,
+                directory: location.directory,
                 id: ctx.payload.id,
                 prompt: ctx.payload.prompt,
                 delivery: ctx.payload.delivery,
@@ -176,8 +180,9 @@ export const SessionHandler = HttpApiBuilder.group(Api, "server.session", (handl
       .handle(
         "session.context",
         Effect.fn(function* (ctx) {
+          const location = yield* Location.Service
           return {
-            data: yield* session.context(ctx.params.sessionID).pipe(
+            data: yield* session.context(ctx.params.sessionID, { directory: location.directory }).pipe(
               Effect.catchTag("Session.NotFoundError", (error) =>
                 Effect.fail(
                   new SessionNotFoundError({

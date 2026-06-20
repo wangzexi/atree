@@ -29,7 +29,13 @@ import { logFailure } from "./session/logging"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
-import { appendPromptJsonl, readSessionJsonlMessages, readSessionStores, writeSessionStore } from "./atree/session-store"
+import {
+  appendPromptJsonl,
+  readSessionJsonlMessages,
+  readSessionStore,
+  readSessionStores,
+  writeSessionStore,
+} from "./atree/session-store"
 
 // get project -> project.locations
 //
@@ -118,9 +124,13 @@ function promptsMatch(input: Prompt, existing: SessionMessage.User) {
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
-  readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info, NotFoundError>
+  readonly get: (
+    sessionID: SessionSchema.ID,
+    options?: { directory?: AbsolutePath },
+  ) => Effect.Effect<SessionSchema.Info, NotFoundError>
   readonly messages: (input: {
     sessionID: SessionSchema.ID
+    directory?: AbsolutePath
     limit?: number
     order?: "asc" | "desc"
     cursor?: {
@@ -130,10 +140,12 @@ export interface Interface {
   }) => Effect.Effect<SessionMessage.Message[], NotFoundError | MessageDecodeError>
   readonly message: (input: {
     sessionID: SessionSchema.ID
+    directory?: AbsolutePath
     messageID: SessionMessage.ID
   }) => Effect.Effect<SessionMessage.Message | undefined>
   readonly context: (
     sessionID: SessionSchema.ID,
+    options?: { directory?: AbsolutePath },
   ) => Effect.Effect<SessionMessage.Message[], NotFoundError | MessageDecodeError>
   readonly events: (input: {
     sessionID: SessionSchema.ID
@@ -150,6 +162,7 @@ export interface Interface {
   readonly prompt: (input: {
     id?: SessionMessage.ID
     sessionID: SessionSchema.ID
+    directory?: AbsolutePath
     prompt: Prompt
     delivery?: SessionInput.Delivery
     resume?: boolean
@@ -326,7 +339,14 @@ export const layer = Layer.effect(
         yield* persistFileSession(created)
         return created
       }),
-      get: Effect.fn("V2Session.get")(function* (sessionID) {
+      get: Effect.fn("V2Session.get")(function* (sessionID, options) {
+        const directory = options?.directory
+        if (directory) {
+          const fileSession = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+          if (fileSession) return fileSession
+        }
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
         return session
@@ -391,7 +411,7 @@ export const layer = Layer.effect(
         return direction === "previous" ? limited.toReversed() : limited
       }),
       messages: Effect.fn("V2Session.messages")(function* (input) {
-        const session = yield* result.get(input.sessionID)
+        const session = yield* result.get(input.sessionID, { directory: input.directory })
         const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
@@ -430,7 +450,7 @@ export const layer = Layer.effect(
       }),
       message: Effect.fn("V2Session.message")(function* (input) {
         const session = yield* result
-          .get(input.sessionID)
+          .get(input.sessionID, { directory: input.directory })
           .pipe(Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined)))
         if (session) {
           const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
@@ -442,8 +462,8 @@ export const layer = Layer.effect(
         const stored = yield* store.message(input.messageID)
         return stored?.sessionID === input.sessionID ? stored.message : undefined
       }),
-      context: Effect.fn("V2Session.context")(function* (sessionID) {
-        const session = yield* result.get(sessionID)
+      context: Effect.fn("V2Session.context")(function* (sessionID, options) {
+        const session = yield* result.get(sessionID, { directory: options?.directory })
         const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
@@ -463,7 +483,7 @@ export const layer = Layer.effect(
       prompt: Effect.fn("V2Session.prompt")((input) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
-            const session = yield* result.get(input.sessionID)
+            const session = yield* result.get(input.sessionID, { directory: input.directory })
             const sessionRow = yield* db
               .select({ id: SessionTable.id })
               .from(SessionTable)
