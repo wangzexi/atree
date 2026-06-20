@@ -10,7 +10,9 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer } from "effect"
 import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "fs/promises"
 import os from "os"
@@ -98,6 +100,11 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(meta).toContain("createdAt:")
       expect(jsonl).toBe("")
       expect(assets).toEqual([])
+
+      const { db } = yield* Database.Service
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, session.id)).run().pipe(Effect.orDie)
+      const listed = yield* sessions.list({ directory: AbsolutePath.make(node), limit: 10 })
+      expect(listed.map((item) => item.id)).toContain(session.id)
     }),
   )
 
