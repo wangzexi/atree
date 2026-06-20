@@ -4,6 +4,7 @@ import os from "os"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { Database } from "@opencode-ai/core/database/database"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
@@ -220,6 +221,89 @@ describe("atree todo state", () => {
         db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
       )
       expect(sessionRow?.directory).toBe(nodeDirectory)
+    }),
+  )
+
+  it.effect("ignores a stale database directory when resolving todo state from the persisted atree root", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const { db } = yield* Database.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-stale-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-stale-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const staleDirectory = path.join(root, "old")
+      const actualDirectory = path.join(root, "new")
+      const sessionID = "ses_stale_todo_directory" as SessionID
+      const now = Date.now()
+      yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_stale_todo",
+          worktree: staleDirectory,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_stale_todo",
+          slug: "stale-todo-directory",
+          directory: staleDirectory,
+          title: "Stale todo directory",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "actual-todo-directory",
+          version: "test",
+          projectID: "proj_actual_todo",
+          directory: actualDirectory,
+          path: "new",
+          title: "Actual todo directory",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* todo.update({
+        sessionID,
+        todos: [{ content: "write to actual todo directory", status: "pending", priority: "high" }],
+      })
+
+      expect(yield* Effect.promise(() => readSessionTodoState(actualDirectory, sessionID))).toEqual([
+        { content: "write to actual todo directory", status: "pending", priority: "high" },
+      ])
+      expect(yield* Effect.promise(() => readSessionTodoState(staleDirectory, sessionID))).toEqual([])
     }),
   )
 

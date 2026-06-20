@@ -135,7 +135,13 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      if (row?.directory) return row.directory
+      if (row?.directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(row.directory, sessionID))
+        if (fileSession) {
+          yield* upsertFileSessionCache(fileSession)
+          return fileSession.directory
+        }
+      }
 
       const instance = yield* InstanceRef
       if (instance) {

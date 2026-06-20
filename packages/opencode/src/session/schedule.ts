@@ -437,7 +437,6 @@ export const layer = Layer.effect(
           yield* upsertFileSessionCache(fileSession)
           return fileSession.directory
         }
-        return row.directory
       }
 
       const directory = yield* InstanceState.directory.pipe(
@@ -485,7 +484,6 @@ export const layer = Layer.effect(
           yield* upsertFileSessionCache(fileSession)
           return { directory: fileSession.directory, archived: fileSession.time.archived !== undefined }
         }
-        return { directory: row.directory, archived: row.archived !== null }
       }
 
       const directory = yield* InstanceState.directory.pipe(

@@ -619,6 +619,92 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "ignores a stale database directory when creating schedule state from the persisted atree root",
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-stale-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-stale-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const staleDirectory = path.join(root, "old")
+      const actualDirectory = path.join(root, "new")
+      const sessionID = "ses_stale_schedule_directory" as SessionID
+      const now = Date.now()
+      yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_stale_schedule",
+          worktree: staleDirectory,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_stale_schedule",
+          slug: "stale-schedule-directory",
+          directory: staleDirectory,
+          title: "Stale schedule directory",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "actual-schedule-directory",
+          version: "test",
+          projectID: "proj_actual_schedule",
+          directory: actualDirectory,
+          path: "new",
+          title: "Actual schedule directory",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          kind: "once",
+          runAt: now + 60_000,
+          message: "created in actual schedule directory",
+        }),
+      )
+
+      expect(created).toMatchObject({ sessionID, message: "created in actual schedule directory" })
+      expect(yield* Effect.promise(() => readSessionScheduleState(actualDirectory, sessionID))).toHaveLength(1)
+      expect(yield* Effect.promise(() => readSessionScheduleState(staleDirectory, sessionID))).toEqual([])
+    }),
+  )
+
   it.instance(
     "creates a schedule for a nested file-backed session found from the persisted atree root",
     Effect.gen(function* () {

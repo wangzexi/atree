@@ -38,6 +38,7 @@
 - core `SessionV2.get/messages/context/prompt` 和 server 包 V2 session/message handler 已能传递目录 hint，复制 `.agents/atree/` 后可以显式读取目标目录的同 id 会话。
 - `SessionV2.messages/context/message` 已能读取目录内 `session.jsonl` 的用户/助手文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件投影。
 - `SessionV2.prompt` 对 file-backed session 写入用户 prompt 到目录内 `session.jsonl`，不再只依赖 SQLite。
+- todo/schedule 在无显式目录时会校验 SQLite 缓存目录仍存在对应 file-backed session；旧目录失效时继续从当前 instance 或持久化 root 定位真实目录。
 
 已通过的护栏：
 
