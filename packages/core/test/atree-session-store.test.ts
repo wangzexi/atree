@@ -262,6 +262,45 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("prefers a file-backed session from the persisted root over a stale SQLite directory row", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => mkdir(target, { recursive: true }))
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_store_stale_directory")
+      const created = yield* sessions.create({
+        id: sessionID,
+        location: Location.Ref.make({ directory: AbsolutePath.make(source) }),
+      })
+      yield* Effect.promise(() =>
+        rm(path.join(source, ".agents", "atree", "sessions", created.id), { recursive: true, force: true }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Recovered from root",
+          createdAt: 100,
+          updatedAt: 200,
+        }),
+      )
+
+      const loaded = yield* sessions.get(sessionID)
+
+      expect(loaded.title).toBe("Recovered from root")
+      expect(loaded.location.directory).toBe(AbsolutePath.make(yield* Effect.promise(() => realpath(target))))
+    }),
+  )
+
   it.effect("reads file-backed session.jsonl messages through v2 APIs", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
