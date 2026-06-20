@@ -54,6 +54,12 @@ const takePrompt = (queue: Queue.Queue<SessionPrompt.PromptInput>) =>
     Effect.sleep("2 seconds").pipe(Effect.flatMap(() => Effect.fail(new Error("timed out waiting for prompt")))),
   )
 
+const expectNoPrompt = (queue: Queue.Queue<SessionPrompt.PromptInput>) =>
+  Effect.race(
+    Queue.take(queue).pipe(Effect.flatMap(() => Effect.fail(new Error("unexpected prompt")))),
+    Effect.sleep("100 millis"),
+  )
+
 const waitForRunStatus = (schedules: Schedule.Interface, sessionID: SessionID, status: Schedule.RunStatus) =>
   pollWithTimeout(
     Effect.gen(function* () {
@@ -320,6 +326,34 @@ it.instance("clears a one-time scheduled task when the session is busy", () =>
     expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.ran")
     expect(scheduleEventTypes(events, session.id)).toContain("schedule.deleted")
+  }),
+)
+
+it.instance("clears a one-time scheduled task without prompting when the session is archived", () =>
+  Effect.gen(function* () {
+    const schedules = yield* Schedule.Service
+    const queue = yield* Queue.unbounded<SessionPrompt.PromptInput>()
+    promptQueue = queue
+    const { db } = yield* Database.Service
+    yield* initScheduleTables
+
+    const session = yield* createFixtureSession("schedule once archived test")
+    const created = yield* schedules.create({
+      sessionID: session.id,
+      kind: "once",
+      runAt: Date.now() + 60_000,
+      message: "scheduled once after archive",
+    })
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toHaveLength(
+      1,
+    )
+
+    yield* db.run(sql`UPDATE session SET time_archived = ${Date.now()} WHERE id = ${session.id}`).pipe(Effect.orDie)
+    yield* schedules.tick(created.id)
+
+    yield* expectNoPrompt(queue)
+    expect(yield* schedules.list(session.id)).toEqual([])
+    expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
   }),
 )
 
