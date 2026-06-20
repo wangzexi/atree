@@ -227,6 +227,20 @@ type DirectMessageRecord =
   | { kind: "system"; messageID: string; text: string; created: number }
   | { kind: "synthetic"; messageID: string; text: string; created: number }
 
+type AssistantEventRecord = {
+  id: string
+  agent: string
+  model: ModelV2.Ref
+  content: SessionMessage.AssistantContent[]
+  created: number
+  completed?: number
+  finish?: string
+  cost?: number
+  tokens?: SessionMessage.Assistant["tokens"]
+  snapshot?: SessionMessage.Assistant["snapshot"]
+  error?: SessionMessage.Assistant["error"]
+}
+
 function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
@@ -333,6 +347,35 @@ function modelRef(value: unknown): ModelV2.Ref | undefined {
     providerID: ProviderV2.ID.make(model.providerID),
     variant: ModelV2.VariantID.make(typeof model.variant === "string" ? model.variant : "default"),
   }
+}
+
+function tokensValue(value: unknown): SessionMessage.Assistant["tokens"] | undefined {
+  if (!value || typeof value !== "object") return
+  const tokens = value as { input?: unknown; output?: unknown; reasoning?: unknown; cache?: unknown }
+  const cache = tokens.cache && typeof tokens.cache === "object" ? (tokens.cache as { read?: unknown; write?: unknown }) : {}
+  if (
+    typeof tokens.input !== "number" ||
+    typeof tokens.output !== "number" ||
+    typeof tokens.reasoning !== "number" ||
+    typeof cache.read !== "number" ||
+    typeof cache.write !== "number"
+  ) {
+    return
+  }
+  return {
+    input: tokens.input,
+    output: tokens.output,
+    reasoning: tokens.reasoning,
+    cache: { read: cache.read, write: cache.write },
+  }
+}
+
+function unknownError(value: unknown): SessionMessage.Assistant["error"] | undefined {
+  if (value && typeof value === "object") {
+    const error = value as { type?: unknown; message?: unknown }
+    if (error.type === "unknown" && typeof error.message === "string") return { type: "unknown", message: error.message }
+  }
+  return
 }
 
 function textParts(parts: V1Part[]) {
@@ -648,6 +691,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
   const shells = new Map<string, ShellRecord>()
   const compactions = new Map<string, CompactionRecord>()
   const directMessages = new Map<string, DirectMessageRecord>()
+  const assistantEvents = new Map<string, AssistantEventRecord>()
   const removed = new Set<string>()
   const removedParts = new Set<string>()
   let index = 0
@@ -759,6 +803,90 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         created: timestampValue(data.timestamp, index),
       })
     }
+    if (entry.type === "session.next.step.started") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const agent = typeof data.agent === "string" ? data.agent : undefined
+      const model = modelRef(data.model)
+      if (!assistantMessageID || !agent || !model) continue
+      assistantEvents.set(assistantMessageID, {
+        id: assistantMessageID,
+        agent,
+        model,
+        content: assistantEvents.get(assistantMessageID)?.content ?? [],
+        created: timestampValue(data.timestamp, index),
+        snapshot: typeof data.snapshot === "string" ? { start: data.snapshot } : undefined,
+      })
+    }
+    if (entry.type === "session.next.step.ended") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      if (!assistantMessageID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      const snapshot =
+        typeof data.snapshot === "string" ? { ...assistant.snapshot, end: data.snapshot } : assistant.snapshot
+      assistantEvents.set(assistantMessageID, {
+        ...assistant,
+        completed: timestampValue(data.timestamp, index),
+        finish: typeof data.finish === "string" ? data.finish : undefined,
+        cost: typeof data.cost === "number" ? data.cost : undefined,
+        tokens: tokensValue(data.tokens),
+        snapshot,
+      })
+    }
+    if (entry.type === "session.next.step.failed") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      if (!assistantMessageID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      assistantEvents.set(assistantMessageID, {
+        ...assistant,
+        completed: timestampValue(data.timestamp, index),
+        finish: "error",
+        error: unknownError(data.error),
+      })
+    }
+    if (entry.type === "session.next.text.ended") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const textID = typeof data.textID === "string" ? data.textID : undefined
+      const text = typeof data.text === "string" ? data.text : undefined
+      if (!assistantMessageID || !textID || text === undefined) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      const content = assistant.content.filter((part) => !(part.type === "text" && part.id === textID))
+      content.push(new SessionMessage.AssistantText({ type: "text", id: textID, text }))
+      assistantEvents.set(assistantMessageID, { ...assistant, content })
+    }
+    if (entry.type === "session.next.reasoning.ended") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const reasoningID = typeof data.reasoningID === "string" ? data.reasoningID : undefined
+      const text = typeof data.text === "string" ? data.text : undefined
+      if (!assistantMessageID || !reasoningID || text === undefined) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      const content = assistant.content.filter((part) => !(part.type === "reasoning" && part.id === reasoningID))
+      content.push(
+        new SessionMessage.AssistantReasoning({
+          type: "reasoning",
+          id: reasoningID,
+          text,
+          providerMetadata:
+            data.providerMetadata && typeof data.providerMetadata === "object"
+              ? (data.providerMetadata as Record<string, Record<string, unknown>>)
+              : undefined,
+        }),
+      )
+      assistantEvents.set(assistantMessageID, { ...assistant, content })
+    }
     if (entry.type === "session.next.shell.started") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
@@ -812,9 +940,13 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
     .sort((a, b) => messageCreated(a.info, index) - messageCreated(b.info, index) || a.info.id.localeCompare(b.info.id))
 
   const converted: SessionMessage.Message[] = []
+  const replayedMessageIDs = new Set<string>()
   for (const message of replayed) {
     const item = await toV2Message(info, message.info, message.parts)
-    if (item) converted.push(item)
+    if (item) {
+      converted.push(item)
+      replayedMessageIDs.add(item.id)
+    }
   }
   for (const message of directMessages.values()) {
     const created = DateTime.makeUnsafe(message.created)
@@ -859,6 +991,27 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         }),
       )
     }
+  }
+  for (const assistant of assistantEvents.values()) {
+    if (removed.has(assistant.id) || replayedMessageIDs.has(assistant.id)) continue
+    converted.push(
+      new SessionMessage.Assistant({
+        id: SessionMessage.ID.make(assistant.id),
+        type: "assistant",
+        agent: assistant.agent,
+        model: assistant.model,
+        content: assistant.content,
+        snapshot: assistant.snapshot,
+        finish: assistant.finish,
+        cost: assistant.cost,
+        tokens: assistant.tokens,
+        error: assistant.error,
+        time: {
+          created: DateTime.makeUnsafe(assistant.created),
+          completed: assistant.completed === undefined ? undefined : DateTime.makeUnsafe(assistant.completed),
+        },
+      }),
+    )
   }
   for (const shell of shells.values()) {
     converted.push(

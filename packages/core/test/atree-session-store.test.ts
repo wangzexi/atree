@@ -636,6 +636,268 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores event-backed assistant steps from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_assistant",
+          title: "Core event assistant",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_assistant", [
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_assistant",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            snapshot: "snapshot-start",
+            timestamp: 30,
+          },
+          {
+            type: "session.next.reasoning.ended",
+            assistantMessageID: "msg_core_event_assistant",
+            reasoningID: "reasoning_core_event",
+            text: "Think",
+            providerMetadata: { anthropic: { signature: "sig_event" } },
+            timestamp: 31,
+          },
+          {
+            type: "session.next.text.ended",
+            assistantMessageID: "msg_core_event_assistant",
+            textID: "text_core_event",
+            text: "Final answer",
+            timestamp: 32,
+          },
+          {
+            type: "session.next.step.ended",
+            assistantMessageID: "msg_core_event_assistant",
+            finish: "stop",
+            cost: 0.25,
+            tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
+            snapshot: "snapshot-end",
+            timestamp: 40,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_assistant"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_assistant",
+        type: "assistant",
+        agent: "build",
+        model: { providerID: "test", id: "model-a", variant: "default" },
+        content: [
+          { type: "reasoning", id: "reasoning_core_event", text: "Think" },
+          { type: "text", id: "text_core_event", text: "Final answer" },
+        ],
+        snapshot: { start: "snapshot-start", end: "snapshot-end" },
+        finish: "stop",
+        cost: 0.25,
+        tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
+      })
+      if (messages[0]?.type === "assistant") {
+        expect(DateTime.toEpochMillis(messages[0].time.completed!)).toBe(40)
+        expect(messages[0].content[0]).toMatchObject({
+          providerMetadata: { anthropic: { signature: "sig_event" } },
+        })
+      }
+    }),
+  )
+
+  it.effect("restores failed event-backed assistant steps from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_assistant_failed",
+          title: "Core event assistant failed",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_assistant_failed", [
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_assistant_failed",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 30,
+          },
+          {
+            type: "session.next.step.failed",
+            assistantMessageID: "msg_core_event_assistant_failed",
+            error: { type: "unknown", message: "model failed" },
+            timestamp: 40,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_assistant_failed"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_assistant_failed",
+        type: "assistant",
+        finish: "error",
+        error: { type: "unknown", message: "model failed" },
+      })
+    }),
+  )
+
+  it.effect("does not duplicate mixed event-backed assistant steps from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_assistant_mixed",
+          title: "Core event assistant mixed",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_assistant_mixed", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_event_assistant_mixed",
+              role: "assistant",
+              model: { providerID: "test", modelID: "model-a", variant: "default" },
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "part_core_event_assistant_mixed",
+              messageID: "msg_core_event_assistant_mixed",
+              type: "text",
+              text: "V1 answer",
+            },
+          },
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_assistant_mixed",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 31,
+          },
+          {
+            type: "session.next.text.ended",
+            assistantMessageID: "msg_core_event_assistant_mixed",
+            textID: "text_core_event_assistant_mixed",
+            text: "Event answer",
+            timestamp: 32,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_assistant_mixed"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_assistant_mixed",
+        type: "assistant",
+        content: [{ type: "text", text: "V1 answer" }],
+      })
+    }),
+  )
+
+  it.effect("removes event-backed assistant steps from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_assistant_removed",
+          title: "Core event assistant removed",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_assistant_removed", [
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_assistant_removed",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 30,
+          },
+          {
+            type: "session.next.text.ended",
+            assistantMessageID: "msg_core_event_assistant_removed",
+            textID: "text_core_event_assistant_removed",
+            text: "Removed answer",
+            timestamp: 31,
+          },
+          {
+            type: "message.removed",
+            messageID: "msg_core_event_assistant_removed",
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_assistant_removed"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(0)
+    }),
+  )
+
   it.effect("restores completed tool invocations from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
