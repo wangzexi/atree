@@ -221,7 +221,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `session.jsonl` 读取会暂存先于 `message.updated` 到达的 orphan part，并在 message 到达后归并；delta/removal 也能作用到这类暂存 part，避免 JSONL 行顺序轻微乱序时丢消息内容。
 - core `SessionStore.context` 会先保持现有 SQLite 投影语义；当 SQLite 没有上下文消息、但能定位到 file-backed session 且 `session.jsonl` 可恢复出消息时，才从目录恢复上下文。这样可以覆盖“只有目录文件、没有全局投影”的恢复场景，同时不改变 runner 当前依赖的 pending/promotion/epoch 行为；`runnerContext` 的 baseline/compaction 语义暂时仍保持 SQLite 路径。
 - core `SessionStore.runnerContext` 也具备同样的无投影 fallback：SQLite runner 上下文为空时，会从目录 `session.jsonl` 恢复消息；当前 runner 主循环仍直接使用 SQLite `SessionHistory.entriesForRunner`，后续迁移需要单独处理 baseline/epoch。
-- core `SessionStore.message` 会先保持现有 SQLite 单条消息查询；当 SQLite 没有该消息时，会从持久化 atree root 扫描 file-backed sessions，并从对应 `session.jsonl` 恢复单条消息。
+- core `SessionStore.message` 会优先从持久化 atree root 的 file-backed sessions 查找对应 `session.jsonl` 消息；只有目录事实源没有这条消息时才回退现有 SQLite 单条消息查询，避免同 message id 的陈旧全局投影盖过目录记录。
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
 - core `SessionTodo` 会在能定位到 file-backed session 时把 todo 状态镜像到同一会话目录的 `todo.json`，读取时目录状态优先；即使 SQLite todo 投影缺失，也能从目录恢复。
 - core `SessionTodo` 的文件态行为已经和 opencode 侧保持一致：写入 todo 时会确保 `session.jsonl` / `assets/` 骨架存在，读取旧 `extensions/todo/state.json` 作为迁移兼容，重写该会话 todo 后会从旧扩展状态中移除对应 session，并推进会话 `meta.yaml` 的更新时间。

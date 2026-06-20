@@ -4,13 +4,14 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { Global } from "@opencode-ai/core/global"
 import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer } from "effect"
@@ -605,6 +606,146 @@ describe("atree file-backed SessionV2 discovery", () => {
         id: "msg_core_store_message",
         type: "user",
         text: "message from file-backed store",
+      })
+    }),
+  )
+
+  storeIt.effect("prefers file-backed messages over stale SQLite message rows", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = "ses_core_store_message_stale"
+      const messageID = "msg_core_store_message_stale"
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source stale",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target current",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 50 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_message_current",
+              messageID,
+              type: "text",
+              text: "current file-backed message",
+            },
+          },
+        ]),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "global",
+          worktree: source,
+          vcs: null,
+          name: "Global",
+          icon_url: null,
+          icon_url_override: null,
+          icon_color: null,
+          time_created: 10,
+          time_updated: 10,
+          time_initialized: null,
+          sandboxes: [],
+          commands: null,
+        })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make(sessionID),
+          project_id: "global",
+          workspace_id: null,
+          parent_id: null,
+          slug: sessionID,
+          directory: source,
+          path: ".",
+          title: "Stale SQLite session",
+          version: "test",
+          share_url: null,
+          summary_additions: null,
+          summary_deletions: null,
+          summary_files: null,
+          summary_diffs: null,
+          metadata: {},
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          revert: null,
+          permission: null,
+          agent: null,
+          model: null,
+          time_created: 10,
+          time_updated: 10,
+          time_compacting: null,
+          time_archived: null,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionMessageTable)
+        .values({
+          id: SessionMessage.ID.make(messageID),
+          session_id: SessionV2.ID.make(sessionID),
+          type: "user",
+          seq: 0,
+          time_created: 10,
+          time_updated: 10,
+          data: {
+            text: "stale sqlite message",
+            files: [],
+            agents: {},
+            time: { created: 10 },
+          },
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      const result = yield* store.message(SessionMessage.ID.make(messageID))
+
+      expect(result?.sessionID).toBe(SessionV2.ID.make(sessionID))
+      expect(result?.message).toMatchObject({
+        id: messageID,
+        type: "user",
+        text: "current file-backed message",
       })
     }),
   )

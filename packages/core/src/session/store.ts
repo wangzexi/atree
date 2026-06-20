@@ -57,6 +57,27 @@ export const layer = Layer.effect(
       return cached
     })
 
+    const findFileBackedMessage = Effect.fn("SessionStore.findFileBackedMessage")(function* (
+      messageID: SessionMessage.ID,
+    ) {
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (!root) return undefined
+      const found = yield* Effect.promise(() => findSessionJsonlMessage(root, messageID)).pipe(
+        Effect.catchCause(() =>
+          Effect.succeed<
+            | {
+                session: SessionSchema.Info
+                message: SessionMessage.Message
+              }
+            | undefined
+          >(undefined),
+        ),
+      )
+      return found ? { sessionID: found.session.id, message: found.message } : undefined
+    })
+
     return Service.of({
       get: Effect.fn("SessionStore.get")(function* (sessionID) {
         return yield* resolveFileSession(sessionID)
@@ -92,29 +113,14 @@ export const layer = Layer.effect(
           .where(eq(SessionMessageTable.id, messageID))
           .get()
           .pipe(Effect.orDie)
-        return row
-          ? {
-              sessionID: SessionSchema.ID.make(row.session_id),
-              message: yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
-            }
-          : yield* Effect.gen(function* () {
-              const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-                Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-              )
-              if (!root) return undefined
-              const found = yield* Effect.promise(() => findSessionJsonlMessage(root, messageID)).pipe(
-                Effect.catchCause(() =>
-                  Effect.succeed<
-                    | {
-                        session: SessionSchema.Info
-                        message: SessionMessage.Message
-                      }
-                    | undefined
-                  >(undefined),
-                ),
-              )
-              return found ? { sessionID: found.session.id, message: found.message } : undefined
-            })
+        const fileMessage = yield* findFileBackedMessage(messageID)
+        if (fileMessage) return fileMessage
+        if (!row) return undefined
+
+        return {
+          sessionID: SessionSchema.ID.make(row.session_id),
+          message: yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
+        }
       }),
     })
   }),
