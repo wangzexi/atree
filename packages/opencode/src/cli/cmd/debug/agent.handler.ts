@@ -167,7 +167,7 @@ const createToolContext = Effect.fn("Cli.debug.agent.createToolContext")(functio
     cost: 0,
     tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
   }
-  yield* sessionSvc.updateMessage(message)
+  yield* sessionSvc.updateMessage(message, { directory: session.directory })
 
   const ruleset = Permission.merge(agent.permission, session.permission ?? [])
 
