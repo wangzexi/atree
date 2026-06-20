@@ -66,6 +66,7 @@ describe("atree directory self-contained state", () => {
       const instance = yield* TestInstance
 
       const session = yield* sessions.create({ title: "interaction events" })
+      const beforeUpdated = (yield* Effect.promise(() => readSessionStore(instance.directory, session.id)))!.time.updated
 
       const questionFiber = yield* questions
         .ask({
@@ -134,6 +135,8 @@ describe("atree directory self-contained state", () => {
           reply: "once",
         }),
       )
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, session.id))
+      expect(stored?.time.updated).toBeGreaterThan(beforeUpdated)
     }),
   )
 

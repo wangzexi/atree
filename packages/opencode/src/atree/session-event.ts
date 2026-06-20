@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { appendSessionJsonl, findSessionStore } from "./session-store"
+import { appendSessionJsonl, findSessionStore, touchSessionStore } from "./session-store"
 import { readWorkspaceState } from "./state"
 import { InstanceState } from "@/effect/instance-state"
 import type { SessionID } from "@/session/schema"
@@ -23,6 +23,7 @@ export const appendAtreeSessionEventByID = (
     const instanceSession = yield* findSessionInRoot(instanceDirectory, sessionID)
     if (instanceSession) {
       yield* Effect.promise(() => appendSessionJsonl(instanceSession, entry))
+      yield* Effect.promise(() => touchSessionStore(instanceSession.directory, instanceSession.id))
       return
     }
 
@@ -32,6 +33,7 @@ export const appendAtreeSessionEventByID = (
     const session = yield* findSessionInRoot(state.rootDirectory ?? undefined, sessionID)
     if (!session) return
     yield* Effect.promise(() => appendSessionJsonl(session, entry))
+    yield* Effect.promise(() => touchSessionStore(session.directory, session.id))
   })
 
 export const appendAtreeSessionEventByIDBestEffort = (
