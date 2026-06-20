@@ -1,5 +1,5 @@
 import { Database } from "@opencode-ai/core/database/database"
-import { findSessionStore, readWorkspaceRoot } from "@opencode-ai/core/atree/session-store"
+import { findSessionStore, readSessionStore, readWorkspaceRoot } from "@opencode-ai/core/atree/session-store"
 import { LocationServiceMap } from "@opencode-ai/core/location-layer"
 import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -48,7 +48,12 @@ export const sessionLocationLayer = Layer.effect(
           .where(eq(SessionTable.id, sessionID))
           .get()
           .pipe(Effect.orDie)
-        const fileSession = row
+        const cachedFileSession = row?.directory
+          ? yield* Effect.promise(() => readSessionStore(row.directory, sessionID)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+          : undefined
+        const rootFileSession = cachedFileSession
           ? undefined
           : yield* Effect.promise(() => readWorkspaceRoot()).pipe(
               Effect.flatMap((root) =>
@@ -56,8 +61,9 @@ export const sessionLocationLayer = Layer.effect(
               ),
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
-        const directory = row?.directory ?? fileSession?.location.directory
-        const workspaceID = row?.workspaceID ?? fileSession?.location.workspaceID
+        const fileSession = cachedFileSession ?? rootFileSession
+        const directory = fileSession?.location.directory ?? row?.directory
+        const workspaceID = fileSession?.location.workspaceID ?? row?.workspaceID
         if (!directory)
           return yield* new SessionNotFoundError({
             sessionID,
