@@ -7,6 +7,8 @@ import { provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { writeSessionStore } from "@/atree/session-store"
 import { InstanceState } from "@/effect/instance-state"
+import fs from "fs/promises"
+import path from "path"
 
 const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Project.defaultLayer, CrossSpawnSpawner.defaultLayer))
 
@@ -148,6 +150,33 @@ describe("session.listGlobal", () => {
           session.listGlobal({ directory: test.directory, archived: true, limit: 200 }),
         )
         expect(archived.find((session) => session.id === stale.id)?.time.archived).toBe(archivedAt)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "ignores stale cache rows that no longer have a directory session store",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const cachedOnly = yield* withSession({ title: "global-stale-cache-only" })
+
+        yield* Effect.promise(() =>
+          fs.rm(path.join(test.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+            recursive: true,
+            force: true,
+          }),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) =>
+          session.listGlobal({ directory: test.directory, limit: 200 }),
+        )
+        expect(sessions.map((session) => session.id)).not.toContain(cachedOnly.id)
+
+        const archived = yield* SessionNs.Service.use((session) =>
+          session.listGlobal({ directory: test.directory, archived: true, limit: 200 }),
+        )
+        expect(archived.map((session) => session.id)).not.toContain(cachedOnly.id)
       }),
     { git: true },
   )
