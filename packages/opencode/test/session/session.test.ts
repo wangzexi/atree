@@ -441,6 +441,40 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not rewrite a valid cached directory when reading a copied session explicitly", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* tmpdirScoped({ git: true })
+      const target = yield* tmpdirScoped({ git: true })
+      const info = yield* provideInstance(source)(session.create({ title: "source cache owner" }))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      const targetCtx = yield* provideInstance(target)(InstanceState.context)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          ...info,
+          directory: target,
+          projectID: targetCtx.project.id,
+          title: "target copied session",
+        } as any),
+      )
+
+      const copied = yield* provideInstance(target)(session.get(info.id, { directory: target }))
+      const { db } = yield* Database.Service
+      const row = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, info.id))
+        .get()
+        .pipe(Effect.orDie)
+
+      expect(copied.directory).toBe(target)
+      expect(copied.title).toBe("target copied session")
+      expect(row?.directory).toBe(source)
+    }),
+  )
+
   it.effect("reads file-backed child sessions with an explicit directory and no instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
