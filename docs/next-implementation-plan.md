@@ -34,7 +34,7 @@
 - `schedule.json` 和 `todo.json` 已经按会话落在同一个会话目录下。
 - 删除 SQLite 投影后，session metadata、message、part、assets、schedule、todo 可以从目录恢复。
 - `packages/core` 的 `SessionV2` 已能从当前目录或持久化 root 发现 file-backed sessions。
-- `SessionV2.messages/context/message` 已能读取目录内 `session.jsonl` 的用户/助手文本、reasoning、文件资产、已完成工具调用结果、shell 事件和 compaction 事件投影。
+- `SessionV2.messages/context/message` 已能读取目录内 `session.jsonl` 的用户/助手文本、reasoning、文件资产、pending/running/completed 工具调用、shell 事件和 compaction 事件投影。
 - `SessionV2.prompt` 对 file-backed session 写入用户 prompt 到目录内 `session.jsonl`，不再只依赖 SQLite。
 
 已通过的护栏：
@@ -50,7 +50,7 @@
 
 - OpenCode V1 session 服务和 core `SessionV2` 仍是两套读写入口。
 - SQLite 仍承担运行时投影、执行队列和部分兼容缓存；目前还不能删除。
-- core `SessionV2` 已经能恢复文本、reasoning、文件资产、已完成工具调用结果、shell 事件和 compaction 事件，但还没有覆盖所有运行态事件，例如 pending/running tool、permission/question 等更完整的 v2 结构。
+- core `SessionV2` 已经能恢复文本、reasoning、文件资产、pending/running/completed 工具调用、shell 事件和 compaction 事件，但还没有覆盖 permission/question 等更完整的 v2 结构。
 - 真正模型输出链路仍主要由 OpenCode 原有 projector/runtime 推动，目录 JSONL 目前是事实源化过程中的镜像与恢复层。
 
 下一步优先级：
