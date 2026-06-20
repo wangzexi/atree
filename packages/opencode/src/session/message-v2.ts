@@ -37,7 +37,8 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
-import { readSessionJsonlProjection, readSessionStore } from "@/atree/session-store"
+import { findSessionStore, readSessionJsonlProjection, readSessionStore } from "@/atree/session-store"
+import { readWorkspaceState } from "@/atree/state"
 import type { Session } from "./session"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -133,8 +134,28 @@ type PageResult = {
 }
 
 function fileBackedSession(directory: string | undefined, sessionID: SessionID) {
-  if (!directory) return Effect.succeed<Session.Info | undefined>(undefined)
-  return Effect.promise(() => readSessionStore(directory, sessionID))
+  return Effect.gen(function* () {
+    if (directory) {
+      const fileSession = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      if (fileSession) return fileSession
+    }
+    const { db } = yield* Database.Service
+    const row = yield* db
+      .select({ directory: SessionTable.directory })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    if (row?.directory && row.directory !== directory) {
+      const fileSession = yield* Effect.promise(() => readSessionStore(row.directory, sessionID))
+      if (fileSession) return fileSession
+    }
+    const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+      Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+    )
+    if (!state.rootDirectory) return
+    return yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
+  })
 }
 
 function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {

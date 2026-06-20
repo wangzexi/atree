@@ -1,12 +1,14 @@
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
+import os from "os"
 import path from "path"
 import { Global } from "@opencode-ai/core/global"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { SessionTable } from "@opencode-ai/core/session/sql"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
 import { Deferred, Effect, Exit, Layer, Option } from "effect"
 import { Session as SessionNs } from "@/session/session"
@@ -516,6 +518,131 @@ describe("Session", () => {
 
       const found = yield* session.findMessage(info.id, (message) => message.info.id === messageID)
       expect(Option.isNone(found)).toBe(true)
+    }),
+  )
+
+  it.effect("prefers file-backed messages over stale SQLite rows when no directory hint is provided", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-message-stale-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-message-stale-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const staleDirectory = path.join(root, "old")
+      const actualDirectory = path.join(root, "new")
+      const sessionID = "ses_stale_message_directory" as SessionID
+      const staleMessageID = "msg_stale_message_cache" as MessageID
+      const actualMessageID = "msg_actual_message_file" as MessageID
+      const now = Date.now()
+      yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_stale_message",
+          worktree: staleDirectory,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_stale_message",
+          slug: "stale-message-directory",
+          directory: staleDirectory,
+          title: "Stale message directory",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(MessageTable)
+        .values({
+          id: staleMessageID,
+          session_id: sessionID,
+          time_created: now + 1,
+          time_updated: now + 1,
+          data: {
+            role: "user",
+            time: { created: now + 1 },
+          },
+        } as typeof MessageTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(PartTable)
+        .values({
+          id: "prt_stale_message_cache" as PartID,
+          message_id: staleMessageID,
+          session_id: sessionID,
+          time_created: now + 1,
+          time_updated: now + 1,
+          data: { type: "text", text: "stale SQLite message" },
+        } as typeof PartTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      const actualSession = {
+        id: sessionID,
+        slug: "actual-message-directory",
+        version: "test",
+        projectID: "proj_actual_message",
+        directory: actualDirectory,
+        path: "new",
+        title: "Actual message directory",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: now, updated: now },
+      } as SessionNs.Info
+      yield* Effect.promise(() => writeSessionStore(actualSession))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(actualSession, {
+          type: "message.updated",
+          message: {
+            id: actualMessageID,
+            role: "user",
+            time: { created: now + 2 },
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(actualSession, {
+          type: "message.part.updated",
+          part: {
+            id: "prt_actual_message_file",
+            messageID: actualMessageID,
+            type: "text",
+            text: "actual file-backed message",
+          },
+        }),
+      )
+
+      const page = yield* MessageV2.page({ sessionID, limit: 10 })
+
+      expect(page.items.map((item) => item.info.id)).toEqual([actualMessageID])
+      expect(page.items[0]?.parts).toMatchObject([{ text: "actual file-backed message" }])
     }),
   )
 
