@@ -580,6 +580,141 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores pending and running tool invocations from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_tool_inflight",
+          title: "Core inflight tools",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_tool_inflight", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_tool_inflight",
+              role: "assistant",
+              model: { providerID: "test", modelID: "test", variant: "default" },
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_tool_partial",
+              messageID: "msg_core_tool_inflight",
+              type: "tool-invocation",
+              toolInvocation: {
+                state: "partial-call",
+                toolCallId: "call_core_partial",
+                toolName: "read",
+                args: '{"filePath"',
+              },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_tool_call",
+              messageID: "msg_core_tool_inflight",
+              type: "tool-invocation",
+              toolInvocation: {
+                state: "call",
+                toolCallId: "call_core_running",
+                toolName: "grep",
+                args: { pattern: "atree" },
+              },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_v1_pending",
+              messageID: "msg_core_tool_inflight",
+              type: "tool",
+              tool: "bash",
+              callID: "call_core_v1_pending",
+              state: {
+                status: "pending",
+                input: { command: "pwd" },
+                raw: '{"command":"pwd"}',
+              },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_v1_running",
+              messageID: "msg_core_tool_inflight",
+              type: "tool",
+              tool: "read",
+              callID: "call_core_v1_running",
+              state: {
+                status: "running",
+                input: { filePath: "README.md" },
+                metadata: { title: "Read README.md" },
+                time: { start: 31 },
+              },
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_tool_inflight"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_tool_inflight",
+        type: "assistant",
+        content: [
+          { type: "tool", id: "call_core_partial", name: "read", state: { status: "pending", input: '{"filePath"' } },
+          {
+            type: "tool",
+            id: "call_core_running",
+            name: "grep",
+            state: { status: "running", input: { pattern: "atree" }, structured: {}, content: [] },
+          },
+          {
+            type: "tool",
+            id: "call_core_v1_pending",
+            name: "bash",
+            state: { status: "pending", input: '{"command":"pwd"}' },
+          },
+          {
+            type: "tool",
+            id: "call_core_v1_running",
+            name: "read",
+            state: {
+              status: "running",
+              input: { filePath: "README.md" },
+              structured: { title: "Read README.md" },
+              content: [],
+            },
+          },
+        ],
+      })
+      if (messages[0]?.type === "assistant" && messages[0].content[3]?.type === "tool") {
+        expect(DateTime.toEpochMillis(messages[0].content[3].time.created)).toBe(31)
+      }
+    }),
+  )
+
   it.effect("restores shell events from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

@@ -173,6 +173,8 @@ type V1Part = {
   id: string
   messageID: string
   type: string
+  tool?: string
+  callID?: string
   text?: string
   url?: string
   mime?: string
@@ -191,6 +193,7 @@ type V1Part = {
   state?: {
     status?: string
     input?: unknown
+    raw?: string
     output?: unknown
     title?: string
     metadata?: Record<string, unknown>
@@ -362,6 +365,77 @@ function toolParts(parts: V1Part[], created: DateTime.Utc) {
             result: invocation.result,
           }),
           time: { created, completed: created },
+        }),
+      )
+    }
+    if (part.type === "tool-invocation" && part.toolInvocation?.state === "partial-call") {
+      const invocation = part.toolInvocation
+      if (typeof invocation.toolCallId !== "string" || typeof invocation.toolName !== "string") continue
+      result.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: invocation.toolCallId,
+          name: invocation.toolName,
+          provider: { executed: false },
+          state: new SessionMessage.ToolStatePending({
+            status: "pending",
+            input: textOutput(invocation.args) ?? "",
+          }),
+          time: { created },
+        }),
+      )
+    }
+    if (part.type === "tool-invocation" && part.toolInvocation?.state === "call") {
+      const invocation = part.toolInvocation
+      if (typeof invocation.toolCallId !== "string" || typeof invocation.toolName !== "string") continue
+      result.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: invocation.toolCallId,
+          name: invocation.toolName,
+          provider: { executed: false },
+          state: new SessionMessage.ToolStateRunning({
+            status: "running",
+            input: objectInput(invocation.args),
+            structured: {},
+            content: [],
+          }),
+          time: { created },
+        }),
+      )
+    }
+    if (part.type === "tool" && part.state?.status === "pending") {
+      result.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: part.callID ?? part.id,
+          name: part.tool ?? part.name ?? "tool",
+          provider: { executed: false },
+          state: new SessionMessage.ToolStatePending({
+            status: "pending",
+            input: part.state.raw ?? textOutput(part.state.input) ?? "",
+          }),
+          time: { created },
+        }),
+      )
+    }
+    if (part.type === "tool" && part.state?.status === "running") {
+      result.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: part.callID ?? part.id,
+          name: part.tool ?? part.name ?? "tool",
+          provider: { executed: false },
+          state: new SessionMessage.ToolStateRunning({
+            status: "running",
+            input: objectInput(part.state.input),
+            structured: part.state.metadata ?? {},
+            content: [],
+          }),
+          time: {
+            created:
+              typeof part.state.time?.start === "number" ? DateTime.makeUnsafe(part.state.time.start) : created,
+          },
         }),
       )
     }
