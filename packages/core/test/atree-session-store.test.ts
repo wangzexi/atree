@@ -580,6 +580,61 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores shell events from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_shell",
+          title: "Core shell",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_shell", [
+          {
+            type: "session.next.shell.started",
+            messageID: "msg_core_shell",
+            callID: "call_core_shell",
+            command: "pwd",
+            timestamp: 30,
+          },
+          {
+            type: "session.next.shell.ended",
+            callID: "call_core_shell",
+            output: "/workspace",
+            timestamp: 40,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({ sessionID: SessionV2.ID.make("ses_core_shell"), order: "asc" })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_shell",
+        type: "shell",
+        callID: "call_core_shell",
+        command: "pwd",
+        output: "/workspace",
+      })
+      if (messages[0]?.type === "shell") {
+        expect(DateTime.toEpochMillis(messages[0].time.created)).toBe(30)
+        expect(messages[0].time.completed ? DateTime.toEpochMillis(messages[0].time.completed) : undefined).toBe(40)
+      }
+    }),
+  )
+
   it.effect("replays removed parts from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

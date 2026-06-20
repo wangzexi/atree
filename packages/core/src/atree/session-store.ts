@@ -201,6 +201,15 @@ type V1Part = {
   }
 }
 
+type ShellRecord = {
+  messageID: string
+  callID: string
+  command: string
+  output: string
+  created: number
+  completed?: number
+}
+
 function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
@@ -281,6 +290,16 @@ async function writeBufferIfMissing(target: string, content: Buffer) {
 
 function messageCreated(message: V1Message, fallback: number) {
   return typeof message.time?.created === "number" ? message.time.created : fallback
+}
+
+function timestampValue(value: unknown, fallback: number) {
+  if (typeof value === "number") return value
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>
+    if (typeof record.epochMillis === "number") return record.epochMillis
+    if (typeof record.millis === "number") return record.millis
+  }
+  return fallback
 }
 
 function textParts(parts: V1Part[]) {
@@ -521,6 +540,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
     throw error
   })
   const messages = new Map<string, { info: V1Message; parts: V1Part[] }>()
+  const shells = new Map<string, ShellRecord>()
   const removed = new Set<string>()
   const removedParts = new Set<string>()
   let index = 0
@@ -573,6 +593,33 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const message = messages.get(messageID)
       if (message) message.parts = message.parts.filter((part) => part.id !== partID)
     }
+    if (entry.type === "session.next.shell.started") {
+      const data = entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const command = typeof data.command === "string" ? data.command : undefined
+      if (!messageID || !callID || command === undefined) continue
+      shells.set(callID, {
+        messageID,
+        callID,
+        command,
+        output: "",
+        created: timestampValue(data.timestamp, index),
+      })
+    }
+    if (entry.type === "session.next.shell.ended") {
+      const data = entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const output = typeof data.output === "string" ? data.output : undefined
+      if (!callID || output === undefined) continue
+      const shell = shells.get(callID)
+      if (!shell) continue
+      shells.set(callID, {
+        ...shell,
+        output,
+        completed: timestampValue(data.timestamp, index),
+      })
+    }
   }
 
   const replayed = [...messages.values()]
@@ -588,7 +635,26 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
     const item = await toV2Message(info, message.info, message.parts)
     if (item) converted.push(item)
   }
-  return converted
+  for (const shell of shells.values()) {
+    converted.push(
+      new SessionMessage.Shell({
+        id: SessionMessage.ID.make(shell.messageID),
+        type: "shell",
+        callID: shell.callID,
+        command: shell.command,
+        output: shell.output,
+        time: {
+          created: DateTime.makeUnsafe(shell.created),
+          completed: shell.completed === undefined ? undefined : DateTime.makeUnsafe(shell.completed),
+        },
+      }),
+    )
+  }
+  return converted.sort((a, b) => {
+    const left = DateTime.toEpochMillis(a.time.created)
+    const right = DateTime.toEpochMillis(b.time.created)
+    return left - right || a.id.localeCompare(b.id)
+  })
 }
 
 export async function appendPromptJsonl(info: SessionSchema.Info, admitted: SessionInput.Admitted) {
