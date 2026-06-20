@@ -389,6 +389,43 @@ export async function readSessionJsonlMessages(info: SessionInfo) {
   return (await readSessionJsonlProjection(info)).messages
 }
 
+async function applySessionUpdatedEvents(info: SessionInfo) {
+  const target = path.join(sessionRoot(info), "session.jsonl")
+  const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  let next = info
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (entry.type !== "session.updated" || !isRecord(entry.patch)) continue
+    const patch = entry.patch
+    const time = { ...next.time }
+    if (isRecord(patch.time) && "archived" in patch.time) {
+      const archived = patch.time.archived
+      if (typeof archived === "number") time.archived = archived
+      else if (archived === null) delete time.archived
+    }
+    if (typeof entry.at === "number") {
+      time.updated = Math.max(time.updated, entry.at)
+    }
+    next = {
+      ...next,
+      ...(typeof patch.title === "string" ? { title: patch.title } : {}),
+      ...(isRecord(patch.metadata) ? { metadata: patch.metadata as SessionInfo["metadata"] } : {}),
+      ...(Array.isArray(patch.permission) ? { permission: patch.permission as SessionInfo["permission"] } : {}),
+      time,
+    }
+  }
+  return next
+}
+
 export async function readSessionStore(directory: string, sessionID: SessionID) {
   const target = path.join(directory, ".agents", "atree", "sessions", sessionID, "meta.yaml")
   const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
@@ -396,7 +433,9 @@ export async function readSessionStore(directory: string, sessionID: SessionID) 
     throw error
   })
   if (!raw) return
-  return parseMeta(raw, directory)
+  const parsed = parseMeta(raw, directory)
+  if (!parsed) return
+  return applySessionUpdatedEvents(parsed)
 }
 
 export async function findSessionStore(rootDirectory: string, sessionID: SessionID) {
@@ -524,6 +563,7 @@ export async function readSessionStores(directory: string) {
     const parsed = parseMeta(raw, directory)
     if (parsed) sessions.push(parsed)
   }
-  sessions.sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
-  return sessions
+  const projected = await Promise.all(sessions.map((session) => applySessionUpdatedEvents(session)))
+  projected.sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+  return projected
 }

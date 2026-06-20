@@ -142,6 +142,68 @@ describe("atree session store", () => {
     expect(await readSessionStore(directory, "ses_missing" as any)).toBeUndefined()
   })
 
+  test("overlays session metadata updates from session jsonl when meta is stale", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_jsonl_meta",
+      slug: "jsonl-meta",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      title: "Stale title",
+      metadata: { icon: "🦊" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2, archived: 3 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "session.updated",
+      patch: { title: "JSONL title", metadata: { icon: "🧭" } },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.updated",
+      patch: { permission: [{ permission: "bash", pattern: "*", action: "allow" }] },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.updated",
+      patch: { time: { archived: null } },
+    })
+
+    const restored = await readSessionStore(directory, "ses_jsonl_meta" as any)
+    expect(restored?.title).toBe("JSONL title")
+    expect(restored?.metadata).toEqual({ icon: "🧭" })
+    expect(restored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
+    expect(restored?.time.archived).toBeUndefined()
+    expect(restored?.time.updated).toBeGreaterThan(2)
+  })
+
+  test("sorts directory sessions using session jsonl metadata update time", async () => {
+    const directory = await tempdir()
+    const base = {
+      slug: "session",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    }
+    const old = { ...base, id: "ses_jsonl_sort_old", title: "Old" } as any
+    const fresh = { ...base, id: "ses_jsonl_sort_fresh", title: "Fresh", time: { created: 1, updated: 2 } } as any
+
+    await writeSessionStore(old)
+    await writeSessionStore(fresh)
+    await appendSessionJsonl(old, { type: "session.updated", patch: { title: "Old updated" } })
+
+    const sessions = await readSessionStores(directory)
+    expect(sessions.map((session) => String(session.id))).toEqual(["ses_jsonl_sort_old", "ses_jsonl_sort_fresh"])
+    expect(sessions[0]?.title).toBe("Old updated")
+  })
+
   test("finds a session metadata store under a nested atree root", async () => {
     const root = await tempdir()
     const node = path.join(root, "projects", "alpha")
