@@ -798,6 +798,42 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not list directory sessions that only exist in the stale SQLite cache", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const cachedOnly = yield* session.create({ title: "cached-only-session" })
+
+      yield* Effect.promise(() => fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+        recursive: true,
+        force: true,
+      }))
+
+      const active = yield* session.list({ directory: instance.directory })
+      const archived = yield* session.list({ directory: instance.directory, archived: true })
+
+      expect(active.map((item) => item.id)).not.toContain(cachedOnly.id)
+      expect(archived.map((item) => item.id)).not.toContain(cachedOnly.id)
+    }),
+  )
+
+  it.instance("does not list global directory sessions that only exist in the stale SQLite cache", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const cachedOnly = yield* session.create({ title: "global-cached-only-session" })
+
+      yield* Effect.promise(() => fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+        recursive: true,
+        force: true,
+      }))
+
+      const global = yield* session.listGlobal({ directory: instance.directory })
+
+      expect(global.map((item) => item.id)).not.toContain(cachedOnly.id)
+    }),
+  )
+
   it.instance("materializes data-url file parts into the session assets directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

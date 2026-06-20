@@ -740,8 +740,12 @@ export const layer: Layer.Layer<
     ) {
       if (!input?.directory) return items
       const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
+      const fileIDs = new Set(fileSessions.map((item) => item.id))
       const byID = new Map<string, Info>()
-      for (const item of items) byID.set(item.id, item)
+      for (const item of items) {
+        if (!fileIDs.has(item.id)) continue
+        byID.set(item.id, item)
+      }
       for (const fileSession of fileSessions) {
         const item = localizeFileSession(fileSession, ctx)
         byID.delete(item.id)
@@ -787,14 +791,21 @@ export const layer: Layer.Layer<
         .limit(input?.limit ?? 100)
         .all()
         .pipe(Effect.orDie)
+      const directoryInput = input?.directory ? input : undefined
+      const fileSessions = directoryInput
+        ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
+        : undefined
+      const fileIDs = fileSessions ? new Set(fileSessions.map((item) => item.id)) : undefined
       const byID = new Map<string, Info>()
-      for (const row of rows) byID.set(row.id, fromRow(row))
-      if (input?.directory) {
-        const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory!))
+      for (const row of rows) {
+        if (fileIDs && !fileIDs.has(row.id)) continue
+        byID.set(row.id, fromRow(row))
+      }
+      if (fileSessions) {
         for (const fileSession of fileSessions) {
           const item = localizeFileSession(fileSession, ctx)
           byID.delete(item.id)
-          if (!matchesGlobalListInput(item, input)) continue
+          if (!matchesGlobalListInput(item, directoryInput!)) continue
           byID.set(item.id, item)
         }
       }
