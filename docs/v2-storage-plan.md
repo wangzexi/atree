@@ -215,6 +215,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名。
 - core `session.jsonl` 读取会暂存先于 `message.updated` 到达的 orphan part，并在 message 到达后归并；delta/removal 也能作用到这类暂存 part，避免 JSONL 行顺序轻微乱序时丢消息内容。
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
+- core `SessionTodo` 会在能定位到 file-backed session 时把 todo 状态镜像到同一会话目录的 `todo.json`，读取时目录状态优先；即使 SQLite todo 投影缺失，也能从目录恢复。
 - todo/schedule 的无显式目录解析不再直接信任 SQLite 中缓存的 `SessionTable.directory`；只有该目录仍能读到对应 `meta.yaml` 时才接受，否则继续从当前 instance 或持久化 root 查找真实 file-backed session。
 - schedule 执行后的 `lastRanAt`、`lastRunStatus` 会回写到目录 `schedule.json`，重启后可以恢复运行状态。
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。

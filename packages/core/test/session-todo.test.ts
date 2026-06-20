@@ -1,8 +1,10 @@
 import { describe, expect } from "bun:test"
-import { asc } from "drizzle-orm"
-import { Effect, Layer } from "effect"
+import { asc, eq } from "drizzle-orm"
+import { DateTime, Effect, Layer } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
+import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { readSessionTodoProjection } from "@opencode-ai/core/atree/todo-store"
 import { Project } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -10,6 +12,9 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
 import { testEffect } from "./lib/effect"
+import { mkdtemp, rm } from "fs/promises"
+import os from "os"
+import path from "path"
 
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
@@ -90,6 +95,56 @@ describe("SessionTodo", () => {
         { sessionID, todos: [{ content: "replacement", status: "completed", priority: "medium" }] },
         { sessionID, todos: [] },
       ])
+    }),
+  )
+
+  it.effect("mirrors todo state into a file-backed session directory", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_state")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(directory), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo",
+          directory,
+          title: "file todo",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          projectID: Project.ID.global,
+          title: "file todo",
+          location: { directory: AbsolutePath.make(directory) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+
+      const state = [{ content: "directory todo", status: "pending", priority: "high" }]
+      yield* todos.update({ sessionID: fileSessionID, todos: state })
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: true,
+        todos: state,
+      })
+
+      yield* db.delete(TodoTable).where(eq(TodoTable.session_id, fileSessionID)).run().pipe(Effect.orDie)
+      expect(yield* todos.get(fileSessionID)).toEqual(state)
     }),
   )
 })

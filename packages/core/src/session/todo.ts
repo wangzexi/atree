@@ -2,10 +2,12 @@ export * as SessionTodo from "./todo"
 
 import { asc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
+import { findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
+import { readSessionTodoProjection, writeSessionTodoState } from "../atree/todo-store"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
-import { TodoTable } from "./sql"
+import { SessionTable, TodoTable } from "./sql"
 
 export const Info = Schema.Struct({
   content: Schema.String.annotate({ description: "Brief description of the task" }),
@@ -42,10 +44,33 @@ export const layer = Layer.effect(
     const { db } = yield* Database.Service
     const events = yield* EventV2.Service
 
+    const fileSession = Effect.fn("SessionTodo.fileSession")(function* (sessionID: SessionSchema.ID) {
+      const row = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      if (row?.directory) {
+        const session = yield* Effect.promise(() => readSessionStore(row.directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (session) return session
+      }
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (!root) return
+      return yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+    })
+
     const update = Effect.fn("SessionTodo.update")(function* (input: {
       readonly sessionID: SessionSchema.ID
       readonly todos: ReadonlyArray<Info>
     }) {
+      const session = yield* fileSession(input.sessionID)
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
@@ -66,10 +91,16 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(Effect.orDie)
+      if (session) yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
       yield* events.publish(Event.Updated, input)
     })
 
     const get = Effect.fn("SessionTodo.get")(function* (sessionID: SessionSchema.ID) {
+      const session = yield* fileSession(sessionID)
+      if (session) {
+        const projection = yield* Effect.promise(() => readSessionTodoProjection(session.location.directory, sessionID))
+        if (projection.hasState) return projection.todos
+      }
       const rows = yield* db
         .select()
         .from(TodoTable)
