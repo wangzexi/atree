@@ -177,6 +177,49 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.effect("restores todo state from session jsonl when todo projection files are removed", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-jsonl-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const sessionID = "ses_todo_jsonl_restore" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "todo-jsonl-restore",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Todo JSONL restore",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* todo.update({
+        sessionID,
+        directory,
+        todos: [{ content: "restore from todo jsonl", status: "in_progress", priority: "high" }],
+      })
+      yield* Effect.promise(() =>
+        fs.rm(path.join(directory, ".agents", "atree", "sessions", sessionID, "todo.json"), { force: true }),
+      )
+      yield* Database.Service.use(({ db }) =>
+        db.delete(TodoTable).where(eq(TodoTable.session_id, sessionID)).run().pipe(Effect.orDie),
+      )
+
+      expect(yield* todo.get(sessionID, { directory })).toEqual([
+        { content: "restore from todo jsonl", status: "in_progress", priority: "high" },
+      ])
+    }),
+  )
+
   it.instance("updates todo state for a nested file-backed session found from the persisted atree root", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service

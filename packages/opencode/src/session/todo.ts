@@ -9,7 +9,7 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { readSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionStore } from "@/atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "@/atree/todo-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -162,7 +162,26 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(Effect.orDie)
-      if (directory) yield* Effect.promise(() => writeSessionTodoState(directory, input.sessionID, input.todos))
+      if (directory) {
+        yield* Effect.promise(() => writeSessionTodoState(directory, input.sessionID, input.todos))
+        const session = yield* Effect.promise(() => readSessionStore(directory, input.sessionID))
+        if (session) {
+          yield* Effect.promise(() =>
+            appendSessionJsonl(session, {
+              type: "todo.updated",
+              sessionID: input.sessionID,
+              todos: input.todos,
+            }),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to append todo event to atree session log", {
+                sessionID: input.sessionID,
+                cause,
+              }),
+            ),
+          )
+        }
+      }
       yield* events.publish(Event.Updated, input)
     })
 

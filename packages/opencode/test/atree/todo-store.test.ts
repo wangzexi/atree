@@ -3,7 +3,7 @@ import fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { readSessionTodoProjection, readSessionTodoState, writeSessionTodoState } from "../../src/atree/todo-store"
-import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -109,5 +109,63 @@ describe("atree todo store", () => {
     await writeSessionTodoState(directory, "ses_legacy", [])
     expect(await readSessionTodoProjection(directory, "ses_legacy")).toEqual({ hasState: true, todos: [] })
     expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()
+  })
+
+  test("replays todo state from session jsonl when the projection file is missing", async () => {
+    const directory = await tempdir()
+    await writeSessionStore({
+      id: "ses_jsonl" as never,
+      slug: "jsonl",
+      version: "test",
+      projectID: "proj_jsonl" as never,
+      directory,
+      title: "JSONL",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl" as never))!
+    await appendSessionJsonl(session, {
+      type: "todo.updated",
+      sessionID: "ses_jsonl",
+      todos: [{ content: "old todo", status: "pending", priority: "low" }],
+    })
+    await appendSessionJsonl(session, {
+      type: "todo.updated",
+      sessionID: "ses_jsonl",
+      todos: [{ content: "restored todo", status: "in_progress", priority: "high" }],
+    })
+
+    expect(await readSessionTodoProjection(directory, "ses_jsonl")).toEqual({
+      hasState: true,
+      todos: [{ content: "restored todo", status: "in_progress", priority: "high" }],
+    })
+    expect(await readSessionTodoState(directory, "ses_jsonl")).toEqual([
+      { content: "restored todo", status: "in_progress", priority: "high" },
+    ])
+  })
+
+  test("replays an explicitly empty todo list from session jsonl", async () => {
+    const directory = await tempdir()
+    await writeSessionStore({
+      id: "ses_jsonl_empty" as never,
+      slug: "jsonl-empty",
+      version: "test",
+      projectID: "proj_jsonl_empty" as never,
+      directory,
+      title: "JSONL empty",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_empty" as never))!
+    await appendSessionJsonl(session, {
+      type: "todo.updated",
+      sessionID: "ses_jsonl_empty",
+      todos: [],
+    })
+
+    expect(await readSessionTodoProjection(directory, "ses_jsonl_empty")).toEqual({ hasState: true, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_missing")).toEqual({ hasState: false, todos: [] })
   })
 })

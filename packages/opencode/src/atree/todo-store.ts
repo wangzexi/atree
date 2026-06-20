@@ -31,6 +31,10 @@ function sessionStatePath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "todo.json")
 }
 
+function sessionJsonlPath(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
+}
+
 async function readState(target: string): Promise<TodoState> {
   try {
     const raw = await fs.readFile(target, "utf8")
@@ -93,6 +97,31 @@ async function removeLegacySessionTodo(directory: string, sessionID: string) {
   await writeAtomic(target, state)
 }
 
+async function readSessionJsonlProjection(directory: string, sessionID: string) {
+  const raw = await fs.readFile(sessionJsonlPath(directory, sessionID), "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  let hasState = false
+  let todos: StoredTodo[] = []
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (entry.type !== "todo.updated") continue
+    if (entry.sessionID !== sessionID) continue
+    hasState = true
+    todos = Array.isArray(entry.todos) ? entry.todos.filter(isStoredTodo) : []
+  }
+
+  return { hasState, todos }
+}
+
 export async function writeSessionTodoState(directory: string, sessionID: string, todos: StoredTodo[]) {
   await ensureAtreeDirectoryStore(directory)
   await ensureSessionPayloadFilesByID(directory, sessionID)
@@ -110,7 +139,7 @@ export async function readSessionTodoProjection(directory: string, sessionID: st
   if (sessionState.hasState) return sessionState
 
   const state = await readState(legacyStatePath(directory))
-  if (!Object.hasOwn(state.sessions, sessionID)) return { hasState: false, todos: [] as StoredTodo[] }
+  if (!Object.hasOwn(state.sessions, sessionID)) return readSessionJsonlProjection(directory, sessionID)
   const todos = state.sessions[sessionID]
   return { hasState: true, todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [] }
 }
