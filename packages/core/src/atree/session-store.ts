@@ -644,6 +644,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
     throw error
   })
   const messages = new Map<string, { info: V1Message; parts: V1Part[] }>()
+  const orphanParts = new Map<string, V1Part[]>()
   const shells = new Map<string, ShellRecord>()
   const compactions = new Map<string, CompactionRecord>()
   const directMessages = new Map<string, DirectMessageRecord>()
@@ -664,17 +665,23 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const message = entry.message as V1Message
       if (typeof message.id !== "string" || (message.role !== "user" && message.role !== "assistant")) continue
       const existing = messages.get(message.id)
-      messages.set(message.id, { info: message, parts: existing?.parts ?? [] })
+      messages.set(message.id, { info: message, parts: existing?.parts ?? orphanParts.get(message.id) ?? [] })
+      orphanParts.delete(message.id)
       removed.delete(message.id)
     }
     if (entry.type === "message.part.updated" && entry.part && typeof entry.part === "object") {
       const part = entry.part as V1Part
       if (typeof part.id !== "string" || typeof part.messageID !== "string") continue
       const message = messages.get(part.messageID)
-      if (!message) continue
-      const next = message.parts.filter((item) => item.id !== part.id)
-      next.push(part)
-      messages.set(part.messageID, { info: message.info, parts: next })
+      if (message) {
+        const next = message.parts.filter((item) => item.id !== part.id)
+        next.push(part)
+        messages.set(part.messageID, { info: message.info, parts: next })
+      } else {
+        const next = (orphanParts.get(part.messageID) ?? []).filter((item) => item.id !== part.id)
+        next.push(part)
+        orphanParts.set(part.messageID, next)
+      }
       removedParts.delete(`${part.messageID}:${part.id}`)
     }
     if (entry.type === "message.part.delta") {
@@ -684,12 +691,15 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const delta = typeof entry.delta === "string" ? entry.delta : undefined
       if (!messageID || !partID || !field || delta === undefined) continue
       if (removedParts.has(`${messageID}:${partID}`)) continue
-      const part = messages.get(messageID)?.parts.find((item) => item.id === partID)
+      const part =
+        messages.get(messageID)?.parts.find((item) => item.id === partID) ??
+        orphanParts.get(messageID)?.find((item) => item.id === partID)
       if (part) appendPartDelta(part, field, delta)
     }
     if (entry.type === "message.removed" && typeof entry.messageID === "string") {
       removed.add(entry.messageID)
       messages.delete(entry.messageID)
+      orphanParts.delete(entry.messageID)
     }
     if (entry.type === "message.part.removed") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
@@ -698,6 +708,8 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       removedParts.add(`${messageID}:${partID}`)
       const message = messages.get(messageID)
       if (message) message.parts = message.parts.filter((part) => part.id !== partID)
+      const orphan = orphanParts.get(messageID)
+      if (orphan) orphanParts.set(messageID, orphan.filter((part) => part.id !== partID))
     }
     if (entry.type === "session.next.agent.switched") {
       const data = eventData(entry)

@@ -435,6 +435,67 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("attaches orphan parts when the message arrives later", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_orphan_part",
+          title: "Core orphan part",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_orphan_part", [
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_orphan",
+              messageID: "msg_core_orphan",
+              type: "text",
+              text: "hello ",
+            },
+          },
+          {
+            type: "message.part.delta",
+            messageID: "msg_core_orphan",
+            partID: "prt_core_orphan",
+            field: "text",
+            delta: "orphan",
+          },
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_orphan",
+              role: "assistant",
+              model: { providerID: "test", modelID: "test", variant: "default" },
+              time: { created: 30 },
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({ sessionID: SessionV2.ID.make("ses_core_orphan_part"), order: "asc" })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_orphan",
+        type: "assistant",
+        content: [{ type: "text", text: "hello orphan" }],
+      })
+    }),
+  )
+
   it.effect("restores assistant reasoning parts from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
