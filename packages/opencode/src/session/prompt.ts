@@ -1456,7 +1456,7 @@ export const layer = Layer.effect(
       "SessionPrompt.shell",
     )(function* (input: ShellInput) {
       const ready = yield* Latch.make()
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       return yield* state.startShell(input.sessionID, lastAssistant(session), shellImpl(input, ready), ready)
     })
 
@@ -1514,7 +1514,7 @@ export const layer = Layer.effect(
         template = template.replace(bashRegex, () => results[index++])
       }
       template = template.trim()
-      const commandSession = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const commandSession = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
@@ -1573,6 +1573,7 @@ export const layer = Layer.effect(
 
       const result = yield* prompt({
         sessionID: input.sessionID,
+        directory: commandSession.directory,
         messageID: input.messageID,
         model: userModel,
         agent: userAgent,
@@ -1670,6 +1671,7 @@ export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput"
 
 export const ShellInput = Schema.Struct({
   sessionID: SessionID,
+  directory: Schema.optional(Schema.String),
   messageID: Schema.optional(MessageID),
   agent: Schema.String,
   model: Schema.optional(ModelRef),
@@ -1680,6 +1682,7 @@ export type ShellInput = Schema.Schema.Type<typeof ShellInput>
 export const CommandInput = Schema.Struct({
   messageID: Schema.optional(MessageID),
   sessionID: SessionID,
+  directory: Schema.optional(Schema.String),
   agent: Schema.optional(Schema.String),
   model: Schema.optional(Schema.String),
   arguments: Schema.String,

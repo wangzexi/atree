@@ -320,10 +320,11 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof InitPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
       yield* promptSvc
         .command({
           sessionID: ctx.params.sessionID,
+          directory: info.directory,
           messageID: ctx.payload.messageID,
           model: `${ctx.payload.providerID}/${ctx.payload.modelID}`,
           command: Command.Default.INIT,
@@ -366,6 +367,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
       yield* compactSvc.create({
         sessionID: ctx.params.sessionID,
+        directory: info.directory,
         agent: currentAgent,
         model: {
           providerID: ctx.payload.providerID,
@@ -373,7 +375,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         },
         auto: ctx.payload.auto ?? false,
       })
-      yield* promptSvc.loop({ sessionID: ctx.params.sessionID })
+      yield* promptSvc.loop({ sessionID: ctx.params.sessionID, directory: info.directory })
       return true
     })
 
@@ -381,11 +383,12 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
       const message = yield* promptSvc
         .prompt({
           ...ctx.payload,
           sessionID: ctx.params.sessionID,
+          directory: info.directory,
         })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
       return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
@@ -397,8 +400,8 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof PromptPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
-      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID }).pipe(
+      const info = yield* requireSession(ctx.params.sessionID)
+      yield* promptSvc.prompt({ ...ctx.payload, sessionID: ctx.params.sessionID, directory: info.directory }).pipe(
         Effect.catchCause((cause) =>
           Effect.gen(function* () {
             yield* Effect.logError("prompt_async failed", { sessionID: ctx.params.sessionID, cause })
@@ -417,9 +420,9 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof CommandPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
+      const info = yield* requireSession(ctx.params.sessionID)
       return yield* promptSvc
-        .command({ ...ctx.payload, sessionID: ctx.params.sessionID })
+        .command({ ...ctx.payload, sessionID: ctx.params.sessionID, directory: info.directory })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
     })
 
@@ -427,8 +430,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       payload: typeof ShellPayload.Type
     }) {
-      yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID }))
+      const info = yield* requireSession(ctx.params.sessionID)
+      return yield* SessionError.mapBusy(
+        promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID, directory: info.directory }),
+      )
     })
 
     const revert = Effect.fn("SessionHttpApi.revert")(function* (ctx: {
