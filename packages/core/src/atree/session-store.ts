@@ -136,6 +136,14 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
     next = SessionSchema.Info.make({
       ...next,
       ...(typeof patch.title === "string" ? { title: patch.title } : {}),
+      ...("workspaceID" in patch
+        ? {
+            location: Location.Ref.make({
+              directory: next.location.directory,
+              workspaceID: typeof patch.workspaceID === "string" ? WorkspaceV2.ID.make(patch.workspaceID) : undefined,
+            }),
+          }
+        : {}),
       time,
     })
   }

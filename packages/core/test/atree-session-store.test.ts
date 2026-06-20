@@ -270,7 +270,7 @@ describe("atree file-backed SessionV2 discovery", () => {
             at: 100,
             type: "session.updated",
             sessionID,
-            patch: { title: "JSONL core title" },
+            patch: { title: "JSONL core title", workspaceID: "wrk_core_jsonl" },
           },
           {
             version: 1,
@@ -286,6 +286,7 @@ describe("atree file-backed SessionV2 discovery", () => {
       const loaded = yield* sessions.get(sessionID, { directory: AbsolutePath.make(node) })
 
       expect(loaded.title).toBe("JSONL core title")
+      expect(loaded.location.workspaceID).toBe("wrk_core_jsonl")
       expect(loaded.time.archived).toBeUndefined()
       expect(DateTime.toEpochMillis(loaded.time.updated)).toBe(110)
     }),
