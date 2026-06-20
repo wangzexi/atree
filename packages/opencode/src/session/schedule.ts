@@ -303,7 +303,6 @@ export const layer = Layer.effect(
           )
           .pipe(Effect.orDie)
         yield* events.publish(Event.Ran, { scheduleID, sessionID, status: runStatus, ranAt })
-        yield* syncScheduleState(sessionID, options?.directory)
         yield* appendScheduleSessionEventBestEffort(
           sessionID,
           {
@@ -315,6 +314,7 @@ export const layer = Layer.effect(
           },
           options?.directory,
         )
+        yield* syncScheduleState(sessionID, options?.directory)
       },
     )
 
@@ -328,7 +328,6 @@ export const layer = Layer.effect(
       timers.delete(scheduleID)
       yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
       yield* events.publish(Event.Deleted, { scheduleID, sessionID })
-      yield* syncScheduleState(sessionID, directoryHint)
       yield* appendScheduleSessionEventBestEffort(
         sessionID,
         {
@@ -339,6 +338,7 @@ export const layer = Layer.effect(
         },
         directoryHint,
       )
+      yield* syncScheduleState(sessionID, directoryHint)
     })
 
     const getLastRun = Effect.fn("Schedule.getLastRun")(function* (scheduleID: ID) {
@@ -896,7 +896,6 @@ export const layer = Layer.effect(
       const bridge = yield* EffectBridge.make()
       startTimer(id, input.sessionID, kind, expression || "", runAt, bridge, directory)
       yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID })
-      yield* syncScheduleState(input.sessionID, input.directory)
       const createdTimer = timers.get(id)
       const created = {
         id,
@@ -923,6 +922,7 @@ export const layer = Layer.effect(
         },
         input.directory,
       )
+      yield* syncScheduleState(input.sessionID, input.directory)
       return created
     })
 
@@ -943,7 +943,6 @@ export const layer = Layer.effect(
           stopTimer(timer)
           timers.delete(scheduleID)
         }
-        yield* Effect.promise(() => writeSessionScheduleState(found.directory, found.sessionID, remaining))
         yield* events.publish(Event.Deleted, {
           scheduleID,
           sessionID: found.sessionID as SessionID,
@@ -958,6 +957,7 @@ export const layer = Layer.effect(
           },
           found.directory,
         )
+        yield* Effect.promise(() => writeSessionScheduleState(found.directory, found.sessionID, remaining))
         return true
       }
       const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
@@ -970,7 +970,6 @@ export const layer = Layer.effect(
           stopTimer(timer)
           timers.delete(scheduleID)
         }
-        yield* Effect.promise(() => writeSessionScheduleState(directory, session.id, remaining))
         yield* events.publish(Event.Deleted, {
           scheduleID,
           sessionID: session.id,
@@ -985,6 +984,7 @@ export const layer = Layer.effect(
           },
           directory,
         )
+        yield* Effect.promise(() => writeSessionScheduleState(directory, session.id, remaining))
         return true
       }
       return false
@@ -1016,7 +1016,6 @@ export const layer = Layer.effect(
         scheduleID,
         sessionID: row.session_id as SessionID,
       })
-      yield* syncScheduleState(row.session_id as SessionID, options?.directory)
       yield* appendScheduleSessionEventBestEffort(
         row.session_id as SessionID,
         {
@@ -1027,6 +1026,7 @@ export const layer = Layer.effect(
         },
         options?.directory,
       )
+      yield* syncScheduleState(row.session_id as SessionID, options?.directory)
     })
 
     const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (

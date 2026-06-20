@@ -9,7 +9,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Effect, Layer } from "effect"
 import { eq } from "drizzle-orm"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
-import { writeSessionStore } from "../../src/atree/session-store"
+import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 import { writeWorkspaceRoot } from "../../src/atree/state"
 import { Schedule } from "../../src/session/schedule"
 import { ScheduleTable } from "../../src/session/schedule.sql"
@@ -806,6 +806,9 @@ describe("atree schedule restore", () => {
       })
       expect(entries[1]).toMatchObject({ scheduleID: created.id, sessionID, status: "ran", ranAt: now + 1_000 })
       expect(entries[2]).toMatchObject({ scheduleID: created.id, sessionID, reason: "deleted" })
+      expect(entries.every((entry) => typeof entry.at === "number")).toBe(true)
+      const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+      expect(stored?.time.updated).toBeGreaterThanOrEqual(entries[2].at)
       expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
     }),
   )
