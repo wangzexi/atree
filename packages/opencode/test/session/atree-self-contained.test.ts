@@ -8,7 +8,7 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { and, eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
-import { readSessionScheduleState } from "@/atree/schedule-store"
+import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
 import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { readSessionTodoState } from "@/atree/todo-store"
 import { BackgroundJob } from "@/background/job"
@@ -17,7 +17,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Schedule } from "@/session/schedule"
 import { ScheduleRunTable, ScheduleTable } from "@/session/schedule.sql"
-import { MessageID, PartID } from "@/session/schema"
+import { MessageID, PartID, SessionID } from "@/session/schema"
 import { Session } from "@/session/session"
 import { Todo } from "@/session/todo"
 import { Storage } from "@/storage/storage"
@@ -253,6 +253,59 @@ describe("atree directory self-contained state", () => {
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
         .where(eq(ScheduleTable.id, schedule.id))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
+
+  it.instance("archiving a file-backed session clears schedule state without database rows", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+      const now = Date.now()
+      const sessionID = "ses_file_archive_clears_schedule" as SessionID
+      const scheduleID = "sch_file_archive_clears_schedule"
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-archive-clears-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: instance.directory,
+          path: ".",
+          title: "File archive clears schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "should be cleared from file state",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+
+      yield* sessions.setArchived({ sessionID, directory: instance.directory, time: now + 1 })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+      const row = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
         .get()
         .pipe(Effect.orDie)
       expect(row).toBeUndefined()
