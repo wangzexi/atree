@@ -2751,11 +2751,23 @@ export default function Layout(props: ParentProps) {
     let routeDirectoryGroupRun = 0
     createEffect(() => {
       const run = ++routeDirectoryGroupRun
-      const root = rootProject()?.worktree
       const directory = currentDir()
-      if (!root || !directory) return
+      if (!directory) return
+
+      const root = rootProject()?.worktree ?? projectRoot(directory)
       const group = sessionTabs.directoryGroup()
-      if (group?.server === server.key && pathKey(group.directory) === pathKey(directory)) return
+      const sessionID = params.id
+      const hasCurrentSession = !!sessionID
+        ? sessionTabs.store.some(
+            (tab) =>
+              tab.type === "session" &&
+              tab.server === server.key &&
+              tab.sessionId === sessionID &&
+              pathKey(atob(tab.dirBase64)) === pathKey(directory),
+          )
+        : true
+
+      if (group?.server === server.key && pathKey(group.directory) === pathKey(directory) && hasCurrentSession) return
 
       void loadDirectory(root, directory, { probeChildren: true }).then(() => {
         if (run !== routeDirectoryGroupRun) return
