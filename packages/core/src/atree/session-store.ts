@@ -11,7 +11,7 @@ import { ProviderV2 } from "../provider"
 import { AbsolutePath, RelativePath } from "../schema"
 import type { SessionInput } from "../session/input"
 import { SessionMessage } from "../session/message"
-import { FileAttachment } from "../session/prompt"
+import { AgentAttachment, FileAttachment } from "../session/prompt"
 import { SessionSchema } from "../session/schema"
 import { WorkspaceV2 } from "../workspace"
 
@@ -226,6 +226,14 @@ type DirectMessageRecord =
   | { kind: "model"; messageID: string; model: ModelV2.Ref; created: number }
   | { kind: "system"; messageID: string; text: string; created: number }
   | { kind: "synthetic"; messageID: string; text: string; created: number }
+
+type PromptEventRecord = {
+  messageID: string
+  text: string
+  files?: FileAttachment[]
+  agents?: AgentAttachment[]
+  created: number
+}
 
 type AssistantEventRecord = {
   id: string
@@ -630,6 +638,29 @@ async function materializePromptFile(info: SessionSchema.Info, file: FileAttachm
   return { uri: relative.split(path.sep).join("/"), mime }
 }
 
+async function resolvePromptFile(info: SessionSchema.Info, file: FileAttachment) {
+  let uri = file.uri
+  if (assetURL(uri)) {
+    const root = sessionRoot(info)
+    const assetsRoot = path.resolve(root, "assets")
+    const assetPath = path.resolve(root, uri)
+    if (assetPath !== assetsRoot && assetPath.startsWith(`${assetsRoot}${path.sep}`)) {
+      const buffer = await fs.readFile(assetPath).catch((error: unknown) => {
+        if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
+        throw error
+      })
+      if (buffer) uri = `data:${file.mime};base64,${buffer.toString("base64")}`
+    }
+  }
+  return new FileAttachment({
+    uri,
+    mime: file.mime,
+    name: file.name,
+    description: file.description,
+    source: file.source,
+  })
+}
+
 async function resolveFilePart(info: SessionSchema.Info, part: V1Part) {
   if (part.type !== "file" || typeof part.url !== "string" || typeof part.mime !== "string") return
   let uri = part.url
@@ -730,6 +761,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
   const shells = new Map<string, ShellRecord>()
   const compactions = new Map<string, CompactionRecord>()
   const directMessages = new Map<string, DirectMessageRecord>()
+  const promptEvents = new Map<string, PromptEventRecord>()
   const assistantEvents = new Map<string, AssistantEventRecord>()
   const removed = new Set<string>()
   const removedParts = new Set<string>()
@@ -793,6 +825,51 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       if (message) message.parts = message.parts.filter((part) => part.id !== partID)
       const orphan = orphanParts.get(messageID)
       if (orphan) orphanParts.set(messageID, orphan.filter((part) => part.id !== partID))
+    }
+    if (entry.type === "session.next.prompted") {
+      const data = eventData(entry)
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const prompt = data.prompt && typeof data.prompt === "object" ? (data.prompt as Record<string, unknown>) : undefined
+      if (!messageID || !prompt) continue
+      const text = typeof prompt.text === "string" ? prompt.text : undefined
+      if (text === undefined) continue
+      const files = Array.isArray(prompt.files)
+        ? prompt.files.flatMap((file) => {
+            if (!file || typeof file !== "object") return []
+            const item = file as { uri?: unknown; mime?: unknown; name?: unknown; description?: unknown; source?: unknown }
+            if (typeof item.uri !== "string" || typeof item.mime !== "string") return []
+            return [
+              new FileAttachment({
+                uri: item.uri,
+                mime: item.mime,
+                name: typeof item.name === "string" ? item.name : undefined,
+                description: typeof item.description === "string" ? item.description : undefined,
+                source: item.source && typeof item.source === "object" ? (item.source as FileAttachment["source"]) : undefined,
+              }),
+            ]
+          })
+        : undefined
+      const agents = Array.isArray(prompt.agents)
+        ? prompt.agents.flatMap((agent) => {
+            if (!agent || typeof agent !== "object") return []
+            const item = agent as { name?: unknown; source?: unknown }
+            if (typeof item.name !== "string") return []
+            return [
+              new AgentAttachment({
+                name: item.name,
+                source: item.source && typeof item.source === "object" ? (item.source as AgentAttachment["source"]) : undefined,
+              }),
+            ]
+          })
+        : undefined
+      promptEvents.set(messageID, {
+        messageID,
+        text,
+        files: files && files.length > 0 ? files : undefined,
+        agents: agents && agents.length > 0 ? agents : undefined,
+        created: timestampValue(data.timestamp, index),
+      })
+      removed.delete(messageID)
     }
     if (entry.type === "session.next.agent.switched") {
       const data = eventData(entry)
@@ -1148,6 +1225,24 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       converted.push(item)
       replayedMessageIDs.add(item.id)
     }
+  }
+  for (const prompt of promptEvents.values()) {
+    if (removed.has(prompt.messageID) || replayedMessageIDs.has(prompt.messageID)) continue
+    const files = prompt.files
+      ? (await Promise.all(prompt.files.map((file) => resolvePromptFile(info, file)))).filter(
+          (file): file is FileAttachment => file !== undefined,
+        )
+      : undefined
+    converted.push(
+      new SessionMessage.User({
+        id: SessionMessage.ID.make(prompt.messageID),
+        type: "user",
+        text: prompt.text,
+        files: files && files.length > 0 ? files : undefined,
+        agents: prompt.agents,
+        time: { created: DateTime.makeUnsafe(prompt.created) },
+      }),
+    )
   }
   for (const message of directMessages.values()) {
     const created = DateTime.makeUnsafe(message.created)

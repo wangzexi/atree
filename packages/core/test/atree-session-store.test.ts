@@ -636,6 +636,129 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores event-backed prompts from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_prompted",
+          title: "Core event prompted",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        mkdir(path.join(node, ".agents", "atree", "sessions", "ses_core_event_prompted", "assets"), {
+          recursive: true,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeFile(
+          path.join(node, ".agents", "atree", "sessions", "ses_core_event_prompted", "assets", "prompt.txt"),
+          "prompt asset",
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_prompted", [
+          {
+            type: "session.next.prompted",
+            messageID: "msg_core_event_prompted",
+            prompt: {
+              text: "Prompt text",
+              files: [{ uri: "assets/prompt.txt", mime: "text/plain", name: "prompt.txt" }],
+              agents: [{ name: "build" }],
+            },
+            delivery: "steer",
+            timestamp: 30,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_prompted"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_prompted",
+        type: "user",
+        text: "Prompt text",
+        files: [{ uri: "data:text/plain;base64,cHJvbXB0IGFzc2V0", mime: "text/plain", name: "prompt.txt" }],
+        agents: [{ name: "build" }],
+      })
+      expect(DateTime.toEpochMillis(messages[0]!.time.created)).toBe(30)
+    }),
+  )
+
+  it.effect("does not duplicate mixed event-backed prompts from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_prompted_mixed",
+          title: "Core event prompted mixed",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_prompted_mixed", [
+          {
+            type: "message.updated",
+            message: { id: "msg_core_event_prompted_mixed", role: "user", time: { created: 30 } },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "part_core_event_prompted_mixed",
+              messageID: "msg_core_event_prompted_mixed",
+              type: "text",
+              text: "V1 prompt",
+            },
+          },
+          {
+            type: "session.next.prompted",
+            messageID: "msg_core_event_prompted_mixed",
+            prompt: { text: "Event prompt" },
+            delivery: "steer",
+            timestamp: 31,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_prompted_mixed"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_prompted_mixed",
+        type: "user",
+        text: "V1 prompt",
+      })
+    }),
+  )
+
   it.effect("restores event-backed assistant steps from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
