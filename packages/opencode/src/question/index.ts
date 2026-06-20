@@ -5,6 +5,7 @@ import { SessionID, MessageID } from "@/session/schema"
 import { QuestionID } from "./schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
 
 // Schemas — these are pure data; nothing checks class identity (see PR
 // description) so they're plain `Schema.Struct` + type alias. That lets
@@ -168,6 +169,10 @@ export const layer = Layer.effect(
       }
       pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)
+      yield* appendAtreeSessionEventByIDBestEffort(info.sessionID, {
+        type: "question.asked",
+        question: info,
+      })
 
       return yield* Effect.ensuring(
         Deferred.await(deferred),
@@ -194,6 +199,12 @@ export const layer = Layer.effect(
         requestID: existing.info.id,
         answers: input.answers.map((a) => [...a]),
       })
+      yield* appendAtreeSessionEventByIDBestEffort(existing.info.sessionID, {
+        type: "question.replied",
+        sessionID: existing.info.sessionID,
+        requestID: existing.info.id,
+        answers: input.answers.map((a) => [...a]),
+      })
       yield* Deferred.succeed(existing.deferred, input.answers)
     })
 
@@ -207,6 +218,11 @@ export const layer = Layer.effect(
       pending.delete(requestID)
       yield* Effect.logInfo("rejected", { requestID })
       yield* events.publish(Event.Rejected, {
+        sessionID: existing.info.sessionID,
+        requestID: existing.info.id,
+      })
+      yield* appendAtreeSessionEventByIDBestEffort(existing.info.sessionID, {
+        type: "question.rejected",
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
       })

@@ -2,18 +2,21 @@ import { describe, expect } from "bun:test"
 import fs from "fs/promises"
 import path from "path"
 import { Database } from "@opencode-ai/core/database/database"
+import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { MessageTable, PartTable, SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { and, eq } from "drizzle-orm"
-import { Effect, Layer } from "effect"
+import { Effect, Fiber, Layer } from "effect"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
 import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { readSessionTodoState } from "@/atree/todo-store"
 import { BackgroundJob } from "@/background/job"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { Permission } from "@/permission"
+import { Question } from "@/question"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Schedule } from "@/session/schedule"
 import { ScheduleRunTable, ScheduleTable } from "@/session/schedule.sql"
@@ -37,12 +40,103 @@ const it = testEffect(
     ),
     Schedule.defaultLayer,
     Todo.defaultLayer,
+    Question.layer.pipe(Layer.provideMerge(EventV2Bridge.defaultLayer)),
+    Permission.layer.pipe(Layer.provideMerge(EventV2Bridge.defaultLayer)),
     CrossSpawnSpawner.defaultLayer,
     testInstanceStoreLayer,
   ),
 )
 
+const waitFor = <T>(load: Effect.Effect<T | undefined>) =>
+  Effect.gen(function* () {
+    for (let i = 0; i < 20; i++) {
+      const value = yield* load
+      if (value !== undefined) return value
+      yield* Effect.sleep("10 millis")
+    }
+    throw new Error("timed out waiting for pending request")
+  })
+
 describe("atree directory self-contained state", () => {
+  it.instance("records pending question and permission decisions in session.jsonl", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+      const instance = yield* TestInstance
+
+      const session = yield* sessions.create({ title: "interaction events" })
+
+      const questionFiber = yield* questions
+        .ask({
+          sessionID: session.id,
+          questions: [
+            {
+              question: "Which path should atree take?",
+              header: "Path",
+              options: [{ label: "Local", description: "Use local directory state" }],
+            },
+          ],
+        })
+        .pipe(Effect.forkScoped)
+      const pendingQuestion = yield* waitFor(questions.list().pipe(Effect.map((items) => items[0])))
+      yield* questions.reply({ requestID: pendingQuestion.id, answers: [["Local"]] })
+      expect(yield* Fiber.join(questionFiber)).toEqual([["Local"]])
+
+      const permissionFiber = yield* permissions
+        .ask({
+          id: PermissionV1.ID.make("per_atree_jsonl"),
+          sessionID: session.id,
+          permission: "bash",
+          patterns: ["echo atree"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        })
+        .pipe(Effect.forkScoped)
+      const pendingPermission = yield* waitFor(permissions.list().pipe(Effect.map((items) => items[0])))
+      yield* permissions.reply({ requestID: pendingPermission.id, reply: "once" })
+      yield* Fiber.join(permissionFiber)
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "question.asked",
+          question: expect.objectContaining({ id: pendingQuestion.id, sessionID: session.id }),
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "question.replied",
+          sessionID: session.id,
+          requestID: pendingQuestion.id,
+          answers: [["Local"]],
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.asked",
+          permission: expect.objectContaining({ id: pendingPermission.id, sessionID: session.id }),
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.replied",
+          sessionID: session.id,
+          requestID: pendingPermission.id,
+          reply: "once",
+        }),
+      )
+    }),
+  )
+
   it.instance("persists session identity fields in directory metadata without SQLite cache", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

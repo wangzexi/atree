@@ -7,6 +7,7 @@ import os from "os"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
 
 export const Event = {
   Asked: EventV2.define({ type: "permission.asked", schema: PermissionV1.Request.fields }),
@@ -109,6 +110,10 @@ export const layer = Layer.effect(
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
       pending.set(id, { info, deferred })
       yield* events.publish(Event.Asked, info)
+      yield* appendAtreeSessionEventByIDBestEffort(info.sessionID, {
+        type: "permission.asked",
+        permission: info,
+      })
       return yield* Effect.ensuring(
         Deferred.await(deferred),
         Effect.sync(() => {
@@ -128,6 +133,12 @@ export const layer = Layer.effect(
         requestID: existing.info.id,
         reply: input.reply,
       })
+      yield* appendAtreeSessionEventByIDBestEffort(existing.info.sessionID, {
+        type: "permission.replied",
+        sessionID: existing.info.sessionID,
+        requestID: existing.info.id,
+        reply: input.reply,
+      })
 
       if (input.reply === "reject") {
         yield* Deferred.fail(
@@ -141,6 +152,12 @@ export const layer = Layer.effect(
           if (item.info.sessionID !== existing.info.sessionID) continue
           pending.delete(id)
           yield* events.publish(Event.Replied, {
+            sessionID: item.info.sessionID,
+            requestID: item.info.id,
+            reply: "reject",
+          })
+          yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+            type: "permission.replied",
             sessionID: item.info.sessionID,
             requestID: item.info.id,
             reply: "reject",
@@ -169,6 +186,12 @@ export const layer = Layer.effect(
         if (!ok) continue
         pending.delete(id)
         yield* events.publish(Event.Replied, {
+          sessionID: item.info.sessionID,
+          requestID: item.info.id,
+          reply: "always",
+        })
+        yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+          type: "permission.replied",
           sessionID: item.info.sessionID,
           requestID: item.info.id,
           reply: "always",
