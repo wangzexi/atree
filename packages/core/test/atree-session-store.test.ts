@@ -88,10 +88,12 @@ describe("atree file-backed SessionV2 discovery", () => {
       })
       const sessionRoot = path.join(node, ".agents", "atree", "sessions", session.id)
 
+      const directoryMeta = yield* Effect.promise(() => readFile(path.join(node, ".agents", "atree", "meta.yaml"), "utf8"))
       const meta = yield* Effect.promise(() => readFile(path.join(sessionRoot, "meta.yaml"), "utf8"))
       const jsonl = yield* Effect.promise(() => readFile(path.join(sessionRoot, "session.jsonl"), "utf8"))
       const assets = yield* Effect.promise(() => readdir(path.join(sessionRoot, "assets")))
 
+      expect(directoryMeta).toContain('source: "atree"')
       expect(meta).toContain('id: "ses_core_create_store"')
       expect(meta).toContain("createdAt:")
       expect(jsonl).toBe("")

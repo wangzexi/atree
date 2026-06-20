@@ -224,6 +224,7 @@ async function writeAtomic(target: string, content: string) {
 }
 
 async function writeIfMissing(target: string, content: string) {
+  await fs.mkdir(path.dirname(target), { recursive: true })
   try {
     await fs.writeFile(target, content, { flag: "wx" })
   } catch (error) {
@@ -233,6 +234,7 @@ async function writeIfMissing(target: string, content: string) {
 }
 
 export async function writeSessionStore(info: SessionSchema.Info) {
+  await writeIfMissing(path.join(info.location.directory, ".agents", "atree", "meta.yaml"), 'version: 1\nsource: "atree"\n')
   const root = sessionRoot(info)
   await fs.mkdir(path.join(root, "assets"), { recursive: true })
   await writeIfMissing(path.join(root, "session.jsonl"), "")
