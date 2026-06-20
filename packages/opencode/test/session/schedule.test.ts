@@ -371,6 +371,7 @@ it.instance("clears a one-time scheduled task in the file-backed directory that 
     yield* schedules.tick(created.id)
     const prompt = yield* takePrompt(queue)
     expect(prompt.sessionID).toBe(sessionID)
+    expect(prompt.directory).toBe(target)
     expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
     expect(yield* Effect.promise(() => readSessionScheduleState(stale, sessionID))).toEqual([])
   }),

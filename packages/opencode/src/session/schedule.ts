@@ -622,6 +622,7 @@ export const layer = Layer.effect(
       yield* prompt
         .prompt({
           sessionID,
+          directory: directoryHint,
           parts: [
             {
               type: "text",

@@ -1138,7 +1138,7 @@ export const layer = Layer.effect(
     const prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error> = Effect.fn(
       "SessionPrompt.prompt",
     )(function* (input: PromptInput) {
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       yield* revert.cleanup(session)
       const message = yield* createUserMessage({ ...input, session })
       yield* sessions.touch(input.sessionID, { directory: session.directory })
@@ -1153,7 +1153,7 @@ export const layer = Layer.effect(
       }
 
       if (input.noReply === true) return message
-      return yield* loop({ sessionID: input.sessionID })
+      return yield* loop({ sessionID: input.sessionID, directory: session.directory })
     })
 
     const lastAssistant = Effect.fnUntraced(function* (session: Session.Info) {
@@ -1448,7 +1448,7 @@ export const layer = Layer.effect(
     const loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts> = Effect.fn("SessionPrompt.loop")(function* (
       input: LoopInput,
     ) {
-      const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       return yield* state.ensureRunning(input.sessionID, lastAssistant(session), runLoop(session))
     })
 
@@ -1640,6 +1640,7 @@ const ModelRef = Schema.Struct({
 
 export const PromptInput = Schema.Struct({
   sessionID: SessionID,
+  directory: Schema.optional(Schema.String),
   messageID: Schema.optional(MessageID),
   model: Schema.optional(ModelRef),
   agent: Schema.optional(Schema.String),
@@ -1664,6 +1665,7 @@ export type PromptInput = Schema.Schema.Type<typeof PromptInput>
 
 export class LoopInput extends Schema.Class<LoopInput>("SessionPrompt.LoopInput")({
   sessionID: SessionID,
+  directory: Schema.optional(Schema.String),
 }) {}
 
 export const ShellInput = Schema.Struct({

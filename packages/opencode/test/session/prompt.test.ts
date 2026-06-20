@@ -7,6 +7,7 @@ import { EventV2Bridge } from "@/event-v2-bridge"
 import { FetchHttpClient } from "effect/unstable/http"
 import { expect } from "bun:test"
 import { Cause, Deferred, Duration, Effect, Exit, Fiber, Layer } from "effect"
+import fs from "fs/promises"
 import path from "path"
 import { fileURLToPath, pathToFileURL } from "url"
 import { NamedError } from "@opencode-ai/core/util/error"
@@ -609,6 +610,38 @@ it.instance("loop writes assistant output to the session directory instead of th
     expect(result.info.path.cwd).toBe(nodeDirectory)
     expect(storedText).toContain("write from node session")
     expect(storedText).toContain("node response")
+  }),
+)
+
+it.instance("prompt writes copied file-backed session input to the explicit target directory", () =>
+  Effect.gen(function* () {
+    const { dir } = yield* useServerConfig(providerCfg)
+    const prompt = yield* SessionPrompt.Service
+    const sessions = yield* Session.Service
+    const sourceDirectory = path.join(dir, "prompt-source")
+    const targetDirectory = path.join(dir, "prompt-target")
+    yield* ensureDir(sourceDirectory)
+    yield* ensureDir(targetDirectory)
+    const chat = yield* sessions.create({ title: "Copied prompt", directory: sourceDirectory })
+    yield* Effect.promise(() =>
+      fs.cp(path.join(sourceDirectory, ".agents"), path.join(targetDirectory, ".agents"), { recursive: true }),
+    )
+
+    yield* prompt.prompt({
+      sessionID: chat.id,
+      directory: targetDirectory,
+      agent: "build",
+      noReply: true,
+      parts: [{ type: "text", text: "target-only prompt" }],
+    })
+
+    const sourceStored = yield* Effect.promise(() => readSessionJsonlMessages(chat))
+    const targetStored = yield* Effect.promise(() =>
+      readSessionJsonlMessages({ ...chat, directory: targetDirectory }),
+    )
+
+    expect(JSON.stringify(sourceStored)).not.toContain("target-only prompt")
+    expect(JSON.stringify(targetStored)).toContain("target-only prompt")
   }),
 )
 
