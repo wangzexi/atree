@@ -507,6 +507,74 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores direct session events from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_direct_events",
+          title: "Core direct events",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_direct_events", [
+          {
+            type: "session.next.agent.switched",
+            messageID: "msg_core_agent",
+            agent: "build",
+            timestamp: 30,
+          },
+          {
+            type: "session.next.model.switched",
+            messageID: "msg_core_model",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 31,
+          },
+          {
+            type: "session.next.context.updated",
+            messageID: "msg_core_context",
+            text: "System context",
+            timestamp: 32,
+          },
+          {
+            type: "session.next.synthetic",
+            messageID: "msg_core_synthetic",
+            text: "Synthetic context",
+            timestamp: 33,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_direct_events")
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+      const context = yield* sessions.context(sessionID)
+
+      expect(messages).toMatchObject([
+        { id: "msg_core_agent", type: "agent-switched", agent: "build" },
+        {
+          id: "msg_core_model",
+          type: "model-switched",
+          model: { providerID: "test", id: "model-a", variant: "default" },
+        },
+        { id: "msg_core_context", type: "system", text: "System context" },
+        { id: "msg_core_synthetic", type: "synthetic", text: "Synthetic context", sessionID },
+      ])
+      expect(context.map((message) => message.id)).toEqual(messages.map((message) => message.id))
+      expect(DateTime.toEpochMillis(messages[0]!.time.created)).toBe(30)
+    }),
+  )
+
   it.effect("restores completed tool invocations from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

@@ -221,6 +221,12 @@ type CompactionRecord = {
   created: number
 }
 
+type DirectMessageRecord =
+  | { kind: "agent"; messageID: string; agent: string; created: number }
+  | { kind: "model"; messageID: string; model: ModelV2.Ref; created: number }
+  | { kind: "system"; messageID: string; text: string; created: number }
+  | { kind: "synthetic"; messageID: string; text: string; created: number }
+
 function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
@@ -311,6 +317,22 @@ function timestampValue(value: unknown, fallback: number) {
     if (typeof record.millis === "number") return record.millis
   }
   return fallback
+}
+
+function eventData(entry: Record<string, unknown>) {
+  return entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+}
+
+function modelRef(value: unknown): ModelV2.Ref | undefined {
+  if (!value || typeof value !== "object") return
+  const model = value as { id?: unknown; modelID?: unknown; providerID?: unknown; variant?: unknown }
+  const id = typeof model.id === "string" ? model.id : typeof model.modelID === "string" ? model.modelID : undefined
+  if (typeof id !== "string" || typeof model.providerID !== "string") return
+  return {
+    id: ModelV2.ID.make(id),
+    providerID: ProviderV2.ID.make(model.providerID),
+    variant: ModelV2.VariantID.make(typeof model.variant === "string" ? model.variant : "default"),
+  }
 }
 
 function textParts(parts: V1Part[]) {
@@ -624,6 +646,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
   const messages = new Map<string, { info: V1Message; parts: V1Part[] }>()
   const shells = new Map<string, ShellRecord>()
   const compactions = new Map<string, CompactionRecord>()
+  const directMessages = new Map<string, DirectMessageRecord>()
   const removed = new Set<string>()
   const removedParts = new Set<string>()
   let index = 0
@@ -676,8 +699,56 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const message = messages.get(messageID)
       if (message) message.parts = message.parts.filter((part) => part.id !== partID)
     }
+    if (entry.type === "session.next.agent.switched") {
+      const data = eventData(entry)
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const agent = typeof data.agent === "string" ? data.agent : undefined
+      if (!messageID || !agent) continue
+      directMessages.set(messageID, {
+        kind: "agent",
+        messageID,
+        agent,
+        created: timestampValue(data.timestamp, index),
+      })
+    }
+    if (entry.type === "session.next.model.switched") {
+      const data = eventData(entry)
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const model = modelRef(data.model)
+      if (!messageID || !model) continue
+      directMessages.set(messageID, {
+        kind: "model",
+        messageID,
+        model,
+        created: timestampValue(data.timestamp, index),
+      })
+    }
+    if (entry.type === "session.next.context.updated") {
+      const data = eventData(entry)
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const text = typeof data.text === "string" ? data.text : undefined
+      if (!messageID || text === undefined) continue
+      directMessages.set(messageID, {
+        kind: "system",
+        messageID,
+        text,
+        created: timestampValue(data.timestamp, index),
+      })
+    }
+    if (entry.type === "session.next.synthetic") {
+      const data = eventData(entry)
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const text = typeof data.text === "string" ? data.text : undefined
+      if (!messageID || text === undefined) continue
+      directMessages.set(messageID, {
+        kind: "synthetic",
+        messageID,
+        text,
+        created: timestampValue(data.timestamp, index),
+      })
+    }
     if (entry.type === "session.next.shell.started") {
-      const data = entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+      const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const callID = typeof data.callID === "string" ? data.callID : undefined
       const command = typeof data.command === "string" ? data.command : undefined
@@ -691,7 +762,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       })
     }
     if (entry.type === "session.next.shell.ended") {
-      const data = entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+      const data = eventData(entry)
       const callID = typeof data.callID === "string" ? data.callID : undefined
       const output = typeof data.output === "string" ? data.output : undefined
       if (!callID || output === undefined) continue
@@ -704,7 +775,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       })
     }
     if (entry.type === "session.next.compaction.ended") {
-      const data = entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+      const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const summary = typeof data.text === "string" ? data.text : undefined
       const recent = typeof data.recent === "string" ? data.recent : ""
@@ -732,6 +803,50 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
   for (const message of replayed) {
     const item = await toV2Message(info, message.info, message.parts)
     if (item) converted.push(item)
+  }
+  for (const message of directMessages.values()) {
+    const created = DateTime.makeUnsafe(message.created)
+    if (message.kind === "agent") {
+      converted.push(
+        new SessionMessage.AgentSwitched({
+          id: SessionMessage.ID.make(message.messageID),
+          type: "agent-switched",
+          agent: AgentV2.ID.make(message.agent),
+          time: { created },
+        }),
+      )
+    }
+    if (message.kind === "model") {
+      converted.push(
+        new SessionMessage.ModelSwitched({
+          id: SessionMessage.ID.make(message.messageID),
+          type: "model-switched",
+          model: message.model,
+          time: { created },
+        }),
+      )
+    }
+    if (message.kind === "system") {
+      converted.push(
+        new SessionMessage.System({
+          id: SessionMessage.ID.make(message.messageID),
+          type: "system",
+          text: message.text,
+          time: { created },
+        }),
+      )
+    }
+    if (message.kind === "synthetic") {
+      converted.push(
+        new SessionMessage.Synthetic({
+          id: SessionMessage.ID.make(message.messageID),
+          sessionID: info.id,
+          type: "synthetic",
+          text: message.text,
+          time: { created },
+        }),
+      )
+    }
   }
   for (const shell of shells.values()) {
     converted.push(
