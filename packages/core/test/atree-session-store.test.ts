@@ -40,6 +40,7 @@ async function writeAtreeSession(input: {
   title: string
   createdAt: number
   updatedAt: number
+  archivedAt?: number | null
 }) {
   await mkdir(path.join(Global.Path.data, "atree"), { recursive: true })
   await writeFile(
@@ -64,7 +65,7 @@ async function writeAtreeSession(input: {
       `model: null`,
       `createdAt: ${input.createdAt}`,
       `updatedAt: ${input.updatedAt}`,
-      `archivedAt: null`,
+      `archivedAt: ${input.archivedAt ?? null}`,
       `cost: 0`,
       `tokens: {"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}`,
       `metadata: {}`,
@@ -195,6 +196,54 @@ describe("atree file-backed SessionV2 discovery", () => {
 
       const listed = yield* sessions.list({ directory: AbsolutePath.make(node), limit: 10 })
       expect(listed.map((session) => session.id)).not.toContain(created.id)
+    }),
+  )
+
+  it.effect("replays session metadata updates from session jsonl when core reads file-backed sessions", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-jsonl-meta-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-jsonl-meta-root-")))
+      const node = path.join(root, "notes")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      const sessionID = SessionV2.ID.make("ses_core_jsonl_meta")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Stale core title",
+          createdAt: 10,
+          updatedAt: 20,
+          archivedAt: 30,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            version: 1,
+            at: 100,
+            type: "session.updated",
+            sessionID,
+            patch: { title: "JSONL core title" },
+          },
+          {
+            version: 1,
+            at: 110,
+            type: "session.updated",
+            sessionID,
+            patch: { time: { archived: null } },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const loaded = yield* sessions.get(sessionID, { directory: AbsolutePath.make(node) })
+
+      expect(loaded.title).toBe("JSONL core title")
+      expect(loaded.time.archived).toBeUndefined()
+      expect(DateTime.toEpochMillis(loaded.time.updated)).toBe(110)
     }),
   )
 

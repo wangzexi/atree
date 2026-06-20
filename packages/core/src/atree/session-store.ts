@@ -48,6 +48,10 @@ function baseEventType(value: unknown) {
   return value.replace(/\.\d+$/, "")
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value)
+}
+
 function parseMeta(raw: string, fallbackDirectory: string): SessionSchema.Info | undefined {
   const data: Record<string, unknown> = {}
   for (const line of raw.split(/\r?\n/)) {
@@ -97,6 +101,47 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionSchema.Info |
   })
 }
 
+async function applySessionUpdatedEvents(info: SessionSchema.Info) {
+  const raw = await fs.readFile(sessionJsonl(info), "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  let next = info
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    if (baseEventType(entry.type) !== "session.updated" || !isRecord(entry.patch)) continue
+    const patch = entry.patch
+    const time = { ...next.time }
+    if (isRecord(patch.time)) {
+      if ("archived" in patch.time) {
+        const archived = patch.time.archived
+        if (typeof archived === "number") time.archived = DateTime.makeUnsafe(archived)
+        else if (archived === null) delete time.archived
+      }
+      if (typeof patch.time.updated === "number") {
+        time.updated = DateTime.makeUnsafe(
+          Math.max(DateTime.toEpochMillis(time.updated), patch.time.updated),
+        )
+      }
+    }
+    if (typeof entry.at === "number") {
+      time.updated = DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(time.updated), entry.at))
+    }
+    next = SessionSchema.Info.make({
+      ...next,
+      ...(typeof patch.title === "string" ? { title: patch.title } : {}),
+      time,
+    })
+  }
+  return next
+}
+
 export async function readWorkspaceRoot() {
   try {
     const raw = await fs.readFile(stateFile(), "utf8")
@@ -115,7 +160,9 @@ export async function readSessionStore(directory: string, sessionID: SessionSche
     throw error
   })
   if (!raw) return
-  return parseMeta(raw, directory)
+  const parsed = parseMeta(raw, directory)
+  if (!parsed) return
+  return applySessionUpdatedEvents(parsed)
 }
 
 export async function readSessionStores(directory: string) {
