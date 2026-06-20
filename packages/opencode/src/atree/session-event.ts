@@ -4,6 +4,14 @@ import { readWorkspaceState } from "./state"
 import { InstanceState } from "@/effect/instance-state"
 import type { SessionID } from "@/session/schema"
 
+const findSessionInRoot = (rootDirectory: string | undefined, sessionID: SessionID) =>
+  Effect.gen(function* () {
+    if (!rootDirectory) return
+    return yield* Effect.promise(() => findSessionStore(rootDirectory, sessionID)).pipe(
+      Effect.catchCause(() => Effect.succeed(undefined)),
+    )
+  })
+
 export const appendAtreeSessionEventByID = (
   sessionID: SessionID,
   entry: Record<string, unknown>,
@@ -12,19 +20,16 @@ export const appendAtreeSessionEventByID = (
     const instanceDirectory = yield* InstanceState.directory.pipe(
       Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
     )
-    if (instanceDirectory) {
-      const session = yield* Effect.promise(() => findSessionStore(instanceDirectory, sessionID))
-      if (session) {
-        yield* Effect.promise(() => appendSessionJsonl(session, entry))
-        return
-      }
+    const instanceSession = yield* findSessionInRoot(instanceDirectory, sessionID)
+    if (instanceSession) {
+      yield* Effect.promise(() => appendSessionJsonl(instanceSession, entry))
+      return
     }
 
     const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
       Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
     )
-    if (!state.rootDirectory) return
-    const session = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
+    const session = yield* findSessionInRoot(state.rootDirectory ?? undefined, sessionID)
     if (!session) return
     yield* Effect.promise(() => appendSessionJsonl(session, entry))
   })
