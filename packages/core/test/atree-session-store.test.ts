@@ -635,6 +635,58 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores compaction events from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_compaction",
+          title: "Core compaction",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_compaction", [
+          {
+            type: "session.next.compaction.ended",
+            messageID: "msg_core_compaction",
+            reason: "auto",
+            text: "Summary of older work",
+            recent: "Recent turns",
+            timestamp: 30,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_compaction"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_compaction",
+        type: "compaction",
+        reason: "auto",
+        summary: "Summary of older work",
+        recent: "Recent turns",
+      })
+      if (messages[0]?.type === "compaction") {
+        expect(DateTime.toEpochMillis(messages[0].time.created)).toBe(30)
+      }
+    }),
+  )
+
   it.effect("replays removed parts from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

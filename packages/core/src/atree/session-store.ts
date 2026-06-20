@@ -210,6 +210,14 @@ type ShellRecord = {
   completed?: number
 }
 
+type CompactionRecord = {
+  messageID: string
+  reason: "auto" | "manual"
+  summary: string
+  recent: string
+  created: number
+}
+
 function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
@@ -541,6 +549,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
   })
   const messages = new Map<string, { info: V1Message; parts: V1Part[] }>()
   const shells = new Map<string, ShellRecord>()
+  const compactions = new Map<string, CompactionRecord>()
   const removed = new Set<string>()
   const removedParts = new Set<string>()
   let index = 0
@@ -620,6 +629,21 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         completed: timestampValue(data.timestamp, index),
       })
     }
+    if (entry.type === "session.next.compaction.ended") {
+      const data = entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const summary = typeof data.text === "string" ? data.text : undefined
+      const recent = typeof data.recent === "string" ? data.recent : ""
+      const reason = data.reason === "auto" || data.reason === "manual" ? data.reason : "manual"
+      if (!messageID || summary === undefined) continue
+      compactions.set(messageID, {
+        messageID,
+        reason,
+        summary,
+        recent,
+        created: timestampValue(data.timestamp, index),
+      })
+    }
   }
 
   const replayed = [...messages.values()]
@@ -647,6 +671,18 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
           created: DateTime.makeUnsafe(shell.created),
           completed: shell.completed === undefined ? undefined : DateTime.makeUnsafe(shell.completed),
         },
+      }),
+    )
+  }
+  for (const compaction of compactions.values()) {
+    converted.push(
+      new SessionMessage.Compaction({
+        id: SessionMessage.ID.make(compaction.messageID),
+        type: "compaction",
+        reason: compaction.reason,
+        summary: compaction.summary,
+        recent: compaction.recent,
+        time: { created: DateTime.makeUnsafe(compaction.created) },
       }),
     )
   }
