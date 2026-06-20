@@ -249,6 +249,21 @@ describe("atree directory self-contained state", () => {
       yield* sessions.setArchived({ sessionID: session.id, time: Date.now() })
 
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, session.id))).toEqual([])
+      const jsonl = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "schedule.deleted",
+          scheduleID: schedule.id,
+          sessionID: session.id,
+          reason: "archived",
+        }),
+      )
       const row = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)

@@ -13,7 +13,7 @@ import { Schedule } from "../../src/session/schedule"
 import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { readSessionScheduleState } from "../../src/atree/schedule-store"
-import { writeSessionStore } from "../../src/atree/session-store"
+import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 let promptQueue: Queue.Queue<SessionPrompt.PromptInput> | undefined
@@ -136,7 +136,38 @@ const createFixtureSession = (title: string) =>
         ${now}
       )
     `)
+    yield* Effect.promise(() =>
+      writeSessionStore({
+        id: sessionID,
+        slug: title,
+        version: "test",
+        projectID: "prj_schedule_test",
+        directory: "/tmp/atree-schedule-test",
+        path: ".",
+        title,
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: now, updated: now },
+      } as any),
+    )
     return { id: sessionID }
+  })
+
+const archiveFixtureSession = (sessionID: SessionID, archivedAt = Date.now()) =>
+  Effect.gen(function* () {
+    const { db } = yield* Database.Service
+    yield* db.run(sql`UPDATE session SET time_archived = ${archivedAt} WHERE id = ${sessionID}`).pipe(Effect.orDie)
+    const stored = yield* Effect.promise(() => readSessionStore("/tmp/atree-schedule-test", sessionID))
+    if (!stored) return
+    yield* Effect.promise(() =>
+      writeSessionStore({
+        ...stored,
+        time: {
+          ...stored.time,
+          archived: archivedAt,
+        },
+      }),
+    )
   })
 
 it.instance("creates, lists, triggers, records, and deletes a scheduled task", () =>
@@ -226,7 +257,6 @@ it.instance("clears scheduled tasks and directory schedule state for a session",
 it.instance("does not list scheduled tasks for archived sessions", () =>
   Effect.gen(function* () {
     const schedules = yield* Schedule.Service
-    const { db } = yield* Database.Service
     yield* initScheduleTables
 
     const session = yield* createFixtureSession("schedule archived test")
@@ -239,7 +269,7 @@ it.instance("does not list scheduled tasks for archived sessions", () =>
       1,
     )
 
-    yield* db.run(sql`UPDATE session SET time_archived = ${Date.now()} WHERE id = ${session.id}`).pipe(Effect.orDie)
+    yield* archiveFixtureSession(session.id)
 
     expect(yield* schedules.list(session.id)).toEqual([])
     expect(yield* Effect.promise(() => readSessionScheduleState("/tmp/atree-schedule-test", session.id))).toEqual([])
@@ -334,7 +364,6 @@ it.instance("clears a one-time scheduled task without prompting when the session
     const schedules = yield* Schedule.Service
     const queue = yield* Queue.unbounded<SessionPrompt.PromptInput>()
     promptQueue = queue
-    const { db } = yield* Database.Service
     yield* initScheduleTables
 
     const session = yield* createFixtureSession("schedule once archived test")
@@ -348,7 +377,7 @@ it.instance("clears a one-time scheduled task without prompting when the session
       1,
     )
 
-    yield* db.run(sql`UPDATE session SET time_archived = ${Date.now()} WHERE id = ${session.id}`).pipe(Effect.orDie)
+    yield* archiveFixtureSession(session.id)
     yield* schedules.tick(created.id)
 
     yield* expectNoPrompt(queue)

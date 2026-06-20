@@ -751,6 +751,66 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "appends schedule lifecycle events to the session jsonl in the directory",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_schedule_jsonl_events" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "schedule-jsonl-events",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Schedule JSONL events",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          directory,
+          kind: "recurring",
+          expression: "* * * * *",
+          message: "record schedule lifecycle in session.jsonl",
+        }),
+      )
+      yield* Schedule.Service.use((schedule) =>
+        schedule.recordRun(created.id, sessionID, "ran", now + 1_000, { directory }),
+      )
+      yield* Schedule.Service.use((schedule) => schedule.delete(created.id, { directory }))
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+
+      expect(entries.map((entry) => entry.type)).toEqual([
+        "schedule.created",
+        "schedule.ran",
+        "schedule.deleted",
+      ])
+      expect(entries[0]?.schedule).toMatchObject({
+        id: created.id,
+        sessionID,
+        message: "record schedule lifecycle in session.jsonl",
+      })
+      expect(entries[1]).toMatchObject({ scheduleID: created.id, sessionID, status: "ran", ranAt: now + 1_000 })
+      expect(entries[2]).toMatchObject({ scheduleID: created.id, sessionID, reason: "deleted" })
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+    }),
+  )
+
+  it.effect(
     "ignores a stale database directory when creating schedule state from the persisted atree root",
     Effect.gen(function* () {
       const { db } = yield* Database.Service
