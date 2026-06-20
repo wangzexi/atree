@@ -856,7 +856,7 @@ describe("Session", () => {
       expect(stored?.time.archived).toBe(1234)
       expect(stored?.summary).toEqual({ additions: 4, deletions: 5, files: 6, diffs: [] })
       expect(stored?.share).toEqual({ url: "https://example.com/share" })
-      expect(stored?.workspaceID).toBe("wrk_patched")
+      expect(stored?.workspaceID).toBe("wrk_patched" as any)
       expect(stored?.revert).toBeUndefined()
 
       let row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
@@ -868,7 +868,7 @@ describe("Session", () => {
       expect(row?.summary_deletions).toBe(5)
       expect(row?.summary_files).toBe(6)
       expect(row?.share_url).toBe("https://example.com/share")
-      expect(row?.workspace_id).toBe("wrk_patched")
+      expect(row?.workspace_id).toBe("wrk_patched" as any)
       expect(row?.revert).toBeNull()
 
       yield* session.setArchived({ sessionID: info.id, time: null })
@@ -886,6 +886,7 @@ describe("Session", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as Record<string, any>)
+      expect(entries[0]).toMatchObject({ type: "session.created", sessionID: info.id, info: { id: info.id } })
       expect(entries.filter((entry) => entry.type === "session.updated").map((entry) => entry.patch)).toEqual([
         { title: "Patched title" },
         { metadata: { icon: "🧭" } },

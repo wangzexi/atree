@@ -639,6 +639,13 @@ export const layer: Layer.Layer<
       yield* Effect.logInfo("created", result)
 
       yield* Effect.promise(() => ensureSessionStore(result))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(result, {
+          type: "session.created",
+          sessionID: result.id,
+          info: result,
+        }),
+      ).pipe(Effect.orDie)
       yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
 
       return result

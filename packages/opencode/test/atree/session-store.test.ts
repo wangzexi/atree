@@ -187,13 +187,58 @@ describe("atree session store", () => {
     expect(restored?.title).toBe("JSONL title")
     expect(restored?.metadata).toEqual({ icon: "🧭" })
     expect(restored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
-    expect(restored?.workspaceID).toBe("workspace-jsonl")
+    expect(restored?.workspaceID).toBe("workspace-jsonl" as any)
     expect(restored?.share).toEqual({ url: "https://example.com/share" })
     expect(restored?.summary).toEqual({ additions: 1, deletions: 2, files: 3, diffs: [] })
-    expect(restored?.revert).toEqual({ messageID: "msg_jsonl_revert", partID: "prt_jsonl_revert" })
+    expect(restored?.revert).toEqual({ messageID: "msg_jsonl_revert", partID: "prt_jsonl_revert" } as any)
     expect(restored?.time.compacting).toBe(12)
     expect(restored?.time.archived).toBeUndefined()
     expect(restored?.time.updated).toBeGreaterThan(2)
+  })
+
+  test("rebuilds session metadata from session.created when meta.yaml is missing", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_jsonl_created",
+      slug: "jsonl-created",
+      version: "test",
+      projectID: "proj_test",
+      directory: "/stale/source",
+      path: ".",
+      title: "Created from JSONL",
+      metadata: { icon: "🌲" },
+      cost: 1,
+      tokens: { input: 2, output: 3, reasoning: 4, cache: { read: 5, write: 6 } },
+      time: { created: 10, updated: 11, archived: 12 },
+    } as any
+
+    await appendSessionJsonl({ ...session, directory }, {
+      type: "session.created",
+      sessionID: "ses_jsonl_created",
+      info: session,
+    })
+    await appendSessionJsonl({ ...session, directory }, {
+      type: "session.updated",
+      sessionID: "ses_jsonl_created",
+      patch: { title: "Updated from JSONL", time: { archived: null } },
+    })
+
+    const restored = await readSessionStore(directory, "ses_jsonl_created" as any)
+    expect(restored).toMatchObject({
+      id: "ses_jsonl_created",
+      slug: "jsonl-created",
+      projectID: "proj_test",
+      directory,
+      title: "Updated from JSONL",
+      metadata: { icon: "🌲" },
+      cost: 1,
+      tokens: { input: 2, output: 3, reasoning: 4, cache: { read: 5, write: 6 } },
+    })
+    expect(restored?.time.created).toBe(10)
+    expect(restored?.time.archived).toBeUndefined()
+
+    const sessions = await readSessionStores(directory)
+    expect(sessions.map((item) => item.id)).toEqual(["ses_jsonl_created" as any])
   })
 
   test("sorts directory sessions using session jsonl metadata update time", async () => {

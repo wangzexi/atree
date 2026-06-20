@@ -460,13 +460,91 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
   return next
 }
 
+function sessionInfoFromCreatedEvent(
+  entry: Record<string, unknown>,
+  fallbackDirectory: string,
+  fallbackSessionID: SessionID,
+): SessionInfo | undefined {
+  if (baseEventType(entry.type) !== "session.created" || !isRecord(entry.info)) return
+  const info = entry.info
+  const id = typeof info.id === "string" ? info.id : fallbackSessionID
+  if (id !== fallbackSessionID) return
+  const time = isRecord(info.time) ? info.time : {}
+  const tokens = isRecord(info.tokens) ? info.tokens : undefined
+  const cache = tokens && isRecord(tokens.cache) ? tokens.cache : undefined
+  const created = typeof time.created === "number" ? time.created : typeof entry.at === "number" ? entry.at : 0
+  const updated =
+    typeof time.updated === "number" ? time.updated : typeof entry.at === "number" ? entry.at : created
+  const compacting = typeof time.compacting === "number" ? time.compacting : undefined
+  const archived = typeof time.archived === "number" ? time.archived : undefined
+  const metadata =
+    info.metadata && typeof info.metadata === "object" && Object.keys(info.metadata).length > 0
+      ? (info.metadata as SessionInfo["metadata"])
+      : undefined
+  return {
+    id: fallbackSessionID,
+    slug: typeof info.slug === "string" ? info.slug : id,
+    version: typeof info.version === "string" ? info.version : "atree",
+    projectID: (typeof info.projectID === "string" ? info.projectID : "global") as SessionInfo["projectID"],
+    directory: fallbackDirectory,
+    path: typeof info.path === "string" ? info.path : undefined,
+    workspaceID:
+      typeof info.workspaceID === "string" ? (info.workspaceID as SessionInfo["workspaceID"]) : undefined,
+    parentID: typeof info.parentID === "string" ? (info.parentID as SessionID) : undefined,
+    title: typeof info.title === "string" ? info.title : id,
+    agent: typeof info.agent === "string" ? info.agent : undefined,
+    model: info.model && typeof info.model === "object" ? (info.model as SessionInfo["model"]) : undefined,
+    metadata,
+    permission: Array.isArray(info.permission) ? (info.permission as SessionInfo["permission"]) : undefined,
+    share: info.share && typeof info.share === "object" ? (info.share as SessionInfo["share"]) : undefined,
+    summary: info.summary && typeof info.summary === "object" ? (info.summary as SessionInfo["summary"]) : undefined,
+    revert: info.revert && typeof info.revert === "object" ? (info.revert as SessionInfo["revert"]) : undefined,
+    cost: typeof info.cost === "number" ? info.cost : 0,
+    tokens: {
+      input: typeof tokens?.input === "number" ? tokens.input : 0,
+      output: typeof tokens?.output === "number" ? tokens.output : 0,
+      reasoning: typeof tokens?.reasoning === "number" ? tokens.reasoning : 0,
+      cache: {
+        read: typeof cache?.read === "number" ? cache.read : 0,
+        write: typeof cache?.write === "number" ? cache.write : 0,
+      },
+    },
+    time: {
+      created,
+      updated,
+      ...(compacting !== undefined ? { compacting } : {}),
+      ...(archived !== undefined ? { archived } : {}),
+    },
+  }
+}
+
+async function readSessionCreatedEvent(directory: string, sessionID: SessionID) {
+  const target = path.join(sessionRootByID(directory, sessionID), "session.jsonl")
+  const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  let created: SessionInfo | undefined
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    created = sessionInfoFromCreatedEvent(entry, directory, sessionID) ?? created
+  }
+  return created ? applySessionUpdatedEvents(created) : undefined
+}
+
 export async function readSessionStore(directory: string, sessionID: SessionID) {
   const target = path.join(directory, ".agents", "atree", "sessions", sessionID, "meta.yaml")
   const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
     throw error
   })
-  if (!raw) return
+  if (!raw) return readSessionCreatedEvent(directory, sessionID)
   const parsed = parseMeta(raw, directory)
   if (!parsed) return
   return applySessionUpdatedEvents(parsed)
@@ -593,7 +671,11 @@ export async function readSessionStores(directory: string) {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
       throw error
     })
-    if (!raw) continue
+    if (!raw) {
+      const recovered = await readSessionCreatedEvent(directory, entry.name as SessionID)
+      if (recovered) sessions.push(recovered)
+      continue
+    }
     const parsed = parseMeta(raw, directory)
     if (parsed) sessions.push(parsed)
   }
