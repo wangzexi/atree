@@ -30,6 +30,20 @@ type SessionScheduleState = {
   schedules: StoredSchedule[]
 }
 
+const FindMaxDepth = 8
+const FindMaxNodes = 2_000
+const IgnoredDirectories = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "node_modules",
+  ".next",
+  ".turbo",
+  ".cache",
+  "dist",
+  "build",
+])
+
 function legacyStatePath(directory: string) {
   return path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json")
 }
@@ -106,4 +120,66 @@ export async function readSessionScheduleState(directory: string, sessionID: str
   const state = await readState(legacyStatePath(directory))
   const schedules = state.sessions[sessionID]
   return Array.isArray(schedules) ? schedules : []
+}
+
+export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {
+  const root = await fs.realpath(rootDirectory)
+  const budget = { count: 0 }
+
+  async function checkDirectory(directory: string) {
+    const sessionsRoot = path.join(directory, ".agents", "atree", "sessions")
+    const entries = await fs.readdir(sessionsRoot, { withFileTypes: true }).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "EACCES")
+      ) {
+        return []
+      }
+      throw error
+    })
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      const sessionID = entry.name
+      const state = await readSessionState(sessionStatePath(directory, sessionID))
+      const schedules = state.schedules
+      if (schedules.some((schedule) => schedule.id === scheduleID)) return { directory, sessionID, schedules }
+    }
+  }
+
+  async function walk(directory: string, depth: number): Promise<
+    | {
+        directory: string
+        sessionID: string
+        schedules: StoredSchedule[]
+      }
+    | undefined
+  > {
+    if (budget.count++ >= FindMaxNodes) return
+    const found = await checkDirectory(directory)
+    if (found) return found
+    if (depth >= FindMaxDepth) return
+
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "EACCES")
+      ) {
+        return []
+      }
+      throw error
+    })
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (IgnoredDirectories.has(entry.name)) continue
+      const result = await walk(path.join(directory, entry.name), depth + 1)
+      if (result) return result
+    }
+  }
+
+  return walk(root, 0)
 }

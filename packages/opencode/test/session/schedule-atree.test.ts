@@ -369,6 +369,71 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "deletes a file-backed schedule from the persisted atree root without a directory hint",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-delete-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const directory = path.join(root, "nested")
+      const sessionID = "ses_root_delete_schedule" as SessionID
+      const scheduleID = "sch_root_delete_schedule"
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "root-delete-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Root delete schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "delete from persisted root",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.delete(scheduleID as never))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, scheduleID as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row).toBeUndefined()
+    }),
+  )
+
   it.instance(
     "writes copied file-backed schedule state to the explicit target directory",
     Effect.gen(function* () {

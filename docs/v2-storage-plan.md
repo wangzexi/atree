@@ -228,6 +228,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - schedule 执行后的 `lastRanAt`、`lastRunStatus` 会回写到目录 `schedule.json`，重启后可以恢复运行状态。
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。
 - 当 SQLite 中没有 schedule row 但调用方给出目录时，删除单个 schedule 会直接扫描该目录 file-backed sessions，并从对应会话的 `schedule.json` 中移除该自动化消息。
+- 当 SQLite 中没有 schedule row 且调用方没有目录 hint 时，删除单个 schedule 会回到服务端记录的 atree root，递归查找包含该 schedule id 的会话目录并更新其 `schedule.json`。
 - schedule 的运行 timer 会携带创建/恢复时的目录上下文；一次性自动化消息触发后，会在同一个目录的 `schedule.json` 中清空，不再依赖全局 SQLite session cache 推断目录。
 - schedule 触发时会把恢复到的目录上下文继续传给 prompt/loop；复制 `.agents/atree/` 后，自动化消息产生的新用户消息和后续回复会写入目标目录，而不是写回源目录或陈旧 SQLite row 指向的目录。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。

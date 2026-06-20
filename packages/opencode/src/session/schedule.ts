@@ -14,9 +14,10 @@ import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
-import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
+import { findSessionScheduleState, readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
 import { readSessionStore, readSessionStores } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
+import { readWorkspaceState } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
 
 export const MAX_PER_SESSION = 1
@@ -862,7 +863,26 @@ export const layer = Layer.effect(
       scheduleID: ID,
       directory: string | undefined,
     ) {
-      if (!directory) return false
+      if (!directory) {
+        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+        )
+        if (!state.rootDirectory) return false
+        const found = yield* Effect.promise(() => findSessionScheduleState(state.rootDirectory!, scheduleID))
+        if (!found) return false
+        const remaining = found.schedules.filter((schedule) => schedule.id !== scheduleID)
+        const timer = timers.get(scheduleID)
+        if (timer) {
+          stopTimer(timer)
+          timers.delete(scheduleID)
+        }
+        yield* Effect.promise(() => writeSessionScheduleState(found.directory, found.sessionID, remaining))
+        yield* events.publish(Event.Deleted, {
+          scheduleID,
+          sessionID: found.sessionID as SessionID,
+        })
+        return true
+      }
       const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
       for (const session of fileSessions) {
         const stored = yield* Effect.promise(() => readSessionScheduleState(directory, session.id))
