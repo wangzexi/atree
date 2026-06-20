@@ -179,6 +179,8 @@ type V1Part = {
   filename?: string
   name?: string
   description?: string
+  metadata?: Record<string, Record<string, unknown>>
+  providerMetadata?: Record<string, Record<string, unknown>>
 }
 
 function sessionRoot(info: SessionSchema.Info) {
@@ -269,6 +271,10 @@ function textParts(parts: V1Part[]) {
     if (part.type === "text" && typeof part.text === "string") result.push(part.text)
   }
   return result
+}
+
+function reasoningParts(parts: V1Part[]) {
+  return parts.filter((part) => part.type === "reasoning" && typeof part.text === "string")
 }
 
 function assetURL(value: string) {
@@ -379,6 +385,26 @@ async function toV2Message(
     })
   }
   if (message.role === "assistant") {
+    const content: SessionMessage.AssistantContent[] = []
+    for (const [index, text] of textParts(parts).entries()) {
+      content.push(
+        new SessionMessage.AssistantText({
+          type: "text",
+          id: `${id}-text-${index}`,
+          text,
+        }),
+      )
+    }
+    for (const part of reasoningParts(parts)) {
+      content.push(
+        new SessionMessage.AssistantReasoning({
+          type: "reasoning",
+          id: part.id,
+          text: part.text ?? "",
+          providerMetadata: part.providerMetadata ?? part.metadata,
+        }),
+      )
+    }
     return new SessionMessage.Assistant({
       id,
       type: "assistant",
@@ -388,14 +414,7 @@ async function toV2Message(
         id: ModelV2.ID.make(message.model?.modelID ?? message.model?.id ?? "unknown"),
         variant: ModelV2.VariantID.make(message.model?.variant ?? "default"),
       },
-      content: textParts(parts).map(
-        (text, index) =>
-          new SessionMessage.AssistantText({
-            type: "text",
-            id: `${id}-text-${index}`,
-            text,
-          }),
-      ),
+      content,
       time: {
         created,
         completed:

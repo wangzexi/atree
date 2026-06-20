@@ -435,6 +435,78 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores assistant reasoning parts from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_reasoning",
+          title: "Core reasoning",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_reasoning", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_reasoning",
+              role: "assistant",
+              model: { providerID: "test", modelID: "test", variant: "default" },
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_reasoning",
+              messageID: "msg_core_reasoning",
+              type: "reasoning",
+              text: "Think carefully",
+              metadata: { anthropic: { signature: "sig_1" } },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_reasoning_text",
+              messageID: "msg_core_reasoning",
+              type: "text",
+              text: "Final answer",
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({ sessionID: SessionV2.ID.make("ses_core_reasoning"), order: "asc" })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_reasoning",
+        type: "assistant",
+        content: [
+          { type: "text", text: "Final answer" },
+          { type: "reasoning", id: "prt_core_reasoning", text: "Think carefully" },
+        ],
+      })
+      if (messages[0]?.type === "assistant") {
+        expect(messages[0].content[1]).toMatchObject({
+          providerMetadata: { anthropic: { signature: "sig_1" } },
+        })
+      }
+    }),
+  )
+
   it.effect("replays removed parts from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
