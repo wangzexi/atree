@@ -43,6 +43,11 @@ function parseValue(value: string) {
   }
 }
 
+function baseEventType(value: unknown) {
+  if (typeof value !== "string") return
+  return value.replace(/\.\d+$/, "")
+}
+
 function parseMeta(raw: string, fallbackDirectory: string): SessionSchema.Info | undefined {
   const data: Record<string, unknown> = {}
   for (const line of raw.split(/\r?\n/)) {
@@ -776,7 +781,8 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
     } catch {
       continue
     }
-    if (entry.type === "message.updated" && entry.message && typeof entry.message === "object") {
+    const type = baseEventType(entry.type)
+    if (type === "message.updated" && entry.message && typeof entry.message === "object") {
       const message = entry.message as V1Message
       if (typeof message.id !== "string" || (message.role !== "user" && message.role !== "assistant")) continue
       const existing = messages.get(message.id)
@@ -784,7 +790,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       orphanParts.delete(message.id)
       removed.delete(message.id)
     }
-    if (entry.type === "message.part.updated" && entry.part && typeof entry.part === "object") {
+    if (type === "message.part.updated" && entry.part && typeof entry.part === "object") {
       const part = entry.part as V1Part
       if (typeof part.id !== "string" || typeof part.messageID !== "string") continue
       const message = messages.get(part.messageID)
@@ -799,7 +805,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       }
       removedParts.delete(`${part.messageID}:${part.id}`)
     }
-    if (entry.type === "message.part.delta") {
+    if (type === "message.part.delta") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       const partID = typeof entry.partID === "string" ? entry.partID : undefined
       const field = typeof entry.field === "string" ? entry.field : undefined
@@ -811,12 +817,12 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         orphanParts.get(messageID)?.find((item) => item.id === partID)
       if (part) appendPartDelta(part, field, delta)
     }
-    if (entry.type === "message.removed" && typeof entry.messageID === "string") {
+    if (type === "message.removed" && typeof entry.messageID === "string") {
       removed.add(entry.messageID)
       messages.delete(entry.messageID)
       orphanParts.delete(entry.messageID)
     }
-    if (entry.type === "message.part.removed") {
+    if (type === "message.part.removed") {
       const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
       const partID = typeof entry.partID === "string" ? entry.partID : undefined
       if (!messageID || !partID) continue
@@ -826,7 +832,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const orphan = orphanParts.get(messageID)
       if (orphan) orphanParts.set(messageID, orphan.filter((part) => part.id !== partID))
     }
-    if (entry.type === "session.next.prompted") {
+    if (type === "session.next.prompted") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const prompt = data.prompt && typeof data.prompt === "object" ? (data.prompt as Record<string, unknown>) : undefined
@@ -871,7 +877,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       })
       removed.delete(messageID)
     }
-    if (entry.type === "session.next.agent.switched") {
+    if (type === "session.next.agent.switched") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const agent = typeof data.agent === "string" ? data.agent : undefined
@@ -883,7 +889,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         created: timestampValue(data.timestamp, index),
       })
     }
-    if (entry.type === "session.next.model.switched") {
+    if (type === "session.next.model.switched") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const model = modelRef(data.model)
@@ -895,7 +901,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         created: timestampValue(data.timestamp, index),
       })
     }
-    if (entry.type === "session.next.context.updated") {
+    if (type === "session.next.context.updated") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const text = typeof data.text === "string" ? data.text : undefined
@@ -907,7 +913,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         created: timestampValue(data.timestamp, index),
       })
     }
-    if (entry.type === "session.next.synthetic") {
+    if (type === "session.next.synthetic") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const text = typeof data.text === "string" ? data.text : undefined
@@ -919,7 +925,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         created: timestampValue(data.timestamp, index),
       })
     }
-    if (entry.type === "session.next.step.started") {
+    if (type === "session.next.step.started") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -935,7 +941,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         snapshot: typeof data.snapshot === "string" ? { start: data.snapshot } : undefined,
       })
     }
-    if (entry.type === "session.next.step.ended") {
+    if (type === "session.next.step.ended") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -953,7 +959,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         snapshot,
       })
     }
-    if (entry.type === "session.next.step.failed") {
+    if (type === "session.next.step.failed") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -967,7 +973,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         error: unknownError(data.error),
       })
     }
-    if (entry.type === "session.next.text.ended") {
+    if (type === "session.next.text.ended") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -980,7 +986,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       content.push(new SessionMessage.AssistantText({ type: "text", id: textID, text }))
       assistantEvents.set(assistantMessageID, { ...assistant, content })
     }
-    if (entry.type === "session.next.reasoning.ended") {
+    if (type === "session.next.reasoning.ended") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1003,7 +1009,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       )
       assistantEvents.set(assistantMessageID, { ...assistant, content })
     }
-    if (entry.type === "session.next.tool.input.started") {
+    if (type === "session.next.tool.input.started") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1024,7 +1030,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       )
       assistantEvents.set(assistantMessageID, { ...assistant, content })
     }
-    if (entry.type === "session.next.tool.input.ended") {
+    if (type === "session.next.tool.input.ended") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1045,7 +1051,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         ),
       )
     }
-    if (entry.type === "session.next.tool.called") {
+    if (type === "session.next.tool.called") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1071,7 +1077,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         ),
       )
     }
-    if (entry.type === "session.next.tool.progress") {
+    if (type === "session.next.tool.progress") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1096,7 +1102,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         ),
       )
     }
-    if (entry.type === "session.next.tool.success") {
+    if (type === "session.next.tool.success") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1130,7 +1136,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         ),
       )
     }
-    if (entry.type === "session.next.tool.failed") {
+    if (type === "session.next.tool.failed") {
       const data = eventData(entry)
       const assistantMessageID =
         typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
@@ -1165,7 +1171,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         ),
       )
     }
-    if (entry.type === "session.next.shell.started") {
+    if (type === "session.next.shell.started") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const callID = typeof data.callID === "string" ? data.callID : undefined
@@ -1179,7 +1185,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         created: timestampValue(data.timestamp, index),
       })
     }
-    if (entry.type === "session.next.shell.ended") {
+    if (type === "session.next.shell.ended") {
       const data = eventData(entry)
       const callID = typeof data.callID === "string" ? data.callID : undefined
       const output = typeof data.output === "string" ? data.output : undefined
@@ -1192,7 +1198,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         completed: timestampValue(data.timestamp, index),
       })
     }
-    if (entry.type === "session.next.compaction.ended") {
+    if (type === "session.next.compaction.ended") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const summary = typeof data.text === "string" ? data.text : undefined

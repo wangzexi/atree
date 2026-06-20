@@ -669,7 +669,7 @@ describe("atree file-backed SessionV2 discovery", () => {
       yield* Effect.promise(() =>
         appendSessionJsonl(node, "ses_core_event_prompted", [
           {
-            type: "session.next.prompted",
+            type: "session.next.prompted.1",
             messageID: "msg_core_event_prompted",
             prompt: {
               text: "Prompt text",
@@ -804,7 +804,7 @@ describe("atree file-backed SessionV2 discovery", () => {
             timestamp: 32,
           },
           {
-            type: "session.next.step.ended",
+            type: "session.next.step.ended.2",
             assistantMessageID: "msg_core_event_assistant",
             finish: "stop",
             cost: 0.25,
@@ -1081,7 +1081,7 @@ describe("atree file-backed SessionV2 discovery", () => {
             timestamp: 34,
           },
           {
-            type: "session.next.tool.success",
+            type: "session.next.tool.success.1",
             assistantMessageID: "msg_core_event_tool_completed",
             callID: "call_core_event_tool_completed",
             structured: { exit: 0 },
