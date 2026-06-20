@@ -2,8 +2,8 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
-import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
+import { findSessionScheduleState, readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
 
@@ -143,5 +143,99 @@ describe("atree schedule store", () => {
     await writeSessionScheduleState(directory, "ses_legacy", [])
     expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([])
     expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()
+  })
+
+  test("replays schedule state from session jsonl when the projection file is missing", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_jsonl",
+      sessionID: "ses_jsonl",
+      kind: "recurring" as const,
+      expression: "* * * * *",
+      runAt: null,
+      message: "recover from session log",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    await writeSessionStore({
+      id: "ses_jsonl" as never,
+      slug: "jsonl",
+      version: "test",
+      projectID: "proj_jsonl" as never,
+      directory,
+      title: "JSONL",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl" as never))!
+    await appendSessionJsonl(session, { type: "schedule.created", schedule })
+    await appendSessionJsonl(session, {
+      type: "schedule.ran",
+      scheduleID: "sch_jsonl",
+      sessionID: "ses_jsonl",
+      status: "ran",
+      ranAt: 3,
+    })
+
+    expect(await readSessionScheduleState(directory, "ses_jsonl")).toEqual([
+      {
+        ...schedule,
+        lastRanAt: 3,
+        lastRunStatus: "ran",
+      },
+    ])
+    const realDirectory = await fs.realpath(directory)
+    expect(await findSessionScheduleState(directory, "sch_jsonl")).toMatchObject({
+      directory: realDirectory,
+      sessionID: "ses_jsonl",
+      schedules: [
+        {
+          id: "sch_jsonl",
+          lastRanAt: 3,
+          lastRunStatus: "ran",
+        },
+      ],
+    })
+  })
+
+  test("replays deleted schedules from session jsonl as absent", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_jsonl_deleted",
+      sessionID: "ses_jsonl_deleted",
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "deleted from session log",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    await writeSessionStore({
+      id: "ses_jsonl_deleted" as never,
+      slug: "jsonl-deleted",
+      version: "test",
+      projectID: "proj_jsonl_deleted" as never,
+      directory,
+      title: "JSONL deleted",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_deleted" as never))!
+    await appendSessionJsonl(session, { type: "schedule.created", schedule })
+    await appendSessionJsonl(session, {
+      type: "schedule.deleted",
+      scheduleID: "sch_jsonl_deleted",
+      sessionID: "ses_jsonl_deleted",
+      reason: "deleted",
+    })
+
+    expect(await readSessionScheduleState(directory, "ses_jsonl_deleted")).toEqual([])
+    expect(await findSessionScheduleState(directory, "sch_jsonl_deleted")).toBeUndefined()
   })
 })

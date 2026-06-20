@@ -52,6 +52,27 @@ function sessionStatePath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "schedule.json")
 }
 
+function sessionJsonlPath(directory: string, sessionID: string) {
+  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
+}
+
+function isStoredSchedule(value: unknown): value is StoredSchedule {
+  if (!value || typeof value !== "object") return false
+  const schedule = value as Partial<StoredSchedule>
+  return (
+    typeof schedule.id === "string" &&
+    typeof schedule.sessionID === "string" &&
+    (schedule.kind === "once" || schedule.kind === "recurring") &&
+    typeof schedule.expression === "string" &&
+    (typeof schedule.runAt === "number" || schedule.runAt === null) &&
+    typeof schedule.message === "string" &&
+    typeof schedule.createdAt === "number" &&
+    (typeof schedule.lastRanAt === "number" || schedule.lastRanAt === null) &&
+    (schedule.lastRunStatus === "ran" || schedule.lastRunStatus === "skipped" || schedule.lastRunStatus === null) &&
+    (typeof schedule.nextRun === "number" || schedule.nextRun === null)
+  )
+}
+
 async function readState(target: string): Promise<ScheduleState> {
   try {
     const raw = await fs.readFile(target, "utf8")
@@ -83,6 +104,53 @@ async function readSessionState(target: string) {
     }
     throw error
   }
+}
+
+async function readSessionJsonlProjection(directory: string, sessionID: string) {
+  const raw = await fs.readFile(sessionJsonlPath(directory, sessionID), "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  const schedules = new Map<string, StoredSchedule>()
+
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+
+    if (entry.type === "schedule.created" && isStoredSchedule(entry.schedule)) {
+      if (entry.schedule.sessionID !== sessionID) continue
+      schedules.set(entry.schedule.id, entry.schedule)
+      continue
+    }
+
+    if (entry.type === "schedule.ran") {
+      const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
+      const ranAt = typeof entry.ranAt === "number" ? entry.ranAt : undefined
+      const status = entry.status === "ran" || entry.status === "skipped" ? entry.status : undefined
+      if (!scheduleID || ranAt === undefined || !status) continue
+      const schedule = schedules.get(scheduleID)
+      if (!schedule) continue
+      schedules.set(scheduleID, {
+        ...schedule,
+        lastRanAt: ranAt,
+        lastRunStatus: status,
+      })
+      continue
+    }
+
+    if (entry.type === "schedule.deleted") {
+      const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
+      if (!scheduleID) continue
+      schedules.delete(scheduleID)
+    }
+  }
+
+  return [...schedules.values()]
 }
 
 async function writeAtomic(target: string, value: ScheduleState | SessionScheduleState) {
@@ -119,7 +187,9 @@ export async function readSessionScheduleState(directory: string, sessionID: str
 
   const state = await readState(legacyStatePath(directory))
   const schedules = state.sessions[sessionID]
-  return Array.isArray(schedules) ? schedules : []
+  if (Array.isArray(schedules)) return schedules
+
+  return readSessionJsonlProjection(directory, sessionID)
 }
 
 export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {
@@ -142,8 +212,7 @@ export async function findSessionScheduleState(rootDirectory: string, scheduleID
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       const sessionID = entry.name
-      const state = await readSessionState(sessionStatePath(directory, sessionID))
-      const schedules = state.schedules
+      const schedules = await readSessionScheduleState(directory, sessionID)
       if (schedules.some((schedule) => schedule.id === scheduleID)) return { directory, sessionID, schedules }
     }
   }
