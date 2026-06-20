@@ -411,6 +411,59 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("loads a core SessionStore message from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_store_message",
+          title: "Core store message",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_store_message", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_store_message",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_message",
+              messageID: "msg_core_store_message",
+              type: "text",
+              text: "message from file-backed store",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      const result = yield* store.message(SessionMessage.ID.make("msg_core_store_message"))
+
+      expect(result?.sessionID).toBe(SessionV2.ID.make("ses_core_store_message"))
+      expect(result?.message).toMatchObject({
+        id: "msg_core_store_message",
+        type: "user",
+        text: "message from file-backed store",
+      })
+    }),
+  )
+
   it.effect("records v2 prompts into file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

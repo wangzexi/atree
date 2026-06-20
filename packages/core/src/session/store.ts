@@ -9,7 +9,13 @@ import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import { SessionMessageTable, SessionTable } from "./sql"
 import { fromRow } from "./info"
-import { findSessionStore, readSessionJsonlMessages, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
+import {
+  findSessionJsonlMessage,
+  findSessionStore,
+  readSessionJsonlMessages,
+  readSessionStore,
+  readWorkspaceRoot,
+} from "../atree/session-store"
 
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
@@ -82,7 +88,24 @@ export const layer = Layer.effect(
               sessionID: SessionSchema.ID.make(row.session_id),
               message: yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
             }
-          : undefined
+          : yield* Effect.gen(function* () {
+              const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+                Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+              )
+              if (!root) return undefined
+              const found = yield* Effect.promise(() => findSessionJsonlMessage(root, messageID)).pipe(
+                Effect.catchCause(() =>
+                  Effect.succeed<
+                    | {
+                        session: SessionSchema.Info
+                        message: SessionMessage.Message
+                      }
+                    | undefined
+                  >(undefined),
+                ),
+              )
+              return found ? { sessionID: found.session.id, message: found.message } : undefined
+            })
       }),
     })
   }),

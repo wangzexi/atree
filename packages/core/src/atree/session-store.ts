@@ -166,6 +166,49 @@ export async function findSessionStore(rootDirectory: string, sessionID: Session
   return walk(root, 0)
 }
 
+export async function findSessionJsonlMessage(rootDirectory: string, messageID: SessionMessage.ID) {
+  const root = await fs.realpath(rootDirectory)
+  const budget = { count: 0 }
+
+  async function walk(directory: string, depth: number): Promise<
+    | {
+        session: SessionSchema.Info
+        message: SessionMessage.Message
+      }
+    | undefined
+  > {
+    if (budget.count++ >= FindMaxNodes) return
+    const sessions = await readSessionStores(directory)
+    for (const session of sessions) {
+      const messages = await readSessionJsonlMessages(session)
+      const message = messages.find((item) => item.id === messageID)
+      if (message) return { session, message }
+    }
+    if (depth >= FindMaxDepth) return
+
+    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
+      if (
+        error &&
+        typeof error === "object" &&
+        "code" in error &&
+        (error.code === "ENOENT" || error.code === "EACCES")
+      ) {
+        return []
+      }
+      throw error
+    })
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (IgnoredDirectories.has(entry.name)) continue
+      const result = await walk(path.join(directory, entry.name), depth + 1)
+      if (result) return result
+    }
+  }
+
+  return walk(root, 0)
+}
+
 type V1Message = {
   id: string
   role: "user" | "assistant"
