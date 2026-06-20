@@ -181,6 +181,24 @@ type V1Part = {
   description?: string
   metadata?: Record<string, Record<string, unknown>>
   providerMetadata?: Record<string, Record<string, unknown>>
+  toolInvocation?: {
+    state?: string
+    toolCallId?: string
+    toolName?: string
+    args?: unknown
+    result?: unknown
+  }
+  state?: {
+    status?: string
+    input?: unknown
+    output?: unknown
+    title?: string
+    metadata?: Record<string, unknown>
+    time?: {
+      start?: number
+      end?: number
+    }
+  }
 }
 
 function sessionRoot(info: SessionSchema.Info) {
@@ -275,6 +293,77 @@ function textParts(parts: V1Part[]) {
 
 function reasoningParts(parts: V1Part[]) {
   return parts.filter((part) => part.type === "reasoning" && typeof part.text === "string")
+}
+
+function objectInput(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
+  if (typeof value === "string") {
+    const parsed = parseValue(value)
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed as Record<string, unknown>
+  }
+  return {}
+}
+
+function textOutput(value: unknown) {
+  if (typeof value === "string") return value
+  if (value === undefined) return undefined
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function toolParts(parts: V1Part[], created: DateTime.Utc) {
+  const result: SessionMessage.AssistantTool[] = []
+  for (const part of parts) {
+    if (part.type === "tool-invocation" && part.toolInvocation?.state === "result") {
+      const invocation = part.toolInvocation
+      if (typeof invocation.toolCallId !== "string" || typeof invocation.toolName !== "string") continue
+      const output = textOutput(invocation.result)
+      result.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: invocation.toolCallId,
+          name: invocation.toolName,
+          provider: { executed: true },
+          state: new SessionMessage.ToolStateCompleted({
+            status: "completed",
+            input: objectInput(invocation.args),
+            content: output === undefined ? [] : [{ type: "text", text: output }],
+            structured: {},
+            result: invocation.result,
+          }),
+          time: { created, completed: created },
+        }),
+      )
+    }
+    if (part.type === "tool" && part.state?.status === "completed") {
+      const output = textOutput(part.state.output)
+      result.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: part.id,
+          name: part.name ?? "tool",
+          provider: { executed: false },
+          state: new SessionMessage.ToolStateCompleted({
+            status: "completed",
+            input: objectInput(part.state.input),
+            content: output === undefined ? [] : [{ type: "text", text: output }],
+            structured: part.state.metadata ?? {},
+            result: part.state.output,
+          }),
+          time: {
+            created:
+              typeof part.state.time?.start === "number" ? DateTime.makeUnsafe(part.state.time.start) : created,
+            completed:
+              typeof part.state.time?.end === "number" ? DateTime.makeUnsafe(part.state.time.end) : created,
+          },
+        }),
+      )
+    }
+  }
+  return result
 }
 
 function assetURL(value: string) {
@@ -405,6 +494,7 @@ async function toV2Message(
         }),
       )
     }
+    content.push(...toolParts(parts, created))
     return new SessionMessage.Assistant({
       id,
       type: "assistant",

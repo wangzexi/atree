@@ -507,6 +507,79 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores completed tool invocations from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_tool_result",
+          title: "Core tool result",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_tool_result", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_tool_result",
+              role: "assistant",
+              model: { providerID: "test", modelID: "test", variant: "default" },
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_tool_result",
+              messageID: "msg_core_tool_result",
+              type: "tool-invocation",
+              toolInvocation: {
+                state: "result",
+                toolCallId: "call_core_read",
+                toolName: "read",
+                args: { filePath: "README.md" },
+                result: "file contents",
+              },
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({ sessionID: SessionV2.ID.make("ses_core_tool_result"), order: "asc" })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_tool_result",
+        type: "assistant",
+        content: [
+          {
+            type: "tool",
+            id: "call_core_read",
+            name: "read",
+            state: {
+              status: "completed",
+              input: { filePath: "README.md" },
+              content: [{ type: "text", text: "file contents" }],
+              structured: {},
+              result: "file contents",
+            },
+          },
+        ],
+      })
+    }),
+  )
+
   it.effect("replays removed parts from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
