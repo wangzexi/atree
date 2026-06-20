@@ -836,18 +836,40 @@ describe("Session", () => {
         permission: [{ permission: "bash", pattern: "*", action: "allow" }],
       })
       yield* session.setArchived({ sessionID: info.id, time: 1234 })
+      yield* session.setSummary({
+        sessionID: info.id,
+        summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
+      })
+      yield* session.setShare({ sessionID: info.id, share: { url: "https://example.com/share" } })
+      yield* session.setWorkspace({ sessionID: info.id, workspaceID: "wrk_patched" as any })
+      yield* session.setRevert({
+        sessionID: info.id,
+        revert: { messageID: "msg_revert", partID: "prt_revert" } as any,
+        summary: { additions: 4, deletions: 5, files: 6, diffs: [] },
+      })
+      yield* session.clearRevert(info.id)
 
       const stored = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
       expect(stored?.title).toBe("Patched title")
       expect(stored?.metadata).toEqual({ icon: "🧭" })
       expect(stored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
       expect(stored?.time.archived).toBe(1234)
+      expect(stored?.summary).toEqual({ additions: 4, deletions: 5, files: 6, diffs: [] })
+      expect(stored?.share).toEqual({ url: "https://example.com/share" })
+      expect(stored?.workspaceID).toBe("wrk_patched")
+      expect(stored?.revert).toBeUndefined()
 
       let row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
       expect(row?.title).toBe("Patched title")
       expect(row?.metadata).toEqual({ icon: "🧭" })
       expect(row?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
       expect(row?.time_archived).toBe(1234)
+      expect(row?.summary_additions).toBe(4)
+      expect(row?.summary_deletions).toBe(5)
+      expect(row?.summary_files).toBe(6)
+      expect(row?.share_url).toBe("https://example.com/share")
+      expect(row?.workspace_id).toBe("wrk_patched")
+      expect(row?.revert).toBeNull()
 
       yield* session.setArchived({ sessionID: info.id, time: null })
 
@@ -869,6 +891,14 @@ describe("Session", () => {
         { metadata: { icon: "🧭" } },
         { permission: [{ permission: "bash", pattern: "*", action: "allow" }] },
         { time: { archived: 1234 } },
+        { summary: { additions: 1, deletions: 2, files: 3, diffs: [] } },
+        { share: { url: "https://example.com/share" } },
+        { workspaceID: "wrk_patched" },
+        {
+          summary: { additions: 4, deletions: 5, files: 6, diffs: [] },
+          revert: { messageID: "msg_revert", partID: "prt_revert" },
+        },
+        { revert: null },
         { time: { archived: null } },
       ])
     }),

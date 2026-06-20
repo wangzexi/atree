@@ -1161,11 +1161,29 @@ export const layer: Layer.Layer<
         },
         { directory: input.directory },
       ).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { summary: input.summary, revert: input.revert },
+        },
+        { directory: input.directory },
+      )
     })
 
     const clearRevert = Effect.fn("Session.clearRevert")(function* (sessionID: SessionID, options?: DirectoryOption) {
       yield* patch(sessionID, { time: { updated: Date.now() }, revert: null }, { directory: options?.directory }).pipe(
         Effect.orDie,
+      )
+      yield* appendSessionEvent(
+        sessionID,
+        {
+          type: "session.updated",
+          sessionID,
+          patch: { revert: null },
+        },
+        { directory: options?.directory },
       )
     })
 
@@ -1179,6 +1197,15 @@ export const layer: Layer.Layer<
         { time: { updated: Date.now() }, summary: input.summary },
         { directory: input.directory },
       ).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { summary: input.summary },
+        },
+        { directory: input.directory },
+      )
     })
 
     const setShare = Effect.fn("Session.setShare")(function* (input: {
@@ -1191,6 +1218,15 @@ export const layer: Layer.Layer<
         { share: input.share ?? null, time: { updated: Date.now() } },
         { directory: input.directory },
       ).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { share: input.share ?? null },
+        },
+        { directory: input.directory },
+      )
     })
 
     const setWorkspace = Effect.fn("Session.setWorkspace")(function* (input: {
@@ -1203,6 +1239,15 @@ export const layer: Layer.Layer<
         { workspaceID: input.workspaceID, time: { updated: Date.now() } },
         { directory: input.directory },
       ).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { workspaceID: input.workspaceID ?? null },
+        },
+        { directory: input.directory },
+      )
     })
 
     const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {

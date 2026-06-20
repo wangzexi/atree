@@ -170,6 +170,16 @@ describe("atree session store", () => {
     })
     await appendSessionJsonl(session, {
       type: "session.updated",
+      patch: {
+        workspaceID: "workspace-jsonl",
+        share: { url: "https://example.com/share" },
+        summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
+        revert: { messageID: "msg_jsonl_revert", partID: "prt_jsonl_revert" },
+        time: { compacting: 12 },
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.updated",
       patch: { time: { archived: null } },
     })
 
@@ -177,6 +187,11 @@ describe("atree session store", () => {
     expect(restored?.title).toBe("JSONL title")
     expect(restored?.metadata).toEqual({ icon: "🧭" })
     expect(restored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
+    expect(restored?.workspaceID).toBe("workspace-jsonl")
+    expect(restored?.share).toEqual({ url: "https://example.com/share" })
+    expect(restored?.summary).toEqual({ additions: 1, deletions: 2, files: 3, diffs: [] })
+    expect(restored?.revert).toEqual({ messageID: "msg_jsonl_revert", partID: "prt_jsonl_revert" })
+    expect(restored?.time.compacting).toBe(12)
     expect(restored?.time.archived).toBeUndefined()
     expect(restored?.time.updated).toBeGreaterThan(2)
   })

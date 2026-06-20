@@ -424,11 +424,36 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
     if (typeof entry.at === "number") {
       time.updated = Math.max(time.updated, entry.at)
     }
+    if (isRecord(patch.time) && "compacting" in patch.time) {
+      const compacting = patch.time.compacting
+      if (typeof compacting === "number") time.compacting = compacting
+      else if (compacting === null) delete time.compacting
+    }
     next = {
       ...next,
       ...(typeof patch.title === "string" ? { title: patch.title } : {}),
       ...(isRecord(patch.metadata) ? { metadata: patch.metadata as SessionInfo["metadata"] } : {}),
       ...(Array.isArray(patch.permission) ? { permission: patch.permission as SessionInfo["permission"] } : {}),
+      ...("workspaceID" in patch
+        ? {
+            workspaceID:
+              typeof patch.workspaceID === "string" ? (patch.workspaceID as SessionInfo["workspaceID"]) : undefined,
+          }
+        : {}),
+      ...("share" in patch
+        ? { share: patch.share && typeof patch.share === "object" ? (patch.share as SessionInfo["share"]) : undefined }
+        : {}),
+      ...("summary" in patch
+        ? {
+            summary:
+              patch.summary && typeof patch.summary === "object" ? (patch.summary as SessionInfo["summary"]) : undefined,
+          }
+        : {}),
+      ...("revert" in patch
+        ? {
+            revert: patch.revert && typeof patch.revert === "object" ? (patch.revert as SessionInfo["revert"]) : undefined,
+          }
+        : {}),
       time,
     }
   }
