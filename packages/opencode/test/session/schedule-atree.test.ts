@@ -316,6 +316,59 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "deletes a file-backed schedule from an explicit directory without a database row",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_explicit_delete_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-delete-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit delete schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: "sch_explicit_delete",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "delete with explicit directory",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.delete("sch_explicit_delete" as never, { directory }))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, "sch_explicit_delete" as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row).toBeUndefined()
+    }),
+  )
+
   it.instance(
     "writes copied file-backed schedule state to the explicit target directory",
     Effect.gen(function* () {
