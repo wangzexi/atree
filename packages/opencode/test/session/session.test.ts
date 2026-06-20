@@ -831,16 +831,22 @@ describe("Session", () => {
 
       yield* session.setTitle({ sessionID: info.id, title: "Patched title" })
       yield* session.setMetadata({ sessionID: info.id, metadata: { icon: "🧭" } })
+      yield* session.setPermission({
+        sessionID: info.id,
+        permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+      })
       yield* session.setArchived({ sessionID: info.id, time: 1234 })
 
       const stored = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
       expect(stored?.title).toBe("Patched title")
       expect(stored?.metadata).toEqual({ icon: "🧭" })
+      expect(stored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
       expect(stored?.time.archived).toBe(1234)
 
       let row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
       expect(row?.title).toBe("Patched title")
       expect(row?.metadata).toEqual({ icon: "🧭" })
+      expect(row?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
       expect(row?.time_archived).toBe(1234)
 
       yield* session.setArchived({ sessionID: info.id, time: null })
@@ -850,6 +856,21 @@ describe("Session", () => {
 
       row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
       expect(row?.time_archived).toBeNull()
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", info.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+      expect(entries.filter((entry) => entry.type === "session.updated").map((entry) => entry.patch)).toEqual([
+        { title: "Patched title" },
+        { metadata: { icon: "🧭" } },
+        { permission: [{ permission: "bash", pattern: "*", action: "allow" }] },
+        { time: { archived: 1234 } },
+        { time: { archived: null } },
+      ])
     }),
   )
 

@@ -1072,6 +1072,15 @@ export const layer: Layer.Layer<
       input: { sessionID: SessionID; title: string } & DirectoryOption,
     ) {
       yield* patch(input.sessionID, { title: input.title }, { directory: input.directory }).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { title: input.title },
+        },
+        { directory: input.directory },
+      )
     })
 
     const setArchived = Effect.fn("Session.setArchived")(function* (
@@ -1079,6 +1088,15 @@ export const layer: Layer.Layer<
     ) {
       yield* patch(input.sessionID, { time: { archived: input.time } }, { directory: input.directory }).pipe(
         Effect.orDie,
+      )
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { time: { archived: input.time ?? null } },
+        },
+        { directory: input.directory },
       )
     })
 
@@ -1092,6 +1110,15 @@ export const layer: Layer.Layer<
           directory: input.directory,
         },
       ).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { metadata: input.metadata },
+        },
+        { directory: input.directory },
+      )
     })
 
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
@@ -1106,6 +1133,15 @@ export const layer: Layer.Layer<
           directory: input.directory,
         },
       ).pipe(Effect.orDie)
+      yield* appendSessionEvent(
+        input.sessionID,
+        {
+          type: "session.updated",
+          sessionID: input.sessionID,
+          patch: { permission: [...input.permission] },
+        },
+        { directory: input.directory },
+      )
     })
 
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {

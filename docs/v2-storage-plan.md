@@ -189,6 +189,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 显式按目录读取会话列表时，目录下 `sessions/*/meta.yaml` 是成员事实源；只有 SQLite 中存在但目录文件已不存在的缓存会话不会再出现在 active、archived 或 core `SessionV2.list({ directory })` 结果里。
 - file-backed session 回填 SQLite 缓存时会保护已有仍有效的目录行；如果同一个 session id 已经在另一个仍有 `meta.yaml` 的目录中存在，显式读取复制目录不会把全局缓存行漂移到复制目录。
 - 标题、emoji/metadata、归档状态、workspace/project identity、compacting time 等会话元数据会持久化到 `meta.yaml`。
+- 显式标题、emoji/metadata、权限和归档状态变更会追加到当前会话目录的 `session.jsonl`，让会话状态变化也成为目录原始记录的一部分。
 - 消息、消息片段、删除消息、删除片段会写入 `session.jsonl`，并能在 SQLite 投影缺失时恢复。
 - data URL 文件 part 会物化到会话自己的 `assets/`，fork 会话时也会复制到 fork 会话自己的 `assets/`。
 - 写入消息事件后会推进 `meta.yaml` 的 `updatedAt`，目录列表排序不会只依赖 SQLite 的更新时间。
