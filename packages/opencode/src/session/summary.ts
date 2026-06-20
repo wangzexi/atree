@@ -64,8 +64,8 @@ function unquoteGitPath(input: string) {
 }
 
 export interface Interface {
-  readonly summarize: (input: { sessionID: SessionID; messageID: MessageID }) => Effect.Effect<void>
-  readonly diff: (input: { sessionID: SessionID; messageID?: MessageID }) => Effect.Effect<Snapshot.FileDiff[]>
+  readonly summarize: (input: { sessionID: SessionID; messageID: MessageID; directory?: string }) => Effect.Effect<void>
+  readonly diff: (input: { sessionID: SessionID; messageID?: MessageID; directory?: string }) => Effect.Effect<Snapshot.FileDiff[]>
   readonly computeDiff: (input: { messages: SessionV1.WithParts[] }) => Effect.Effect<Snapshot.FileDiff[]>
 }
 
@@ -102,8 +102,9 @@ export const layer = Layer.effect(
     const summarize = Effect.fn("SessionSummary.summarize")(function* (input: {
       sessionID: SessionID
       messageID: MessageID
+      directory?: string
     }) {
-      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const current = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       yield* sessions.setSummary({
         sessionID: input.sessionID,
         directory: current.directory,
@@ -128,9 +129,13 @@ export const layer = Layer.effect(
       yield* sessions.updateMessage(target.info, { directory: current.directory })
     })
 
-    const diff = Effect.fn("SessionSummary.diff")(function* (input: { sessionID: SessionID; messageID?: MessageID }) {
+    const diff = Effect.fn("SessionSummary.diff")(function* (input: {
+      sessionID: SessionID
+      messageID?: MessageID
+      directory?: string
+    }) {
       if (!input.messageID) return []
-      const current = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+      const current = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       const message = (yield* sessions.messages({ sessionID: input.sessionID, directory: current.directory }).pipe(Effect.orDie)).find(
         (item) => item.info.id === input.messageID,
       )
