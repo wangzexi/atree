@@ -141,6 +141,15 @@ export const layer = Layer.effect(
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
+              yield* events.publish(Event.Rejected, {
+                sessionID: item.info.sessionID,
+                requestID: item.info.id,
+              })
+              yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+                type: "question.rejected",
+                sessionID: item.info.sessionID,
+                requestID: item.info.id,
+              })
               yield* Deferred.fail(item.deferred, new RejectedError())
             }
             state.pending.clear()

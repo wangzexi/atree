@@ -1,5 +1,5 @@
 import { afterEach, expect } from "bun:test"
-import { Cause, Effect, Exit, Fiber, Layer, Queue } from "effect"
+import { Cause, Deferred, Effect, Exit, Fiber, Layer, Queue } from "effect"
 import { Question } from "../../src/question"
 import { InstanceRef } from "../../src/effect/instance-ref"
 import { InstanceStore } from "../../src/project/instance-store"
@@ -417,6 +417,15 @@ lifecycle.live("questions stay isolated by directory", () =>
 lifecycle.live("pending question rejects on instance dispose", () =>
   Effect.gen(function* () {
     const dir = yield* tmpdirScoped({ git: true })
+    const events = yield* EventV2Bridge.Service
+    const rejected = yield* Deferred.make<QuestionID>()
+    const unsub = yield* events.listen((event) => {
+      if (event.type === Question.Event.Rejected.type) {
+        Deferred.doneUnsafe(rejected, Effect.succeed((event.data as { requestID: QuestionID }).requestID))
+      }
+      return Effect.void
+    })
+    yield* Effect.addFinalizer(() => unsub)
     const fiber = yield* askEffect({
       sessionID: SessionID.make("ses_dispose"),
       questions: [
@@ -428,12 +437,14 @@ lifecycle.live("pending question rejects on instance dispose", () =>
       ],
     }).pipe(provideInstance(dir), Effect.forkScoped)
 
-    expect(yield* waitForPending(1).pipe(provideInstance(dir))).toHaveLength(1)
+    const pending = yield* waitForPending(1).pipe(provideInstance(dir))
+    expect(pending).toHaveLength(1)
     const ctx = yield* Effect.gen(function* () {
       return yield* InstanceRef
     }).pipe(provideInstance(dir))
     if (!ctx) return yield* Effect.die(new Error("missing test instance"))
     yield* InstanceStore.Service.use((store) => store.dispose(ctx))
+    expect(yield* Deferred.await(rejected)).toBe(pending[0].id)
 
     const exit = yield* Fiber.await(fiber)
     expect(Exit.isFailure(exit)).toBe(true)

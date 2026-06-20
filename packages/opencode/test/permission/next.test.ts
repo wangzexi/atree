@@ -1023,6 +1023,16 @@ it.instance(
     Effect.gen(function* () {
       const test = yield* TestInstance
       const store = yield* InstanceStore.Service
+      const events = yield* EventV2Bridge.Service
+      const rejected = yield* Deferred.make<PermissionV1.ID>()
+      const unsub = yield* events.listen((event) => {
+        if (event.type === Permission.Event.Replied.type) {
+          const data = event.data as { requestID: PermissionV1.ID; reply: PermissionV1.Reply }
+          if (data.reply === "reject") Deferred.doneUnsafe(rejected, Effect.succeed(data.requestID))
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => unsub)
       const fiber = yield* ask({
         id: PermissionV1.ID.make("per_dispose"),
         sessionID: SessionID.make("session_dispose"),
@@ -1036,6 +1046,7 @@ it.instance(
       expect(yield* waitForPending(1)).toHaveLength(1)
       const ctx = yield* store.load({ directory: test.directory })
       yield* store.dispose(ctx)
+      expect(yield* Deferred.await(rejected)).toBe(PermissionV1.ID.make("per_dispose"))
 
       const exit = yield* Fiber.await(fiber)
       expect(Exit.isFailure(exit)).toBe(true)
