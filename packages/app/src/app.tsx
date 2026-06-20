@@ -25,6 +25,7 @@ import {
   onCleanup,
   type ParentProps,
   Show,
+  Suspense,
 } from "solid-js"
 import { Dynamic } from "solid-js/web"
 import { CommandProvider } from "@/context/command"
@@ -207,10 +208,10 @@ function DraftProviders(props: ParentProps) {
 function RouterRoot(props: ParentProps<{ appChildren?: JSX.Element }>) {
   return (
     <AppShellProviders>
-      {/*<Suspense fallback={<Loading />}>*/}
-      {props.appChildren}
-      {props.children}
-      {/*</Suspense>*/}
+      <Suspense fallback={<div class="h-full min-h-0 flex-1 bg-v2-background-bg-base" />}>
+        {props.appChildren}
+        {props.children}
+      </Suspense>
     </AppShellProviders>
   )
 }
@@ -401,7 +402,7 @@ export function AppInterface(props: {
             <Route path="/new-session" component={DraftRoute} />
             <Route path="/:dir" component={DirectoryLayout}>
               <Route path="/" component={() => <Navigate href="session" />} />
-              <Route path="/session/:id?" component={SessionRoute} />
+              <Route path="session/:id?" component={SessionRoute} />
             </Route>
           </Dynamic>
         </ConnectionGate>

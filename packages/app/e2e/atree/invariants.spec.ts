@@ -28,6 +28,11 @@ const project = {
   sandboxes: [],
 }
 
+const openApp = (page: Parameters<typeof mockOpenCodeServer>[0], url: string) =>
+  page.goto(url, { waitUntil: "commit" })
+
+const reloadApp = (page: Parameters<typeof mockOpenCodeServer>[0]) => page.reload({ waitUntil: "commit" })
+
 test.describe("atree invariants", () => {
   test.beforeEach(async ({ page }) => {
     // Each invariant must start from a clean client state; persisted tab/root
@@ -57,7 +62,7 @@ test.describe("atree invariants", () => {
       files: () => [],
     })
 
-    await page.goto("/")
+    await openApp(page, "/")
     await expect(page.getByText("选择一个根目录开始", { exact: true })).toBeVisible()
     await expect(page.locator('[data-atree-session-tab]')).toHaveCount(0)
     expect(errors).toEqual([])
@@ -81,14 +86,14 @@ test.describe("atree invariants", () => {
           : [],
     })
 
-    await page.goto("/")
+    await openApp(page, "/")
     await expect(page.getByText("aTree", { exact: true })).toBeVisible()
     // The root directory node is rendered from the server workspace state.
     const childNode = page.locator(`[data-atree-directory="${child}"]`)
     await expect(childNode).toBeVisible()
 
     // Reload: the root must come back from the server, not localStorage-only state.
-    await page.reload()
+    await reloadApp(page)
     await expect(page.getByText("aTree", { exact: true })).toBeVisible()
     await expect(childNode).toBeVisible()
     expect(errors).toEqual([])
@@ -127,7 +132,7 @@ test.describe("atree invariants", () => {
         directory === root ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }] : [],
     })
 
-    await page.goto(`/${base64Encode(child)}/session/${firstSession.id}`)
+    await openApp(page, `/${base64Encode(child)}/session/${firstSession.id}`)
 
     await expect(page.locator(`[data-atree-session-tab][data-session-id="${firstSession.id}"]`)).toBeVisible()
     await expect(page.locator(`[data-atree-session-tab][data-session-id="${secondSession.id}"]`)).toBeVisible()
@@ -168,11 +173,11 @@ test.describe("atree invariants", () => {
         directory === root ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }] : [],
     })
 
-    await page.goto(`/${base64Encode(child)}/session/${firstSession.id}`)
+    await openApp(page, `/${base64Encode(child)}/session/${firstSession.id}`)
     await expect(page.locator(`[data-atree-session-tab][data-session-id="${firstSession.id}"]`)).toBeVisible()
     await expect(page.locator("[data-atree-session-tab]")).toHaveCount(2)
 
-    await page.goto(`/${base64Encode(child)}/session/${secondSession.id}`)
+    await openApp(page, `/${base64Encode(child)}/session/${secondSession.id}`)
 
     await expect(page.locator(`[data-atree-session-tab][data-session-id="${secondSession.id}"]`)).toBeVisible()
     await expect(page.locator(`[data-atree-session-tab][data-session-id="${firstSession.id}"]`)).toBeVisible()
@@ -198,7 +203,7 @@ test.describe("atree invariants", () => {
           : [],
     })
 
-    await page.goto("/")
+    await openApp(page, "/")
     await expect(page.getByText("aTree", { exact: true })).toBeVisible()
     const childNode = page.locator(`[data-atree-directory="${child}"]`)
     await expect(childNode).toBeVisible()
@@ -215,7 +220,7 @@ test.describe("atree invariants", () => {
     await page.locator('[data-action="prompt-submit"]').first().click()
 
     await expect(page).toHaveURL(new RegExp(`/${base64Encode(child)}/session/ses_e2e_`))
-    await page.reload()
+    await reloadApp(page)
 
     const sessionID = /\/session\/(ses_e2e_[^/]+)$/.exec(new URL(page.url()).pathname)?.[1]
     expect(sessionID).toBeTruthy()
@@ -276,7 +281,7 @@ test.describe("atree invariants", () => {
           : [],
     })
 
-    await page.goto(`/${base64Encode(child)}/session/${childSession.id}`)
+    await openApp(page, `/${base64Encode(child)}/session/${childSession.id}`)
 
     const childTab = page.locator(`[data-atree-session-tab][data-session-id="${childSession.id}"]`)
     const otherTab = page.locator(`[data-atree-session-tab][data-session-id="${otherSession.id}"]`)
@@ -344,7 +349,7 @@ test.describe("atree invariants", () => {
       },
     })
 
-    await page.goto("/")
+    await openApp(page, "/")
     await expect(page.getByText("aTree", { exact: true })).toBeVisible()
     const childNode = page.locator(`[data-atree-directory="${child}"]`)
     await expect(childNode).toBeVisible()
@@ -359,7 +364,7 @@ test.describe("atree invariants", () => {
     await page.locator('[data-action="prompt-submit"]').first().click()
 
     await expect(page).toHaveURL(new RegExp(`/${base64Encode(child)}/session/ses_e2e_`))
-    await page.reload()
+    await reloadApp(page)
 
     const sessionID = /\/session\/(ses_e2e_[^/]+)$/.exec(new URL(page.url()).pathname)?.[1]
     expect(sessionID).toBeTruthy()

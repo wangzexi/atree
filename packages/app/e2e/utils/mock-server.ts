@@ -52,10 +52,9 @@ export async function mockOpenCodeServer(page: Page, config: MockServerConfig) {
     "/vcs": { branch: "main", default_branch: "main" },
   }
 
-  await page.route("**/*", async (route) => {
+  const targetPort = process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
+  await page.route(new RegExp(`^https?://[^/]+:${targetPort}/`), async (route) => {
     const url = new URL(route.request().url())
-    const targetPort = process.env.PLAYWRIGHT_SERVER_PORT ?? "4096"
-    if (url.port !== targetPort) return route.fallback()
 
     const requestDirectory = () => {
       const query = url.searchParams.get("directory")

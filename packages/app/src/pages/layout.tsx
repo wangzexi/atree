@@ -19,7 +19,7 @@ import { useLayout, LocalProject } from "@/context/layout"
 import { useServerSync } from "@/context/server-sync"
 import { Persist, persisted } from "@/utils/persist"
 import { base64Encode } from "@opencode-ai/core/util/encode"
-import { decodeDirectory64 } from "@/utils/base64"
+import { decode64, decodeDirectory64 } from "@/utils/base64"
 import { ResizeHandle } from "@opencode-ai/ui/resize-handle"
 import { Button } from "@opencode-ai/ui/button"
 import { IconButton } from "@opencode-ai/ui/icon-button"
@@ -2755,19 +2755,22 @@ export default function Layout(props: ParentProps) {
       if (!directory) return
 
       const root = rootProject()?.worktree ?? projectRoot(directory)
-      const group = sessionTabs.directoryGroup()
       const sessionID = params.id
-      const hasCurrentSession = !!sessionID
-        ? sessionTabs.store.some(
-            (tab) =>
-              tab.type === "session" &&
-              tab.server === server.key &&
-              tab.sessionId === sessionID &&
-              pathKey(atob(tab.dirBase64)) === pathKey(directory),
-          )
-        : true
+      const currentGroupReady = untrack(() => {
+        const group = sessionTabs.directoryGroup()
+        const hasCurrentSession = !!sessionID
+          ? sessionTabs.store.some(
+              (tab) =>
+                tab.type === "session" &&
+                tab.server === server.key &&
+                tab.sessionId === sessionID &&
+                pathKey(decode64(tab.dirBase64) ?? "") === pathKey(directory),
+            )
+          : true
+        return group?.server === server.key && pathKey(group.directory) === pathKey(directory) && hasCurrentSession
+      })
 
-      if (group?.server === server.key && pathKey(group.directory) === pathKey(directory) && hasCurrentSession) return
+      if (currentGroupReady) return
 
       void loadDirectory(root, directory, { probeChildren: true }).then(() => {
         if (run !== routeDirectoryGroupRun) return

@@ -5,7 +5,9 @@ export function base64Encode(value: string) {
 }
 
 export function base64Decode(value: string) {
-  const binary = atob(value.replace(/-/g, "+").replace(/_/g, "/"))
+  const normalized = value.replace(/-/g, "+").replace(/_/g, "/")
+  const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), "=")
+  const binary = atob(padded)
   const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0))
   return new TextDecoder().decode(bytes)
 }
