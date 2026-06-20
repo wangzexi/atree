@@ -37,8 +37,8 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
-import { findSessionStore, readSessionJsonlProjection, readSessionStore } from "@/atree/session-store"
-import { readWorkspaceState } from "@/atree/state"
+import { readSessionJsonlProjection } from "@/atree/session-store"
+import { resolveFileSession } from "@/atree/session-resolver"
 import type { Session } from "./session"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -131,31 +131,6 @@ type PageResult = {
   items: WithParts[]
   more: boolean
   cursor: string | undefined
-}
-
-function fileBackedSession(directory: string | undefined, sessionID: SessionID) {
-  return Effect.gen(function* () {
-    if (directory) {
-      const fileSession = yield* Effect.promise(() => readSessionStore(directory, sessionID))
-      if (fileSession) return fileSession
-    }
-    const { db } = yield* Database.Service
-    const row = yield* db
-      .select({ directory: SessionTable.directory })
-      .from(SessionTable)
-      .where(eq(SessionTable.id, sessionID))
-      .get()
-      .pipe(Effect.orDie)
-    if (row?.directory && row.directory !== directory) {
-      const fileSession = yield* Effect.promise(() => readSessionStore(row.directory, sessionID))
-      if (fileSession) return fileSession
-    }
-    const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-      Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-    )
-    if (!state.rootDirectory) return
-    return yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
-  })
 }
 
 function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {
@@ -492,13 +467,13 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   directory?: string
 }) {
   const before = input.before ? cursor.decode(input.before) : undefined
-  const fileSession = yield* fileBackedSession(input.directory, input.sessionID)
+  const { db } = yield* Database.Service
+  const fileSession = yield* resolveFileSession(db, { directory: input.directory, sessionID: input.sessionID })
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     return pageFileMessages(projection.messages, { limit: input.limit, before })
   }
 
-  const { db } = yield* Database.Service
   const where = before
     ? and(eq(MessageTable.session_id, input.sessionID), older(before))
     : eq(MessageTable.session_id, input.sessionID)
@@ -562,15 +537,15 @@ export function stream(sessionID: SessionID, options?: { directory?: string }) {
 
 export function parts(messageID: MessageID, options?: { sessionID?: SessionID; directory?: string }) {
   return Effect.gen(function* () {
+    const { db } = yield* Database.Service
     if (options?.sessionID && options.directory) {
-      const fileSession = yield* fileBackedSession(options.directory, options.sessionID)
+      const fileSession = yield* resolveFileSession(db, { directory: options.directory, sessionID: options.sessionID })
       if (fileSession) {
         const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
         return projection.messages.find((message) => message.info.id === messageID)?.parts ?? []
       }
     }
 
-    const { db } = yield* Database.Service
     const rows = yield* db
       .select()
       .from(PartTable)
@@ -587,7 +562,8 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
   messageID: MessageID
   directory?: string
 }) {
-  const fileSession = yield* fileBackedSession(input.directory, input.sessionID)
+  const { db } = yield* Database.Service
+  const fileSession = yield* resolveFileSession(db, { directory: input.directory, sessionID: input.sessionID })
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     const message = projection.messages.find((item) => item.info.id === input.messageID)
@@ -595,7 +571,6 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
     return message
   }
 
-  const { db } = yield* Database.Service
   const row = yield* db
     .select()
     .from(MessageTable)

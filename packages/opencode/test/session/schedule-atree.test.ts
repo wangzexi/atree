@@ -67,6 +67,19 @@ describe("atree schedule restore", () => {
         } as typeof SessionTable.$inferInsert)
         .run()
         .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "restore",
+          version: "test",
+          projectID: "proj_restore" as never,
+          directory,
+          title: "Restore",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        }),
+      )
 
       yield* Effect.promise(() =>
         writeSessionScheduleState(directory, sessionID, [

@@ -9,9 +9,9 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { findSessionStore, readSessionStore } from "@/atree/session-store"
+import { readSessionStore } from "@/atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "@/atree/todo-store"
-import { readWorkspaceState } from "@/atree/state"
+import { resolveFileSession } from "@/atree/session-resolver"
 import { InstanceRef } from "@/effect/instance-ref"
 
 export const Info = Schema.Struct({
@@ -121,39 +121,12 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
-      if (fallbackDirectory) {
-        const fileSession = yield* Effect.promise(() => readSessionStore(fallbackDirectory, sessionID))
-        if (fileSession) {
-          yield* upsertFileSessionCache(fileSession)
-          return fileSession.directory
-        }
-      }
-
-      const row = yield* db
-        .select({ directory: SessionTable.directory })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      if (row?.directory) {
-        const fileSession = yield* Effect.promise(() => readSessionStore(row.directory, sessionID))
-        if (fileSession) {
-          yield* upsertFileSessionCache(fileSession)
-          return fileSession.directory
-        }
-      }
-
       const instance = yield* InstanceRef
-      if (instance) {
-        const fileSession = yield* Effect.promise(() => readSessionStore(instance.directory, sessionID))
-        if (fileSession) return instance.directory
-      }
-
-      const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-        Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-      )
-      if (!state.rootDirectory) return
-      const fileSession = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
+      const fileSession = yield* resolveFileSession(db, {
+        sessionID,
+        directory: fallbackDirectory,
+        instanceDirectory: instance?.directory,
+      })
       if (!fileSession) return
       yield* upsertFileSessionCache(fileSession)
       return fileSession.directory
