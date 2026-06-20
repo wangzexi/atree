@@ -9,6 +9,9 @@ import { Config } from "@/config/config"
 import { Identifier } from "../id/id"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
+import { InstanceState } from "@/effect/instance-state"
+import { ensureSessionPayloadFilesByID } from "@/atree/session-store"
+import type { SessionID } from "@/session/schema"
 
 const RETENTION = Duration.days(7)
 
@@ -23,6 +26,11 @@ export interface Options {
   maxLines?: number
   maxBytes?: number
   direction?: "head" | "tail"
+  sessionID?: SessionID
+}
+
+export interface WriteOptions {
+  sessionID?: SessionID
 }
 
 function hasTaskTool(agent?: Agent.Info) {
@@ -32,7 +40,7 @@ function hasTaskTool(agent?: Agent.Info) {
 
 export interface Interface {
   readonly cleanup: () => Effect.Effect<void>
-  readonly write: (text: string) => Effect.Effect<string>
+  readonly write: (text: string, options?: WriteOptions) => Effect.Effect<string>
   /**
    * Returns output unchanged when it fits within the limits, otherwise writes the full text
    * to the truncation directory and returns a preview plus a hint to inspect the saved file.
@@ -51,6 +59,17 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const fs = yield* FSUtil.Service
 
+    const directory = Effect.fn("Truncate.directory")(function* (options?: WriteOptions) {
+      const sessionID = options?.sessionID
+      if (!sessionID) return TRUNCATION_DIR
+      const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      if (!ctx) return TRUNCATION_DIR
+      yield* Effect.promise(() => ensureSessionPayloadFilesByID(ctx.directory, sessionID)).pipe(
+        Effect.catchCause(() => Effect.void),
+      )
+      return path.join(ctx.directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output")
+    })
+
     const cleanup = Effect.fn("Truncate.cleanup")(function* () {
       const cutoff = Identifier.timestamp(
         Identifier.create("tool", "ascending", Date.now() - Duration.toMillis(RETENTION)),
@@ -65,9 +84,10 @@ export const layer = Layer.effect(
       }
     })
 
-    const write = Effect.fn("Truncate.write")(function* (text: string) {
-      const file = path.join(TRUNCATION_DIR, ToolID.ascending())
-      yield* fs.ensureDir(TRUNCATION_DIR).pipe(Effect.orDie)
+    const write = Effect.fn("Truncate.write")(function* (text: string, options?: WriteOptions) {
+      const dir = yield* directory(options)
+      const file = path.join(dir, ToolID.ascending())
+      yield* fs.ensureDir(dir).pipe(Effect.orDie)
       yield* fs.writeFileString(file, text).pipe(Effect.orDie)
       return file
     })
@@ -124,7 +144,7 @@ export const layer = Layer.effect(
       const removed = hitBytes ? totalBytes - bytes : lines.length - out.length
       const unit = hitBytes ? "bytes" : "lines"
       const preview = out.join("\n")
-      const file = yield* write(text)
+      const file = yield* write(text, { sessionID: options.sessionID })
 
       const hint = hasTaskTool(agent)
         ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`

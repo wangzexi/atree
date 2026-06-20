@@ -11,11 +11,23 @@ import path from "path"
 import { testEffect } from "../lib/effect"
 import { writeFileStringScoped } from "../lib/filesystem"
 import { TestConfig } from "../fixture/config"
+import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
+import { SessionID } from "@/session/schema"
+import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
 const ROOT = path.resolve(import.meta.dir, "..", "..")
 
 const it = testEffect(Layer.mergeAll(Truncate.defaultLayer, NodeFileSystem.layer, FSUtil.defaultLayer))
+const instanceIt = testEffect(
+  Layer.mergeAll(
+    Truncate.defaultLayer,
+    NodeFileSystem.layer,
+    FSUtil.defaultLayer,
+    testInstanceStoreLayer,
+    CrossSpawnSpawner.defaultLayer,
+  ),
+)
 
 const configuredLayer = (cfg: ConfigV1.Info) =>
   Layer.mergeAll(
@@ -191,6 +203,22 @@ describe("Truncate", () => {
         const fsys = yield* FSUtil.Service
         const written = yield* fsys.readFileString(result.outputPath!)
         expect(written).toBe(lines)
+      }),
+    )
+
+    instanceIt.live("writes session output to the session assets directory", () =>
+      Effect.gen(function* () {
+        const directory = yield* tmpdirScoped()
+        const sessionID = "ses_truncate_assets" as SessionID
+        const svc = yield* Truncate.Service
+        const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
+        const result = yield* svc.output(lines, { maxLines: 10, sessionID }).pipe(provideInstance(directory))
+
+        expect(result.truncated).toBe(true)
+        if (!result.truncated) throw new Error("expected truncated")
+        expect(result.outputPath).toContain(path.join(directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"))
+        const fsys = yield* FSUtil.Service
+        expect(yield* fsys.readFileString(result.outputPath)).toBe(lines)
       }),
     )
 

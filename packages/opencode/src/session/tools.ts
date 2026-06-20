@@ -173,7 +173,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
             }
           }
 
-          const truncated = yield* truncate.output(textParts.join("\n\n"), {}, input.agent)
+          const truncated = yield* truncate.output(textParts.join("\n\n"), { sessionID: ctx.sessionID }, input.agent)
           const metadata = {
             ...result.metadata,
             truncated: truncated.truncated,

@@ -510,7 +510,7 @@ export const ShellTool = Tool.define(
               } else {
                 full += chunk
                 if (Buffer.byteLength(full, "utf-8") > limits.maxBytes) {
-                  return trunc.write(full).pipe(
+                  return trunc.write(full, { sessionID: ctx.sessionID }).pipe(
                     Effect.andThen((next) =>
                       Effect.sync(() => {
                         file = next
@@ -579,7 +579,7 @@ export const ShellTool = Tool.define(
       const end = tail(raw, limits.maxLines, limits.maxBytes)
       if (end.cut) cut = true
       if (!file && end.cut) {
-        file = yield* trunc.write(raw)
+        file = yield* trunc.write(raw, { sessionID: ctx.sessionID })
       }
 
       let output = end.text
