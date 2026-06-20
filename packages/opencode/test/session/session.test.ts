@@ -775,6 +775,29 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("uses file-backed archived metadata to separate active and archived directory lists", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* Effect.acquireRelease(session.create({ title: "file-list-stale-active" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          ...info,
+          time: { ...info.time, archived: Date.now() },
+        } as any),
+      )
+
+      const active = yield* session.list({ directory: instance.directory })
+      const archived = yield* session.list({ directory: instance.directory, archived: true })
+
+      expect(active.map((item) => item.id)).not.toContain(info.id)
+      expect(archived.map((item) => item.id)).toContain(info.id)
+    }),
+  )
+
   it.instance("materializes data-url file parts into the session assets directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
