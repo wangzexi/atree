@@ -1079,10 +1079,13 @@ describe("session HttpApi", () => {
           data: { id: "msg_http_prompt", prompt: { text: "hello" }, delivery: "steer" },
         })
 
-        const messages = yield* requestJson<{ data: PromptBody[] }>(`/api/session/${session.id}/message`, {
-          headers,
-        })
-        expect(messages.data).toHaveLength(0)
+        const messages = yield* requestJson<{ data: Array<{ id: string; type: string; text?: string }> }>(
+          `/api/session/${session.id}/message`,
+          {
+            headers,
+          },
+        )
+        expect(messages.data).toMatchObject([{ id: "msg_http_prompt", type: "user", text: "hello" }])
         const admitted = yield* Database.Service.use(({ db }) =>
           db
             .select()
