@@ -195,6 +195,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 复制 `.agents/atree/` 到另一个目录后，显式传入目标目录的 fork 会从目标目录读取历史，并把新 fork 会话写入目标目录。
 - HTTP prompt 路由在 `directory` hint 指向一个复制出来的 file-backed session 时，会优先使用该目标目录；如果 hint 目录没有对应 session，则回退到 session 自己持久化的目录。
 - HTTP prompt、promptAsync、command、shell、init、summarize/loop 入口会先解析当前 session 的目录，并把目录上下文显式传给执行链路，减少模型执行写回旧 SQLite/cache 目录的可能。
+- Shell 执行内部的 session resolve 也使用传入的目录上下文；shell 用户消息、工具 part 和后续恢复 loop 会继续写入当前目录会话。
 - Summary diff/summarize 读取和写入也接受目录上下文；HTTP diff 会用解析出的当前 session 目录读取消息摘要，避免同 session id 的旧缓存目录影响 diff 展示。
 - Revert/unrevert 也接受目录上下文；HTTP revert/unrevert 会把当前 session 目录传给回滚链路，让 revert 状态、message/part 清理继续落在目录会话内。
 - Share/unshare 写入 share 元数据时也接受目录上下文；HTTP share/unshare 会把当前 session 目录传给 metadata 写入链路。

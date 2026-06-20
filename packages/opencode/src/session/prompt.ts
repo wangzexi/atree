@@ -459,7 +459,7 @@ export const layer = Layer.effect(
           const markReady = ready ? ready.open.pipe(Effect.asVoid) : Effect.void
           const { msg, part, cwd, directory } = yield* Effect.gen(function* () {
             const ctx = yield* InstanceState.context
-            const session = yield* sessions.get(input.sessionID).pipe(Effect.orDie)
+            const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
             if (session.revert) {
               yield* revert.cleanup(session)
             }
