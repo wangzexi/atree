@@ -216,7 +216,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionStore.get` 在读取到 SQLite row 后会先校验该目录是否仍有对应 file-backed session；如果旧目录文件已不存在，会继续从持久化 root 查找目录事实源，最后才回退旧 SQLite row 以兼容非 atree 旧会话。
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
 - core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。
-- question/permission 的 asked/replied/rejected 事件会尽力追加到当前会话目录的 `session.jsonl`。这些请求仍然是运行时 pending 状态，但会话里发生过的澄清问题和权限决策已经会随目录一起复制、归档和读取。
+- question/permission 的 asked/replied/rejected 事件会尽力追加到当前会话目录的 `session.jsonl`；dispose/reload 导致的 pending 取消也会记录为 rejected/reject。这些请求仍然是运行时 pending 状态，但会话里发生过的澄清问题和权限决策已经会随目录一起复制、归档和读取。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core 和 opencode 的 `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名；opencode reader 也会按最后事件清理 message/part 删除 tombstone；todo/schedule 的 JSONL 投影读取也同样兼容版本化事件名。
@@ -227,7 +227,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
 - core `SessionTodo` 会在能定位到 file-backed session 时把 todo 状态镜像到同一会话目录的 `todo.json`，读取时目录状态优先；即使 SQLite todo 投影缺失，也能从目录恢复。
 - core `SessionTodo` 的文件态行为已经和 opencode 侧保持一致：写入 todo 时会确保 `session.jsonl` / `assets/` 骨架存在，读取旧 `extensions/todo/state.json` 作为迁移兼容，重写该会话 todo 后会从旧扩展状态中移除对应 session，并推进会话 `meta.yaml` 的更新时间。
-- todo 更新会先追加到当前会话目录的 `session.jsonl`，再刷新 `todo.json` 投影；当会话目录的 `todo.json` 投影文件缺失时，todo store 可以从最近一条 `todo.updated` 事件恢复当前 todo 状态，并保留“显式空 todo”和“缺失 todo 状态”的区别。
+- todo 更新会先追加到当前会话目录的 `session.jsonl`，再刷新 `todo.json` 投影；当会话目录的 `todo.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `todo.updated` 事件时，todo store 可以从最近一条事件恢复当前 todo 状态，并保留“显式空 todo”和“缺失 todo 状态”的区别。
 - todo/schedule 的无显式目录解析不再直接信任 SQLite 中缓存的 `SessionTable.directory`；只有该目录仍能读到对应 `meta.yaml` 时才接受，否则继续从当前 instance 或持久化 root 查找真实 file-backed session。
 - opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、仍有效的 SQLite 缓存目录、持久化 atree root 扫描。复制或移动 `.agents/atree/` 后，如果旧 SQLite 目录已经失效，相关读写会继续定位到当前目录事实源。
 - core `ToolOutputStore` 在能通过 `SessionStore` 定位到 file-backed session 时，会把超长工具输出写入该会话的 `assets/tool-output/`；不能定位会话目录时仍回退到全局 `tool-output`，保持旧链路兼容。
@@ -240,7 +240,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - schedule 的运行 timer 会携带创建/恢复时的目录上下文；一次性自动化消息触发后，会在同一个目录的 `schedule.json` 中清空，不再依赖全局 SQLite session cache 推断目录。
 - schedule 触发时会把恢复到的目录上下文继续传给 prompt/loop；复制 `.agents/atree/` 后，自动化消息产生的新用户消息和后续回复会写入目标目录，而不是写回源目录或陈旧 SQLite row 指向的目录。
 - schedule 的创建、运行记录和删除会先追加到当前会话目录的 `session.jsonl`，再刷新 `schedule.json` 投影；归档会话导致的自动化清理也会留下 `schedule.deleted` 记录。即使是重启/恢复时发现 archived 会话里残留了旧 `schedule.json`，清理投影前也会补写删除事件。因此自动化消息不只是外部投影状态，也是会话原始记录的一部分。
-- 当会话目录的 `schedule.json` 投影文件缺失时，schedule store 可以从 `session.jsonl` 中的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件重放恢复当前自动化状态，包括最近运行状态和下次执行时间。
+- 当会话目录的 `schedule.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件时，schedule store 可以重放 JSONL 恢复当前自动化状态，包括最近运行状态和下次执行时间。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 

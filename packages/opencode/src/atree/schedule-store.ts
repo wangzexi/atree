@@ -101,11 +101,12 @@ async function readSessionState(target: string) {
     const parsed = JSON.parse(raw) as Partial<SessionScheduleState>
     return {
       hasState: true,
-      schedules: Array.isArray(parsed.schedules) ? parsed.schedules : [],
+      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
+      schedules: Array.isArray(parsed.schedules) ? parsed.schedules.filter(isStoredSchedule) : [],
     }
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return { hasState: false, schedules: [] as StoredSchedule[] }
+      return { hasState: false, updatedAt: 0, schedules: [] as StoredSchedule[] }
     }
     throw error
   }
@@ -117,6 +118,8 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
     throw error
   })
   const schedules = new Map<string, StoredSchedule>()
+  let hasState = false
+  let updatedAt = 0
 
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue
@@ -131,6 +134,8 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
 
     if (type === "schedule.created" && isStoredSchedule(entry.schedule)) {
       if (entry.schedule.sessionID !== sessionID) continue
+      hasState = true
+      if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
       schedules.set(entry.schedule.id, entry.schedule)
       continue
     }
@@ -143,6 +148,8 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
       if (!scheduleID || ranAt === undefined || !status) continue
       const schedule = schedules.get(scheduleID)
       if (!schedule) continue
+      hasState = true
+      if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
       schedules.set(scheduleID, {
         ...schedule,
         lastRanAt: ranAt,
@@ -155,11 +162,13 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
     if (type === "schedule.deleted") {
       const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
       if (!scheduleID) continue
+      hasState = true
+      if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
       schedules.delete(scheduleID)
     }
   }
 
-  return [...schedules.values()]
+  return { hasState, updatedAt, schedules: [...schedules.values()] }
 }
 
 async function writeAtomic(target: string, value: ScheduleState | SessionScheduleState) {
@@ -192,13 +201,21 @@ export async function writeSessionScheduleState(directory: string, sessionID: st
 
 export async function readSessionScheduleState(directory: string, sessionID: string) {
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
-  if (sessionState.hasState) return sessionState.schedules
+  if (sessionState.hasState) {
+    const jsonlState = await readSessionJsonlProjection(directory, sessionID)
+    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return jsonlState.schedules
+    return sessionState.schedules
+  }
 
   const state = await readState(legacyStatePath(directory))
+  const jsonlState = await readSessionJsonlProjection(directory, sessionID)
   const schedules = state.sessions[sessionID]
-  if (Array.isArray(schedules)) return schedules
+  if (Array.isArray(schedules)) {
+    if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return jsonlState.schedules
+    return schedules.filter(isStoredSchedule)
+  }
 
-  return readSessionJsonlProjection(directory, sessionID)
+  return jsonlState.schedules
 }
 
 export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {

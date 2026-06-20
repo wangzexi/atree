@@ -59,8 +59,8 @@ describe("atree todo store", () => {
     await writeSessionTodoState(directory, "ses_empty", [])
 
     expect(await readSessionTodoState(directory, "ses_empty")).toEqual([])
-    expect(await readSessionTodoProjection(directory, "ses_empty")).toEqual({ hasState: true, todos: [] })
-    expect(await readSessionTodoProjection(directory, "ses_missing")).toEqual({ hasState: false, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_empty")).toMatchObject({ hasState: true, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_missing")).toMatchObject({ hasState: false, todos: [] })
   })
 
   test("creates the session payload skeleton when writing todo state", async () => {
@@ -107,7 +107,7 @@ describe("atree todo store", () => {
 
     expect(await readSessionTodoState(directory, "ses_legacy")).toEqual([todo])
     await writeSessionTodoState(directory, "ses_legacy", [])
-    expect(await readSessionTodoProjection(directory, "ses_legacy")).toEqual({ hasState: true, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_legacy")).toMatchObject({ hasState: true, todos: [] })
     expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()
   })
 
@@ -136,7 +136,7 @@ describe("atree todo store", () => {
       todos: [{ content: "restored todo", status: "in_progress", priority: "high" }],
     })
 
-    expect(await readSessionTodoProjection(directory, "ses_jsonl")).toEqual({
+    expect(await readSessionTodoProjection(directory, "ses_jsonl")).toMatchObject({
       hasState: true,
       todos: [{ content: "restored todo", status: "in_progress", priority: "high" }],
     })
@@ -165,8 +165,8 @@ describe("atree todo store", () => {
       todos: [],
     })
 
-    expect(await readSessionTodoProjection(directory, "ses_jsonl_empty")).toEqual({ hasState: true, todos: [] })
-    expect(await readSessionTodoProjection(directory, "ses_missing")).toEqual({ hasState: false, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_jsonl_empty")).toMatchObject({ hasState: true, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_missing")).toMatchObject({ hasState: false, todos: [] })
   })
 
   test("replays versioned todo events from session jsonl", async () => {
@@ -189,7 +189,7 @@ describe("atree todo store", () => {
       todos: [{ content: "versioned todo", status: "pending", priority: "medium" }],
     })
 
-    expect(await readSessionTodoProjection(directory, "ses_jsonl_versioned")).toEqual({
+    expect(await readSessionTodoProjection(directory, "ses_jsonl_versioned")).toMatchObject({
       hasState: true,
       todos: [{ content: "versioned todo", status: "pending", priority: "medium" }],
     })

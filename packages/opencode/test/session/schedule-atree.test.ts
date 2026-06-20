@@ -815,6 +815,72 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "prefers newer schedule jsonl events over a stale schedule projection",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_schedule_stale_projection" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "schedule-stale-projection",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Schedule stale projection",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: "sch_old_projection",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "old projection schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        fs.appendFile(
+          path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"),
+          `${JSON.stringify({
+            version: 1,
+            at: now + 10_000,
+            type: "schedule.created",
+            schedule: {
+              id: "sch_new_jsonl",
+              sessionID,
+              kind: "once",
+              expression: "",
+              runAt: now + 120_000,
+              message: "new jsonl schedule",
+              createdAt: now + 10_000,
+              lastRanAt: null,
+              lastRunStatus: null,
+              nextRun: now + 120_000,
+            },
+          })}\n`,
+        ),
+      )
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toMatchObject([
+        { id: "sch_new_jsonl", message: "new jsonl schedule" },
+      ])
+    }),
+  )
+
+  it.effect(
     "ignores a stale database directory when creating schedule state from the persisted atree root",
     Effect.gen(function* () {
       const { db } = yield* Database.Service

@@ -299,6 +299,53 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.effect("prefers newer todo jsonl events over a stale todo projection", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-stale-projection-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const sessionID = "ses_todo_stale_projection" as SessionID
+      const now = Date.now()
+      const session = {
+        id: sessionID,
+        slug: "todo-stale-projection",
+        version: "test",
+        projectID: "proj_file",
+        directory,
+        path: ".",
+        title: "Todo stale projection",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: now, updated: now },
+      } as any
+
+      yield* Effect.promise(() => writeSessionStore(session))
+      yield* Effect.promise(() =>
+        writeSessionTodoState(directory, sessionID, [
+          { content: "old projection todo", status: "pending", priority: "low" },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        fs.appendFile(
+          path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"),
+          `${JSON.stringify({
+            version: 1,
+            at: now + 10_000,
+            type: "todo.updated",
+            sessionID,
+            todos: [{ content: "new jsonl todo", status: "in_progress", priority: "high" }],
+          })}\n`,
+        ),
+      )
+
+      expect(yield* todo.get(sessionID, { directory })).toEqual([
+        { content: "new jsonl todo", status: "in_progress", priority: "high" },
+      ])
+    }),
+  )
+
   it.effect("ignores a stale database directory when resolving todo state from the persisted atree root", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service
