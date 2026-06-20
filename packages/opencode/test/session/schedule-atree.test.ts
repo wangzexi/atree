@@ -1035,6 +1035,21 @@ describe("atree schedule restore", () => {
 
       yield* Schedule.Service.use((schedule) => schedule.clear(sessionID))
       expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "schedule.deleted",
+          scheduleID: "sch_stale",
+          sessionID,
+          reason: "cleared",
+        }),
+      )
     }),
   )
 
@@ -1078,6 +1093,21 @@ describe("atree schedule restore", () => {
 
       yield* Schedule.Service.use((schedule) => schedule.clear(sessionID, { directory }))
       expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "schedule.deleted",
+          scheduleID: "sch_explicit_clear",
+          sessionID,
+          reason: "cleared",
+        }),
+      )
     }),
   )
 
