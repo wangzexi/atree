@@ -898,6 +898,193 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores event-backed completed tool calls from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_tool_completed",
+          title: "Core event tool completed",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_tool_completed", [
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_tool_completed",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 30,
+          },
+          {
+            type: "session.next.tool.input.started",
+            assistantMessageID: "msg_core_event_tool_completed",
+            callID: "call_core_event_tool_completed",
+            name: "bash",
+            timestamp: 31,
+          },
+          {
+            type: "session.next.tool.input.ended",
+            assistantMessageID: "msg_core_event_tool_completed",
+            callID: "call_core_event_tool_completed",
+            text: '{"cmd":"echo hi"}',
+            timestamp: 32,
+          },
+          {
+            type: "session.next.tool.called",
+            assistantMessageID: "msg_core_event_tool_completed",
+            callID: "call_core_event_tool_completed",
+            tool: "bash",
+            input: { cmd: "echo hi" },
+            provider: { executed: false, metadata: { test: { call: true } } },
+            timestamp: 33,
+          },
+          {
+            type: "session.next.tool.progress",
+            assistantMessageID: "msg_core_event_tool_completed",
+            callID: "call_core_event_tool_completed",
+            structured: { phase: "running" },
+            content: [{ type: "text", text: "running" }],
+            timestamp: 34,
+          },
+          {
+            type: "session.next.tool.success",
+            assistantMessageID: "msg_core_event_tool_completed",
+            callID: "call_core_event_tool_completed",
+            structured: { exit: 0 },
+            content: [{ type: "text", text: "ok" }],
+            result: { ok: true },
+            provider: { executed: true, metadata: { test: { result: true } } },
+            timestamp: 35,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_tool_completed"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_tool_completed",
+        type: "assistant",
+        content: [
+          {
+            type: "tool",
+            id: "call_core_event_tool_completed",
+            name: "bash",
+            provider: {
+              executed: true,
+              metadata: { test: { call: true } },
+              resultMetadata: { test: { result: true } },
+            },
+            state: {
+              status: "completed",
+              input: { cmd: "echo hi" },
+              structured: { exit: 0 },
+              content: [{ type: "text", text: "ok" }],
+              outputPaths: [],
+              result: { ok: true },
+            },
+          },
+        ],
+      })
+      if (messages[0]?.type === "assistant" && messages[0].content[0]?.type === "tool") {
+        expect(DateTime.toEpochMillis(messages[0].content[0].time.ran!)).toBe(33)
+        expect(DateTime.toEpochMillis(messages[0].content[0].time.completed!)).toBe(35)
+      }
+    }),
+  )
+
+  it.effect("restores event-backed failed tool calls from file-backed session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_tool_failed",
+          title: "Core event tool failed",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_tool_failed", [
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_tool_failed",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 30,
+          },
+          {
+            type: "session.next.tool.input.started",
+            assistantMessageID: "msg_core_event_tool_failed",
+            callID: "call_core_event_tool_failed",
+            name: "bash",
+            timestamp: 31,
+          },
+          {
+            type: "session.next.tool.failed",
+            assistantMessageID: "msg_core_event_tool_failed",
+            callID: "call_core_event_tool_failed",
+            error: { type: "unknown", message: "tool failed" },
+            result: "bad",
+            provider: { executed: false, metadata: { test: { result: true } } },
+            timestamp: 32,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_tool_failed"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_tool_failed",
+        type: "assistant",
+        content: [
+          {
+            type: "tool",
+            id: "call_core_event_tool_failed",
+            name: "bash",
+            provider: { executed: false, resultMetadata: { test: { result: true } } },
+            state: {
+              status: "error",
+              error: { type: "unknown", message: "tool failed" },
+              input: {},
+              structured: {},
+              content: [],
+              result: "bad",
+            },
+          },
+        ],
+      })
+    }),
+  )
+
   it.effect("restores completed tool invocations from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

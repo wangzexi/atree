@@ -241,6 +241,8 @@ type AssistantEventRecord = {
   error?: SessionMessage.Assistant["error"]
 }
 
+type EventProvider = NonNullable<SessionMessage.AssistantTool["provider"]>
+
 function sessionRoot(info: SessionSchema.Info) {
   return path.join(info.location.directory, ".agents", "atree", "sessions", info.id)
 }
@@ -376,6 +378,43 @@ function unknownError(value: unknown): SessionMessage.Assistant["error"] | undef
     if (error.type === "unknown" && typeof error.message === "string") return { type: "unknown", message: error.message }
   }
   return
+}
+
+function eventProvider(value: unknown): EventProvider {
+  if (!value || typeof value !== "object") return { executed: false }
+  const provider = value as { executed?: unknown; metadata?: unknown }
+  const executed = typeof provider.executed === "boolean" ? provider.executed : false
+  return {
+    executed,
+    metadata:
+      provider.metadata && typeof provider.metadata === "object"
+        ? (provider.metadata as Record<string, Record<string, unknown>>)
+        : undefined,
+  }
+}
+
+function eventContent(value: unknown): SessionMessage.ToolStateRunning["content"] {
+  return Array.isArray(value) ? (value as SessionMessage.ToolStateRunning["content"]) : []
+}
+
+function eventStructured(value: unknown): Record<string, unknown> {
+  if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>
+  return {}
+}
+
+function eventOutputPaths(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
+}
+
+function updateAssistantEventTool(
+  assistant: AssistantEventRecord,
+  callID: string,
+  update: (tool: SessionMessage.AssistantTool) => SessionMessage.AssistantTool,
+) {
+  return {
+    ...assistant,
+    content: assistant.content.map((part) => (part.type === "tool" && part.id === callID ? update(part) : part)),
+  }
 }
 
 function textParts(parts: V1Part[]) {
@@ -886,6 +925,168 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         }),
       )
       assistantEvents.set(assistantMessageID, { ...assistant, content })
+    }
+    if (entry.type === "session.next.tool.input.started") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const name = typeof data.name === "string" ? data.name : undefined
+      if (!assistantMessageID || !callID || !name) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      const content = assistant.content.filter((part) => !(part.type === "tool" && part.id === callID))
+      content.push(
+        new SessionMessage.AssistantTool({
+          type: "tool",
+          id: callID,
+          name,
+          time: { created: DateTime.makeUnsafe(timestampValue(data.timestamp, index)) },
+          state: new SessionMessage.ToolStatePending({ status: "pending", input: "" }),
+        }),
+      )
+      assistantEvents.set(assistantMessageID, { ...assistant, content })
+    }
+    if (entry.type === "session.next.tool.input.ended") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const text = typeof data.text === "string" ? data.text : undefined
+      if (!assistantMessageID || !callID || text === undefined) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      assistantEvents.set(
+        assistantMessageID,
+        updateAssistantEventTool(assistant, callID, (tool) =>
+          tool.state.status === "pending"
+            ? new SessionMessage.AssistantTool({
+                ...tool,
+                state: new SessionMessage.ToolStatePending({ status: "pending", input: text }),
+              })
+            : tool,
+        ),
+      )
+    }
+    if (entry.type === "session.next.tool.called") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const provider = eventProvider(data.provider)
+      if (!assistantMessageID || !callID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      assistantEvents.set(
+        assistantMessageID,
+        updateAssistantEventTool(assistant, callID, (tool) =>
+          new SessionMessage.AssistantTool({
+            ...tool,
+            provider,
+            time: { ...tool.time, ran: DateTime.makeUnsafe(timestampValue(data.timestamp, index)) },
+            state: new SessionMessage.ToolStateRunning({
+              status: "running",
+              input: objectInput(data.input),
+              structured: {},
+              content: [],
+            }),
+          }),
+        ),
+      )
+    }
+    if (entry.type === "session.next.tool.progress") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      if (!assistantMessageID || !callID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      assistantEvents.set(
+        assistantMessageID,
+        updateAssistantEventTool(assistant, callID, (tool) =>
+          tool.state.status === "running"
+            ? new SessionMessage.AssistantTool({
+                ...tool,
+                state: new SessionMessage.ToolStateRunning({
+                  status: "running",
+                  input: tool.state.input,
+                  structured: eventStructured(data.structured),
+                  content: eventContent(data.content),
+                }),
+              })
+            : tool,
+        ),
+      )
+    }
+    if (entry.type === "session.next.tool.success") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const provider = eventProvider(data.provider)
+      if (!assistantMessageID || !callID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      assistantEvents.set(
+        assistantMessageID,
+        updateAssistantEventTool(assistant, callID, (tool) =>
+          tool.state.status === "running"
+            ? new SessionMessage.AssistantTool({
+                ...tool,
+                provider: {
+                  executed: provider.executed || tool.provider?.executed === true,
+                  metadata: tool.provider?.metadata,
+                  resultMetadata: provider.metadata,
+                },
+                time: { ...tool.time, completed: DateTime.makeUnsafe(timestampValue(data.timestamp, index)) },
+                state: new SessionMessage.ToolStateCompleted({
+                  status: "completed",
+                  input: tool.state.input,
+                  structured: eventStructured(data.structured),
+                  content: eventContent(data.content),
+                  outputPaths: eventOutputPaths(data.outputPaths),
+                  result: data.result,
+                }),
+              })
+            : tool,
+        ),
+      )
+    }
+    if (entry.type === "session.next.tool.failed") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const callID = typeof data.callID === "string" ? data.callID : undefined
+      const provider = eventProvider(data.provider)
+      const error = unknownError(data.error)
+      if (!assistantMessageID || !callID || !error) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      assistantEvents.set(
+        assistantMessageID,
+        updateAssistantEventTool(assistant, callID, (tool) =>
+          tool.state.status === "pending" || tool.state.status === "running"
+            ? new SessionMessage.AssistantTool({
+                ...tool,
+                provider: {
+                  executed: provider.executed || tool.provider?.executed === true,
+                  metadata: tool.provider?.metadata,
+                  resultMetadata: provider.metadata,
+                },
+                time: { ...tool.time, completed: DateTime.makeUnsafe(timestampValue(data.timestamp, index)) },
+                state: new SessionMessage.ToolStateError({
+                  status: "error",
+                  error,
+                  input: tool.state.status === "running" ? tool.state.input : {},
+                  structured: tool.state.status === "running" ? tool.state.structured : {},
+                  content: tool.state.status === "running" ? tool.state.content : [],
+                  result: data.result,
+                }),
+              })
+            : tool,
+        ),
+      )
     }
     if (entry.type === "session.next.shell.started") {
       const data = eventData(entry)
