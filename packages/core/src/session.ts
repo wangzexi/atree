@@ -365,12 +365,18 @@ export const layer = Layer.effect(
         const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
           Effect.orDie,
         )
+        const fileSessions = "directory" in input
+          ? yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
+              Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+            )
+          : undefined
+        const fileSessionIDs = fileSessions ? new Set(fileSessions.map((session) => session.id)) : undefined
         const byID = new Map<string, SessionSchema.Info>()
-        for (const row of rows) byID.set(row.id, fromRow(row))
-        if ("directory" in input) {
-          const fileSessions = yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
-            Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
-          )
+        for (const row of rows) {
+          if (fileSessionIDs && !fileSessionIDs.has(row.id)) continue
+          byID.set(row.id, fromRow(row))
+        }
+        if (fileSessions) {
           for (const fileSession of fileSessions) {
             byID.delete(fileSession.id)
             if (!matchesListInput(fileSession, input, order)) continue

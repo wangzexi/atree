@@ -14,7 +14,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer } from "effect"
-import { mkdir, mkdtemp, readFile, readdir, realpath, writeFile } from "fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 import { testEffect } from "./lib/effect"
@@ -177,6 +177,23 @@ describe("atree file-backed SessionV2 discovery", () => {
         SessionV2.ID.make("ses_core_list_a"),
       ])
       expect(listed.map((session) => session.title)).toEqual(["Core list B", "Core list A"])
+    }),
+  )
+
+  it.effect("ignores stale SQLite rows when a directory-backed session store is removed", () =>
+    Effect.gen(function* () {
+      const node = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-stale-")))
+      const sessions = yield* SessionV2.Service
+      const created = yield* sessions.create({
+        id: SessionV2.ID.make("ses_core_stale_cache"),
+        location: Location.Ref.make({ directory: AbsolutePath.make(node) }),
+      })
+
+      const sessionRoot = path.join(node, ".agents", "atree", "sessions", created.id)
+      yield* Effect.promise(() => rm(sessionRoot, { recursive: true, force: true }))
+
+      const listed = yield* sessions.list({ directory: AbsolutePath.make(node), limit: 10 })
+      expect(listed.map((session) => session.id)).not.toContain(created.id)
     }),
   )
 
