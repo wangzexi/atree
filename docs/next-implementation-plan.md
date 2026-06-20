@@ -39,6 +39,8 @@
 - `SessionV2.messages/context/message` 已能读取目录内 `session.jsonl` 的用户/助手文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件投影。
 - `SessionV2.prompt` 对 file-backed session 写入用户 prompt 到目录内 `session.jsonl`，不再只依赖 SQLite。
 - todo/schedule 在无显式目录时会校验 SQLite 缓存目录仍存在对应 file-backed session；旧目录失效时继续从当前 instance 或持久化 root 定位真实目录。
+- core `SessionTodo` 的目录文件读写已经和 opencode 侧对齐：会创建会话 payload 骨架、读取旧 `extensions/todo/state.json` 作为迁移兼容，并在重写后清理旧状态。
+- opencode 的 session/message/todo/schedule 已经共享同一个 file-backed session resolver；后续收紧“全局 root 回退”只需要优先改这个解析入口，而不是在多个模块里重复修。
 
 已通过的护栏：
 
@@ -60,7 +62,7 @@
 
 1. 继续补护栏测试，固定当前可用行为，尤其是直接打开 session URL、切换目录、归档、一次性 schedule 触发后清空 header。
 2. 把“会话读写事实源”集中到一个 atree session store 模块，减少 `packages/core/src/atree/session-store.ts` 和 `packages/opencode/src/atree/session-store.ts` 的重复逻辑。
-3. 扩展 core JSONL reader，让它能恢复更多 message 类型，而不是只恢复用户/助手文本。
+3. 扩展 core JSONL reader，让它能恢复 permission/question 等更完整的 v2 结构。
 4. 等读写边界稳定后，再考虑收敛 HTTP facade；不要先删 OpenCode 接口，否则测试与回退路径会不够。
 5. Pi core 替换应新开分支做，保留当前 OpenCode spike 作为可运行对照。
 
