@@ -9,7 +9,7 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { appendSessionJsonl, readSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl } from "@/atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "@/atree/todo-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import { InstanceRef } from "@/effect/instance-ref"
@@ -132,16 +132,40 @@ export const layer = Layer.effect(
       return fileSession.directory
     })
 
+    const fileSessionForTodo = Effect.fn("Todo.fileSessionForTodo")(function* (
+      sessionID: SessionID,
+      fallbackDirectory?: string,
+    ) {
+      const instance = yield* InstanceRef
+      const fileSession = yield* resolveFileSession(db, {
+        sessionID,
+        directory: fallbackDirectory,
+        instanceDirectory: instance?.directory,
+      })
+      if (!fileSession) return
+      yield* upsertFileSessionCache(fileSession)
+      return fileSession
+    })
+
+    const appendTodoSessionEvent = Effect.fn("Todo.appendTodoSessionEvent")(function* (
+      session: FileSession,
+      todos: Info[],
+    ) {
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "todo.updated",
+          sessionID: session.id,
+          todos,
+        }),
+      )
+    })
+
     const update = Effect.fn("Todo.update")(function* (input: {
       sessionID: SessionID
       todos: Info[]
       directory?: string
     }) {
-      const directory = yield* sessionDirectory(input.sessionID, input.directory)
-      const fileSession = directory
-        ? yield* Effect.promise(() => readSessionStore(directory, input.sessionID))
-        : undefined
-      if (fileSession) yield* upsertFileSessionCache(fileSession)
+      const fileSession = yield* fileSessionForTodo(input.sessionID, input.directory)
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
@@ -162,25 +186,16 @@ export const layer = Layer.effect(
           }),
         )
         .pipe(Effect.orDie)
-      if (directory) {
-        yield* Effect.promise(() => writeSessionTodoState(directory, input.sessionID, input.todos))
-        const session = yield* Effect.promise(() => readSessionStore(directory, input.sessionID))
-        if (session) {
-          yield* Effect.promise(() =>
-            appendSessionJsonl(session, {
-              type: "todo.updated",
+      if (fileSession) {
+        yield* appendTodoSessionEvent(fileSession, input.todos).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append todo event to atree session log", {
               sessionID: input.sessionID,
-              todos: input.todos,
+              cause,
             }),
-          ).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning("failed to append todo event to atree session log", {
-                sessionID: input.sessionID,
-                cause,
-              }),
-            ),
-          )
-        }
+          ),
+        )
+        yield* Effect.promise(() => writeSessionTodoState(fileSession.directory, input.sessionID, input.todos))
       }
       yield* events.publish(Event.Updated, input)
     })

@@ -9,7 +9,7 @@ import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { readSessionTodoState, writeSessionTodoState } from "../../src/atree/todo-store"
-import { writeSessionStore } from "../../src/atree/session-store"
+import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 import { writeWorkspaceRoot } from "../../src/atree/state"
 import { Session } from "../../src/session/session"
 import { type SessionID } from "../../src/session/schema"
@@ -35,6 +35,38 @@ describe("atree todo state", () => {
       expect(yield* Effect.promise(() => readSessionTodoState(instance.directory, session.id))).toEqual([
         { content: "write todo state", status: "pending", priority: "high" },
       ])
+    }),
+  )
+
+  it.instance("records todo updates before refreshing the directory projection", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const todo = yield* Todo.Service
+      const instance = yield* TestInstance
+      const session = yield* sessions.create({ title: "todo-event-first" })
+
+      yield* todo.update({
+        sessionID: session.id,
+        todos: [{ content: "event before projection", status: "pending", priority: "medium" }],
+      })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const todoEvent = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((entry) => entry.type === "todo.updated")
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, session.id))
+
+      expect(todoEvent).toMatchObject({
+        type: "todo.updated",
+        sessionID: session.id,
+        todos: [{ content: "event before projection", status: "pending", priority: "medium" }],
+      })
+      expect(typeof todoEvent?.at).toBe("number")
+      expect(stored?.time.updated).toBeGreaterThanOrEqual(todoEvent?.at as number)
     }),
   )
 
