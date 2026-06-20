@@ -6,6 +6,7 @@ import {
   appendSessionJsonl,
   findSessionStore,
   readSessionJsonlMessages,
+  readSessionJsonlProjection,
   readSessionStore,
   readSessionStores,
   writeSessionStore,
@@ -441,5 +442,53 @@ describe("atree session store", () => {
     const messages = await readSessionJsonlMessages(session)
     expect(messages).toHaveLength(1)
     expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_versioned", type: "text", text: "hello versioned" })
+  })
+
+  test("lets later updates clear message and part removal tombstones", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_replay_tombstone",
+      slug: "ses-replay-tombstone",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Replay tombstone",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, { type: "message.removed", messageID: "msg_recreated" })
+    await appendSessionJsonl(session, {
+      type: "message.updated",
+      message: { id: "msg_recreated", sessionID: "ses_replay_tombstone", role: "user", time: { created: 1 } },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      part: {
+        id: "prt_recreated",
+        sessionID: "ses_replay_tombstone",
+        messageID: "msg_recreated",
+        type: "text",
+        text: "first",
+      },
+    })
+    await appendSessionJsonl(session, { type: "message.part.removed", messageID: "msg_recreated", partID: "prt_recreated" })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      part: {
+        id: "prt_recreated",
+        sessionID: "ses_replay_tombstone",
+        messageID: "msg_recreated",
+        type: "text",
+        text: "second",
+      },
+    })
+
+    const projection = await readSessionJsonlProjection(session)
+    expect(projection.removedMessageIDs.has("msg_recreated")).toBe(false)
+    expect(projection.removedPartIDs.has("msg_recreated:prt_recreated")).toBe(false)
+    expect(projection.messages[0]?.parts[0]).toMatchObject({ id: "prt_recreated", text: "second" })
   })
 })

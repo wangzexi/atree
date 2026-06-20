@@ -332,11 +332,13 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       const parts = existing?.parts ?? orphanParts.get(message.id) ?? []
       messages.set(message.id, { info: message, parts })
       orphanParts.delete(message.id)
+      removedMessageIDs.delete(message.id)
       continue
     }
 
     if (type === "message.part.updated" && entry.part && typeof entry.part === "object") {
       const part = await resolveAssetURL(info, entry.part as SessionV1.Part)
+      removedPartIDs.delete(`${part.messageID}:${part.id}`)
       const message = messages.get(part.messageID)
       if (message) {
         upsertPart(message.parts, part)
