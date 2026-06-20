@@ -2,7 +2,7 @@ export * as SessionV2 from "./session"
 export * from "./session/schema"
 
 import { Cause, DateTime, Effect, Layer, Schema, Context, Stream } from "effect"
-import { and, asc, desc, eq, gt, like, lt, or, type SQL } from "drizzle-orm"
+import { and, asc, desc, eq, gt, isNull, like, lt, or, type SQL } from "drizzle-orm"
 import { ProjectV2 } from "./project"
 import { WorkspaceV2 } from "./workspace"
 import { ModelV2 } from "./model"
@@ -59,6 +59,7 @@ const ListInputBase = {
   limit: PositiveInt.pipe(Schema.optional),
   order: Schema.Literals(["asc", "desc"]).pipe(Schema.optional),
   anchor: ListAnchor.pipe(Schema.optional),
+  archived: Schema.Boolean.pipe(Schema.optional),
 }
 
 const ListDirectoryInput = Schema.Struct({
@@ -231,6 +232,7 @@ export const layer = Layer.effect(
       if (input.workspaceID && info.location.workspaceID !== input.workspaceID) return false
       if ("project" in input && info.projectID !== input.project) return false
       if (input.search && !info.title.includes(input.search)) return false
+      if (!input.archived && info.time.archived !== undefined) return false
       if (input.anchor) {
         const created = sessionTimeCreated(info)
         const anchor = input.anchor
@@ -361,6 +363,7 @@ export const layer = Layer.effect(
         if (input.workspaceID) conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
         if ("project" in input) conditions.push(eq(SessionTable.project_id, input.project))
         if (input.search) conditions.push(like(SessionTable.title, `%${input.search}%`))
+        if (!input.archived) conditions.push(isNull(SessionTable.time_archived))
         if (input.anchor) {
           conditions.push(
             order === "asc"

@@ -182,6 +182,49 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("excludes archived file-backed sessions from directory lists by default", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-archive-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-archive-root-")))
+      const node = path.join(root, "archive")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_list_active",
+          title: "Core list active",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_list_archived",
+          title: "Core list archived",
+          createdAt: 30,
+          updatedAt: 40,
+          archivedAt: 50,
+        }),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const active = yield* sessions.list({ directory: AbsolutePath.make(node), limit: 10 })
+      const withArchived = yield* sessions.list({ directory: AbsolutePath.make(node), limit: 10, archived: true })
+
+      expect(active.map((session) => session.id)).toEqual([SessionV2.ID.make("ses_core_list_active")])
+      expect(withArchived.map((session) => session.id)).toEqual([
+        SessionV2.ID.make("ses_core_list_archived"),
+        SessionV2.ID.make("ses_core_list_active"),
+      ])
+    }),
+  )
+
   it.effect("ignores stale SQLite rows when a directory-backed session store is removed", () =>
     Effect.gen(function* () {
       const node = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-stale-")))
