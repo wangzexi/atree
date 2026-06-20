@@ -214,6 +214,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.get/messages/context/prompt` 开始支持可选目录 hint；当同一 session id 被复制到另一个目录时，显式传入目标目录会优先读取和写入目标目录的 `meta.yaml` / `session.jsonl`，而不是先命中全局 SQLite row。
 - core `SessionStore.get` 在读取到 SQLite row 后会先校验该目录是否仍有对应 file-backed session；如果旧目录文件已不存在，会继续从持久化 root 查找目录事实源，最后才回退旧 SQLite row 以兼容非 atree 旧会话。
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
+- core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名；todo/schedule 的 JSONL 投影读取也同样兼容版本化事件名。

@@ -12,7 +12,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
 import { testEffect } from "./lib/effect"
-import { mkdir, mkdtemp, rm } from "fs/promises"
+import { mkdir, mkdtemp, readFile, rm } from "fs/promises"
 import os from "os"
 import path from "path"
 
@@ -152,6 +152,63 @@ describe("SessionTodo", () => {
         todos: state,
       })
       expect(yield* todos.get(fileSessionID)).toEqual(state)
+    }),
+  )
+
+  it.effect("records file-backed todo events before refreshing the directory projection", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-event-first-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_event_first")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(directory), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo-event-first",
+          directory,
+          title: "file todo event first",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          projectID: Project.ID.global,
+          title: "file todo event first",
+          location: { directory: AbsolutePath.make(directory) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+
+      const state = [{ content: "core event before projection", status: "pending", priority: "medium" }]
+      yield* todos.update({ sessionID: fileSessionID, todos: state })
+
+      const raw = yield* Effect.promise(() =>
+        readFile(path.join(directory, ".agents", "atree", "sessions", fileSessionID, "session.jsonl"), "utf8"),
+      )
+      const todoEvent = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+        .find((entry) => entry.type === "todo.updated")
+      const touched = yield* Effect.promise(() => readSessionStore(directory, fileSessionID))
+
+      expect(todoEvent).toMatchObject({ type: "todo.updated", sessionID: fileSessionID, todos: state })
+      expect(typeof todoEvent?.at).toBe("number")
+      expect(touched ? DateTime.toEpochMillis(touched.time.updated) : 0).toBeGreaterThanOrEqual(todoEvent?.at as number)
     }),
   )
 

@@ -444,7 +444,7 @@ async function appendJsonl(target: string, entries: Record<string, unknown>[]) {
 }
 
 export async function appendSessionJsonl(info: SessionSchema.Info, entry: Record<string, unknown>) {
-  await appendJsonl(sessionJsonl(info), [entry])
+  await appendJsonl(sessionJsonl(info), [{ version: 1, at: Date.now(), ...entry }])
 }
 
 async function writeBufferIfMissing(target: string, content: Buffer) {

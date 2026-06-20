@@ -92,7 +92,6 @@ export const layer = Layer.effect(
         )
         .pipe(Effect.orDie)
       if (session) {
-        yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
         yield* Effect.promise(() =>
           appendSessionJsonl(session, {
             type: "todo.updated",
@@ -107,6 +106,7 @@ export const layer = Layer.effect(
             }),
           ),
         )
+        yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
       }
       yield* events.publish(Event.Updated, input)
     })
