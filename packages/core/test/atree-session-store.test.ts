@@ -2,6 +2,7 @@ import { describe, expect } from "bun:test"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Global } from "@opencode-ai/core/global"
+import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
@@ -77,6 +78,27 @@ async function appendSessionJsonl(directory: string, sessionID: string, entries:
 }
 
 describe("atree file-backed SessionV2 discovery", () => {
+  it.effect("creates a directory-backed session skeleton through v2 create", () =>
+    Effect.gen(function* () {
+      const node = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-create-")))
+      const sessions = yield* SessionV2.Service
+      const session = yield* sessions.create({
+        id: SessionV2.ID.make("ses_core_create_store"),
+        location: Location.Ref.make({ directory: AbsolutePath.make(node) }),
+      })
+      const sessionRoot = path.join(node, ".agents", "atree", "sessions", session.id)
+
+      const meta = yield* Effect.promise(() => readFile(path.join(sessionRoot, "meta.yaml"), "utf8"))
+      const jsonl = yield* Effect.promise(() => readFile(path.join(sessionRoot, "session.jsonl"), "utf8"))
+      const assets = yield* Effect.promise(() => readdir(path.join(sessionRoot, "assets")))
+
+      expect(meta).toContain('id: "ses_core_create_store"')
+      expect(meta).toContain("createdAt:")
+      expect(jsonl).toBe("")
+      expect(assets).toEqual([])
+    }),
+  )
+
   it.effect("loads a file-backed session from the persisted atree root when SQLite has no row", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

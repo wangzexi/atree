@@ -29,7 +29,7 @@ import { logFailure } from "./session/logging"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
-import { appendPromptJsonl, readSessionJsonlMessages, readSessionStores } from "./atree/session-store"
+import { appendPromptJsonl, readSessionJsonlMessages, readSessionStores, writeSessionStore } from "./atree/session-store"
 
 // get project -> project.locations
 //
@@ -254,11 +254,22 @@ export const layer = Layer.effect(
       return direction === "previous" ? limited.toReversed() : limited
     }
 
+    const persistFileSession = Effect.fn("V2Session.persistFileSession")(function* (session: SessionSchema.Info) {
+      yield* Effect.promise(() => writeSessionStore(session)).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to persist atree session store", { sessionID: session.id, cause }),
+        ),
+      )
+    })
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
         const recorded = yield* store.get(sessionID)
-        if (recorded) return recorded
+        if (recorded) {
+          yield* persistFileSession(recorded)
+          return recorded
+        }
         const project = yield* projects.resolve(input.location.directory)
         yield* db
           .insert(ProjectTable)
@@ -306,9 +317,14 @@ export const layer = Layer.effect(
                 )
             }),
           )
-        if (projected.type === "existing") return projected.session
+        if (projected.type === "existing") {
+          yield* persistFileSession(projected.session)
+          return projected.session
+        }
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
-        return yield* result.get(sessionID).pipe(Effect.orDie)
+        const created = yield* result.get(sessionID).pipe(Effect.orDie)
+        yield* persistFileSession(created)
+        return created
       }),
       get: Effect.fn("V2Session.get")(function* (sessionID) {
         const session = yield* store.get(sessionID)
@@ -496,7 +512,15 @@ export const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
+            yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("failed to mirror prompt into atree session store", {
+                  sessionID: input.sessionID,
+                  messageID,
+                  cause,
+                }),
+              ),
+            )
             return yield* returnPrompt(admitted)
           }),
         ),

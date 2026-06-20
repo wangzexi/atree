@@ -189,6 +189,56 @@ function sessionJsonl(info: SessionSchema.Info) {
   return path.join(sessionRoot(info), "session.jsonl")
 }
 
+function yamlValue(value: unknown) {
+  return JSON.stringify(value ?? null)
+}
+
+function metaYaml(info: SessionSchema.Info) {
+  return [
+    "version: 1",
+    `id: ${yamlValue(info.id)}`,
+    `slug: ${yamlValue(info.id)}`,
+    `sessionVersion: "core"`,
+    `projectID: ${yamlValue(info.projectID)}`,
+    `workspaceID: ${yamlValue(info.location.workspaceID)}`,
+    `path: ${yamlValue(info.subpath ?? ".")}`,
+    `parentID: ${yamlValue(info.parentID)}`,
+    `title: ${yamlValue(info.title)}`,
+    `agent: ${yamlValue(info.agent)}`,
+    `model: ${yamlValue(info.model)}`,
+    `createdAt: ${DateTime.toEpochMillis(info.time.created)}`,
+    `updatedAt: ${DateTime.toEpochMillis(info.time.updated)}`,
+    `archivedAt: ${yamlValue(info.time.archived ? DateTime.toEpochMillis(info.time.archived) : null)}`,
+    `cost: ${yamlValue(info.cost)}`,
+    `tokens: ${yamlValue(info.tokens)}`,
+    "metadata: {}",
+    "",
+  ].join("\n")
+}
+
+async function writeAtomic(target: string, content: string) {
+  await fs.mkdir(path.dirname(target), { recursive: true })
+  const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`)
+  await fs.writeFile(temp, content)
+  await fs.rename(temp, target)
+}
+
+async function writeIfMissing(target: string, content: string) {
+  try {
+    await fs.writeFile(target, content, { flag: "wx" })
+  } catch (error) {
+    if (error && typeof error === "object" && "code" in error && error.code === "EEXIST") return
+    throw error
+  }
+}
+
+export async function writeSessionStore(info: SessionSchema.Info) {
+  const root = sessionRoot(info)
+  await fs.mkdir(path.join(root, "assets"), { recursive: true })
+  await writeIfMissing(path.join(root, "session.jsonl"), "")
+  await writeAtomic(path.join(root, "meta.yaml"), metaYaml(info))
+}
+
 function promptPartID(messageID: SessionMessage.ID) {
   return `prt_${messageID.replace(/^msg_?/, "")}_text`
 }
