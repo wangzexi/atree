@@ -231,6 +231,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - `MessageV2.page/get/parts` 在没有目录 hint 时也会通过共享 resolver 优先扫描持久化 atree root；只有当前 root 内没有 file-backed session 时才回退旧 SQLite message/part 投影，避免同 session id 复制后直接读到旧目录缓存。
 - opencode `Session.getPart({ directory })` 也遵守同样的显式目录边界：目标目录没有对应 file-backed session 时直接返回空，不再读取全局 SQLite `PartTable` 中的旧投影。
 - core `SessionV2.get/messages/context/prompt` 开始支持可选目录 hint；当同一 session id 被复制到另一个目录时，显式传入目标目录会优先读取和写入目标目录的 `meta.yaml` / `session.jsonl`，而不是先命中全局 SQLite row。
+- core `SessionV2.prompt` 在已经从目录事实源解析出 file-backed session 时，只会在 SQLite 投影行属于同一目录时才走旧的 `SessionInput.admit` 路径；如果同 session id 的 SQLite row 指向旧目录，用户消息会直接追加到当前目录的 `session.jsonl`，不再污染旧全局投影。
 - core `SessionStore.get` 会优先从持久化 atree root 查找目录事实源；只有当前 root 内没有 file-backed session 时，才回退 SQLite 中仍有效的旧目录 row 以兼容非 atree 旧会话。
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
 - core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。

@@ -1203,6 +1203,78 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("records v2 prompts into the file-backed session when SQLite points at a stale directory", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const stale = path.join(root, "stale")
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(stale, { recursive: true }))
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_stale_row")
+      const messageID = SessionMessage.ID.make("msg_core_prompt_stale_row")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core prompt stale row",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(stale), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "stale-row",
+          directory: AbsolutePath.make(stale),
+          title: "Stale SQLite session",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sessions = yield* SessionV2.Service
+      const admitted = yield* sessions.prompt({
+        sessionID,
+        id: messageID,
+        prompt: new Prompt({ text: "record in the file session" }),
+        resume: false,
+      })
+      const stored = yield* Effect.promise(() => readSessionStore(node, sessionID))
+      const sqliteMessage = yield* db
+        .select({ id: SessionMessageTable.id })
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.id, messageID))
+        .get()
+        .pipe(Effect.orDie)
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+
+      expect(admitted.id).toBe(messageID)
+      expect(path.resolve(stored?.location.directory ?? "")).toBe(path.resolve(node))
+      expect(sqliteMessage).toBeUndefined()
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: messageID,
+        type: "user",
+        text: "record in the file session",
+      })
+    }),
+  )
+
   it.effect("materializes v2 prompt files into file-backed session assets", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

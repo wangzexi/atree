@@ -124,6 +124,10 @@ function promptsMatch(input: Prompt, existing: SessionMessage.User) {
   )
 }
 
+function sameDirectory(left: string, right: string) {
+  return path.resolve(left) === path.resolve(right)
+}
+
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>
   readonly create: (input: CreateInput) => Effect.Effect<SessionSchema.Info>
@@ -521,13 +525,15 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const session = yield* result.get(input.sessionID, { directory: input.directory })
             const sessionRow = yield* db
-              .select({ id: SessionTable.id })
+              .select({ id: SessionTable.id, directory: SessionTable.directory })
               .from(SessionTable)
               .where(eq(SessionTable.id, input.sessionID))
               .get()
               .pipe(Effect.orDie)
+            const matchingSessionRow =
+              sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
             const messageID = input.id ?? SessionMessage.ID.create()
-            if (!sessionRow) {
+            if (!matchingSessionRow) {
               const existing = (yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
                 Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
               )).find((message) => message.id === messageID)
