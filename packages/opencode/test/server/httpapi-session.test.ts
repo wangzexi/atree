@@ -3,7 +3,7 @@ import { afterEach, describe, expect } from "bun:test"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Global } from "@opencode-ai/core/global"
-import { cp, mkdir } from "node:fs/promises"
+import { cp, mkdir, rm } from "node:fs/promises"
 import path from "node:path"
 import { Cause, Config, Effect, Exit, Layer } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter, HttpServer } from "effect/unstable/http"
@@ -653,9 +653,10 @@ describe("session HttpApi", () => {
           } as any),
         )
 
-        const listed = yield* requestJson<Array<Session.Info & { project: unknown }>>("/experimental/session?roots=true", {
-          headers,
-        })
+        const listed = yield* requestJson<Array<Session.Info & { project: unknown }>>(
+          "/experimental/session?roots=true",
+          { headers },
+        )
         expect(listed.map((item) => item.id)).toContain(activeID)
         expect(listed.map((item) => item.id)).not.toContain(archivedID)
 
@@ -666,6 +667,61 @@ describe("session HttpApi", () => {
         const byID = new Map(withArchived.map((item) => [item.id, item]))
         expect(byID.get(activeID)?.title).toBe("Experimental file backed active list")
         expect(byID.get(archivedID)?.time.archived).toBe(42)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "does not expose stale database-only sessions through directory session lists",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory }
+        const cachedOnly = yield* createSession({ title: "stale cache only" })
+
+        yield* Effect.promise(() =>
+          rm(path.join(test.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+            recursive: true,
+            force: true,
+          }),
+        )
+
+        const listed = yield* requestJson<Session.Info[]>(`${SessionPaths.list}?roots=true`, { headers })
+        expect(listed.map((item) => item.id)).not.toContain(cachedOnly.id)
+
+        const archived = yield* requestJson<Session.Info[]>(`${SessionPaths.list}?roots=true&archived=true`, {
+          headers,
+        })
+        expect(archived.map((item) => item.id)).not.toContain(cachedOnly.id)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "does not expose stale database-only sessions through experimental directory lists",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory }
+        const cachedOnly = yield* createSession({ title: "experimental stale cache only" })
+
+        yield* Effect.promise(() =>
+          rm(path.join(test.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+            recursive: true,
+            force: true,
+          }),
+        )
+
+        const listed = yield* requestJson<Array<Session.Info & { project: unknown }>>("/experimental/session?roots=true", {
+          headers,
+        })
+        expect(listed.map((item) => item.id)).not.toContain(cachedOnly.id)
+
+        const archived = yield* requestJson<Array<Session.Info & { project: unknown }>>(
+          "/experimental/session?roots=true&archived=true",
+          { headers },
+        )
+        expect(archived.map((item) => item.id)).not.toContain(cachedOnly.id)
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
