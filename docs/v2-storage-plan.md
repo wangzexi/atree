@@ -255,6 +255,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - opencode prompt 创建用户消息时产生的 agent/model 切换事件会先追加到当前会话目录的 `session.jsonl`，再发布 EventV2；即使全局投影丢失，也能从目录恢复当前会话使用的 agent/model。
 - opencode prompt 在读取 SQLite 中当前 agent/model 投影时，会用规范化后的目录比较确认该投影属于当前目录会话；等价路径不会误判为外部旧缓存，非当前目录的旧投影也不会参与当前会话的 agent/model 继承。
 - `moveSession` 在源目录存在 file-backed session store 时，会把 `.agents/atree/sessions/<session-id>/` 整个移动到目标目录，并把 `session.next.moved` 追加到移动后的 `session.jsonl`；如果源会话不是目录事实源，仍保留旧 SQLite/EventV2 行为。
+- `moveSession` 判断目标目录和项目 worktree 是否相同时使用规范化目录比较；移动到当前目录的等价路径不会产生多余 moved 事件，也不会错误搬动 `.agents/atree/sessions/<session-id>/`。
 - core 和 opencode 读取会话元数据时都会重放 `session.next.moved`，但不会信任事件中的旧绝对目录路径；当前承载目录仍是事实源，只从 moved 事件恢复 workspace/subpath/path 和更新时间。
 - core `SessionV2.interrupt` 会把 `session.next.interrupt.requested` 镜像到当前会话目录的 `session.jsonl`，同时保留原有 EventV2 seq 传给 execution 的控制语义。
 - core runner 的 LLM 事件 publisher 在真实 file-backed session 上会把 provider turn 产生的 step/text/reasoning/tool 事件 best-effort 镜像到同一会话目录的 `session.jsonl`；EventV2/SQLite projector 仍是运行时投影，但模型回复和工具调用原始事件已经开始随目录一起落地。

@@ -221,6 +221,41 @@ describe("MoveSession", () => {
     }),
   )
 
+  it.live("does not move a file-backed session when the destination is the same normalized directory", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => initRepo(root.path))
+      const source = abs(yield* Effect.promise(() => fs.realpath(root.path)))
+
+      const created = yield* SessionV2.Service.use((service) =>
+        service.create({ location: { directory: source } }),
+      )
+      const sourceStore = path.join(source, ".agents", "atree", "sessions", created.id)
+      yield* Effect.promise(() => fs.writeFile(path.join(sourceStore, "assets", "note.txt"), "kept\n"))
+
+      yield* MoveSession.Service.use((service) =>
+        service.moveSession({
+          sessionID: created.id,
+          destination: { directory: AbsolutePath.make(`${source}/.`) },
+          moveChanges: true,
+        }),
+      )
+
+      expect(yield* Effect.promise(() => fs.readFile(path.join(sourceStore, "assets", "note.txt"), "utf8"))).toBe(
+        "kept\n",
+      )
+      const jsonl = yield* Effect.promise(() => fs.readFile(path.join(sourceStore, "session.jsonl"), "utf8"))
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.map((entry) => entry.type)).not.toContain("session.next.moved")
+    }),
+  )
+
   it.live("moves nested session changes without cleaning unrelated files", () =>
     Effect.gen(function* () {
       const root = yield* Effect.acquireRelease(

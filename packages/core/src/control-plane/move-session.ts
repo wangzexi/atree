@@ -67,6 +67,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ControlPlaneMoveSession") {}
 
+function sameDirectory(left: string, right: string) {
+  return path.resolve(left) === path.resolve(right)
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -78,7 +82,7 @@ export const layer = Layer.effect(
     const moveSession = Effect.fn("MoveSession.moveSession")(function* (input: Input) {
       const current = yield* session.get(input.sessionID)
       const directory = AbsolutePath.make(input.destination.directory)
-      if (current.location.directory === directory) return
+      if (sameDirectory(current.location.directory, directory)) return
 
       const source = yield* project.resolve(current.location.directory)
       const destination = yield* project.resolve(directory)
@@ -87,7 +91,7 @@ export const layer = Layer.effect(
       }
 
       const patch =
-        input.moveChanges && source.directory !== destination.directory
+        input.moveChanges && !sameDirectory(source.directory, destination.directory)
           ? yield* git
               .patch(current.location.directory)
               .pipe(Effect.mapError((error) => new CaptureChangesError({ message: error.message })))
