@@ -225,7 +225,7 @@ export const layer = Layer.effect(
         messages: toLLMMessages(context, model),
         tools: toolMaterialization.definitions,
       })
-      if (yield* compaction.compactIfNeeded({ sessionID: session.id, entries, model, request }))
+      if (yield* compaction.compactIfNeeded({ sessionID: session.id, session, entries, model, request }))
         return yield* Effect.die(rebuildPreparedTurn())
       const publisher = createLLMEventPublisher(events, {
         sessionID: session.id,
