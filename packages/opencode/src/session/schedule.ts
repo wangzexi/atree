@@ -929,6 +929,7 @@ export const layer = Layer.effect(
           )
         }
       }
+      if (directoryHint && !directory) return [] as Info[]
       const rows = yield* db
         .select({
           id: ScheduleTable.id,
@@ -1114,6 +1115,11 @@ export const layer = Layer.effect(
       scheduleID: ID,
       options?: { directory?: string },
     ) {
+      if (options?.directory) {
+        const deleted = yield* deleteStoredSchedule(scheduleID, options.directory)
+        if (deleted) return
+        return yield* Effect.fail(new NotFound({ scheduleID }))
+      }
       const row = yield* db
         .select()
         .from(ScheduleTable)
@@ -1154,6 +1160,7 @@ export const layer = Layer.effect(
       options?: { directory?: string },
     ) {
       const directory = yield* sessionDirectory(sessionID, options?.directory)
+      if (options?.directory && !directory) return
       const stored = directory ? yield* Effect.promise(() => readSessionScheduleState(directory, sessionID)) : []
       const rows = yield* db
         .select({ id: ScheduleTable.id })

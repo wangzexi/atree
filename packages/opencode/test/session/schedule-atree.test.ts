@@ -6,7 +6,7 @@ import { Global } from "@opencode-ai/core/global"
 import { Database } from "@opencode-ai/core/database/database"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { SessionTable } from "@opencode-ai/core/session/sql"
-import { Effect, Layer } from "effect"
+import { Effect, Exit, Layer } from "effect"
 import { eq } from "drizzle-orm"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
@@ -380,6 +380,89 @@ describe("atree schedule restore", () => {
           .pipe(Effect.orDie),
       )
       expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
+  it.effect(
+    "does not read or mutate stale database schedules for a missing explicit directory session",
+    Effect.gen(function* () {
+      const source = yield* tempdir
+      const target = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_missing_explicit_schedule" as SessionID
+      const scheduleID = "sch_missing_explicit_schedule" as Schedule.ID
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_missing_explicit_schedule",
+          worktree: source,
+          vcs: "git",
+          name: "missing explicit schedule",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_missing_explicit_schedule",
+          slug: "missing-explicit-schedule",
+          directory: source,
+          title: "Missing explicit schedule",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale database schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory: target }))
+      expect(listed).toEqual([])
+
+      yield* Schedule.Service.use((schedule) => schedule.clear(sessionID, { directory: target }))
+      const afterClear = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(afterClear?.message).toBe("stale database schedule")
+
+      const deleted = yield* Schedule.Service.use((schedule) =>
+        schedule.delete(scheduleID, { directory: target }).pipe(Effect.exit),
+      )
+      expect(Exit.isFailure(deleted)).toBe(true)
+      const afterDelete = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(afterDelete?.message).toBe("stale database schedule")
     }),
   )
 
