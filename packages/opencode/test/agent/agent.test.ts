@@ -89,6 +89,13 @@ it.instance("plan agent denies edits except plan files", () =>
         plan!.permission,
       ).action,
     ).toBe("allow")
+    expect(
+      Permission.evaluate(
+        "edit",
+        path.join("packages", "app", ".agents", "atree", "sessions", "ses_plan", "assets", "plans", "foo.md"),
+        plan!.permission,
+      ).action,
+    ).toBe("allow")
   }),
 )
 

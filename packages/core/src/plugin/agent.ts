@@ -148,6 +148,11 @@ export const Plugin = PluginV2.define({
             { action: "edit", resource: path.join(".agents", "atree", "sessions", "*", "assets", "plans", "*.md"), effect: "allow" },
             {
               action: "edit",
+              resource: path.join("*", ".agents", "atree", "sessions", "*", "assets", "plans", "*.md"),
+              effect: "allow",
+            },
+            {
+              action: "edit",
               resource: path.relative(worktree, path.join(Global.Path.data, "plans", "*.md")),
               effect: "allow",
             },
