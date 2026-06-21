@@ -834,22 +834,32 @@ export const layer: Layer.Layer<
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: DirectoryOption) {
+      const byID = new Map<string, Info>()
+      const ctx = yield* InstanceState.context.pipe(
+        Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
+      )
+
+      if (options?.directory) {
+        const fileSessions = yield* Effect.promise(() => readSessionStores(options.directory!))
+        for (const fileSession of fileSessions) {
+          const item = localizeFileSession(fileSession, ctx)
+          if (item.time.archived !== undefined) continue
+          if (item.parentID === parentID) byID.set(item.id, item)
+        }
+        return [...byID.values()]
+      }
+
       const rows = yield* db
         .select()
         .from(SessionTable)
         .where(and(eq(SessionTable.parent_id, parentID)))
         .all()
         .pipe(Effect.orDie)
-      const byID = new Map<string, Info>()
       for (const row of rows) {
         const item = fromRow(row)
         if (item.time.archived !== undefined) continue
         byID.set(item.id, item)
       }
-
-      const ctx = yield* InstanceState.context.pipe(
-        Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
-      )
       const parent = yield* getWithDirectory(parentID, options?.directory).pipe(
         Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)),
       )

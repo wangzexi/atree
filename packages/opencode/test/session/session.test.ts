@@ -583,6 +583,49 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers in-directory file session children when listing with directory hint", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const parent = yield* session.create({ title: "children-hint-parent" })
+      const child = yield* session.create({ parentID: parent.id, title: "children-hint-child" })
+
+      const staleChildID = "ses_children_db_stale" as SessionID
+      const now = Date.now()
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: staleChildID,
+          project_id: parent.projectID,
+          slug: "stale-child",
+          directory: parent.directory,
+          title: "stale child",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+          parent_id: parent.id,
+          path: ".",
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const children = yield* session.children(parent.id, { directory: parent.directory })
+      const childIDs = children.map((item) => item.id)
+      expect(childIDs).toContain(child.id)
+      expect(childIDs).not.toContain(staleChildID)
+
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, staleChildID)).run().pipe(Effect.orDie)
+      yield* session.remove(child.id)
+      yield* session.remove(parent.id)
+    }),
+  )
+
   it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
