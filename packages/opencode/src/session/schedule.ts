@@ -870,6 +870,18 @@ export const layer = Layer.effect(
       return yield* restoreStoredSchedules(sessionID, directory)
     })
 
+    const restoreFileBackedSchedules = Effect.fn("Schedule.restoreFileBackedSchedules")(function* (directory: string) {
+      const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(directory))
+      yield* Effect.forEach(
+        fileSessions,
+        (session) =>
+          restoreStoredSchedules(session.id, session.directory).pipe(
+            Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
+          ),
+        { concurrency: "unbounded", discard: true },
+      )
+    })
+
     const hydrated = yield* db.select().from(ScheduleTable).all().pipe(Effect.orDie)
     for (const row of hydrated) {
       const id = row.id as ID
@@ -893,18 +905,15 @@ export const layer = Layer.effect(
     for (const session of sessions) {
       yield* restoreStoredSchedules(session.id as SessionID)
     }
+    const rootDirectory = yield* Effect.promise(() => readWorkspaceState()).pipe(
+      Effect.map((state) => state.rootDirectory),
+      Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+    )
+    if (rootDirectory) yield* restoreFileBackedSchedules(rootDirectory)
 
     const restoreDirectory: Interface["restoreDirectory"] = Effect.fn("Schedule.restoreDirectory")(
       function* (directory) {
-        const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(directory))
-        yield* Effect.forEach(
-          fileSessions,
-          (session) =>
-            restoreStoredSchedules(session.id, session.directory).pipe(
-              Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
-            ),
-          { concurrency: "unbounded", discard: true },
-        )
+        yield* restoreFileBackedSchedules(directory)
       },
     )
 

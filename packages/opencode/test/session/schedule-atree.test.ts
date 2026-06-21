@@ -24,6 +24,7 @@ const events = EventV2Bridge.defaultLayer
 const baseLayer = Layer.mergeAll(database, events)
 const schedule = Schedule.layer.pipe(Layer.provide(baseLayer))
 const it = testEffect(Layer.mergeAll(baseLayer, schedule))
+const baseIt = testEffect(baseLayer)
 
 const tempdir = Effect.acquireRelease(
   Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-restore-"))),
@@ -322,6 +323,69 @@ describe("atree schedule restore", () => {
 
       const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory: nodeDirectory }))
       expect(String(listed[0]?.id)).toBe("sch_nested_directory")
+    }),
+  )
+
+  baseIt.effect(
+    "restores persisted root file-backed schedules when the service starts",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-start-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const directory = path.join(root, "nodes", "daily")
+      const sessionID = "ses_start_restore_schedule" as SessionID
+      const now = Date.now()
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "start-restore-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: "nodes/daily",
+          title: "Start restore schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: "sch_start_restore",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "restore on service start",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use(() => Effect.void).pipe(Effect.provide(Schedule.layer))
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, "sch_start_restore" as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+      expect(row?.message).toBe("restore on service start")
     }),
   )
 
