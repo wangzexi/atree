@@ -219,6 +219,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - `MessageV2.page/stream/get/parts` 开始支持可选目录 hint；当目标目录存在对应 session store 时，会直接从该目录的 `session.jsonl` 投影读取，即使全局 SQLite message/part 投影被删除也能恢复。
 - `MessageV2.page/get/parts` 在调用方显式传入目录时，如果该目录下没有对应 file-backed session，不再继续读取全局 SQLite 中残留的 message/part 投影；`page/get` 返回 NotFound，`parts` 保持旧契约返回空数组。
 - `MessageV2.page/get/parts` 在没有目录 hint 时也会通过共享 resolver 优先扫描持久化 atree root；只有当前 root 内没有 file-backed session 时才回退旧 SQLite message/part 投影，避免同 session id 复制后直接读到旧目录缓存。
+- opencode `Session.getPart({ directory })` 也遵守同样的显式目录边界：目标目录没有对应 file-backed session 时直接返回空，不再读取全局 SQLite `PartTable` 中的旧投影。
 - core `SessionV2.get/messages/context/prompt` 开始支持可选目录 hint；当同一 session id 被复制到另一个目录时，显式传入目标目录会优先读取和写入目标目录的 `meta.yaml` / `session.jsonl`，而不是先命中全局 SQLite row。
 - core `SessionStore.get` 会优先从持久化 atree root 查找目录事实源；只有当前 root 内没有 file-backed session 时，才回退 SQLite 中仍有效的旧目录 row 以兼容非 atree 旧会话。
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
@@ -233,6 +234,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - opencode `session.compacted` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`，作为一次压缩已经完成的高层会话事实；具体 compaction started/ended 事件仍由 compaction 链路记录。
 - opencode `session.diff` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`，先保留 diff 事件原始事实；全局 `session_diff` storage 仍作为现有 HTTP/UI 兼容投影，后续再单独迁移。
 - opencode 侧读取 `meta.yaml` 时会重放 `session.diff` 并恢复会话级 summary 统计；HTTP `session.diff` 在不传 `messageID` 时会返回目录事实源里的会话级 diff，旧全局 `session_diff` storage 仍不作为事实源。
+- HTTP `session.diff` 会先按当前实例目录解析 session；如果当前目录没有该 file-backed session，则返回空 diff，不再通过无目录 `session.get` 读取全局缓存会话。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `SessionV2.switchModel` 会先把 `session.next.model.switched` 追加到当前会话目录的 `session.jsonl`，再发布 EventV2 事件；读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，让目录里的事件流能恢复当前 agent/model，而不是只恢复一条展示消息。
