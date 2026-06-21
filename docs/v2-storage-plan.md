@@ -213,6 +213,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - Share/unshare 写入 share 元数据时也接受目录上下文；HTTP share/unshare 会把当前 session 目录传给 metadata 写入链路。
 - ShareNext 创建分享后的 full sync 也会继续使用显式目录上下文；复制 `.agents/atree/` 到目标目录后，首次分享同步出去的 session/messages/diffs 会来自目标目录事实源，而不是源目录或全局 SQLite 缓存。
 - CLI `import` 导入分享或 JSON 文件时，会先写入当前目录的 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl`，再刷新 SQLite 兼容投影；导入来的会话不再只是全局数据库里的会话。
+- CLI `stats` 聚合会话时会通过 `Session.listGlobal()` 和带目录上下文的 `Session.messages()` 读取；只有目录事实源、没有 SQLite session row 的会话也会被统计。
 - 工具执行上下文会携带当前 session 目录；schedule、todowrite、task 和 plan_exit 读取当前会话时会优先使用该目录，避免工具通过同 session id 的全局 SQLite 投影把状态写回旧目录。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
 - core `SessionContextEpoch.prepare` 产生的上下文更新事件会在保留原有 commit guard 的同时追加到当前目录会话的 `session.jsonl`；系统上下文变化不再只是全局 EventV2/SQLite 投影。
@@ -289,7 +290,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 
 - 全局 SQLite 仍然存在，并且仍承担运行时投影和部分 OpenCode 兼容链路。
 - `EventV2` 的 durable event log 还没有完整迁移到每个目录的 `session.jsonl`；当前 core reader 已能恢复 prompted 用户消息和 assistant step/text/reasoning/tool，question/permission 事件已开始写入 JSONL，但 pending 状态的重放/恢复仍待单独设计。
-- projector、部分 CLI/旧同步导出仍以 SQLite 为中心；CLI `import` 已开始写目录事实源，`MessageV2.page/get/parts` 和 session/todo/schedule 的常用读取链路已经会先尝试 file-backed session resolver。
+- projector、部分 CLI/旧同步导出仍以 SQLite 为中心；CLI `import` / `stats` 已开始读写目录事实源，`MessageV2.page/get/parts` 和 session/todo/schedule 的常用读取链路已经会先尝试 file-backed session resolver。
 - snapshot/worktree 等派生产物仍会落到全局 data dir；它们需要后续单独设计迁移路径，不能在没有 session/location 上下文的情况下直接搬进目录。
 - `schedule.json`、`todo.json` 仍是 OpenCode spike 的过渡文件，长期应折叠进 Pi/core session 事件或更清晰的 atree 扩展协议。
 

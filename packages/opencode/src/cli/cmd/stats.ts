@@ -2,8 +2,6 @@ import { Effect } from "effect"
 import { effectCmd } from "../effect-cmd"
 import { Session } from "@/session/session"
 import { NotFoundError } from "@/storage/storage"
-import { Database } from "@opencode-ai/core/database/database"
-import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Project } from "@/project/project"
 import { InstanceRef } from "@/effect/instance-ref"
 
@@ -81,11 +79,10 @@ export const StatsCommand = effectCmd({
 })
 
 const getAllSessions = Effect.fnUntraced(function* () {
-  const { db } = yield* Database.Service
-  return (yield* db.select().from(SessionTable).all().pipe(Effect.orDie)).map((row) => Session.fromRow(row))
+  return yield* Session.Service.use((svc) => svc.listGlobal({ archived: true, limit: 1_000_000 }))
 })
 
-const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* (
+export const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* (
   days?: number,
   projectFilter?: string,
   currentProject?: Project.Info,
@@ -165,7 +162,7 @@ const aggregateSessionStats = Effect.fn("Cli.stats.aggregate")(function* (
     (session) =>
       Effect.gen(function* () {
         const messages = yield* svc
-          .messages({ sessionID: session.id })
+          .messages({ sessionID: session.id, directory: session.directory })
           .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed([])))
 
         const sessionCost = session.cost ?? 0
