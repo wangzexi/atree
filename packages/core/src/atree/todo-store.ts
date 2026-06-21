@@ -43,6 +43,20 @@ function baseEventType(value: unknown) {
   return value.replace(/\.\d+$/, "")
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function eventData(entry: Record<string, unknown>) {
+  return isRecord(entry.data) ? entry.data : entry
+}
+
+function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) {
+  if (typeof entry.at === "number") return entry.at
+  if (typeof data.at === "number") return data.at
+  return
+}
+
 async function writeAtomic(target: string, value: SessionTodoState | LegacyTodoState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
@@ -84,11 +98,13 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
     } catch {
       continue
     }
+    const data = eventData(entry)
     if (baseEventType(entry.type) !== "todo.updated") continue
-    if (entry.sessionID !== sessionID) continue
+    if (data.sessionID !== sessionID) continue
     hasState = true
-    if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
-    todos = Array.isArray(entry.todos) ? entry.todos.filter(isStoredTodo) : []
+    const at = eventAt(entry, data)
+    if (at !== undefined) updatedAt = Math.max(updatedAt, at)
+    todos = Array.isArray(data.todos) ? data.todos.filter(isStoredTodo) : []
   }
 
   return { hasState, updatedAt, todos }

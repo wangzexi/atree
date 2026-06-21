@@ -61,6 +61,20 @@ function baseEventType(value: unknown) {
   return value.replace(/\.\d+$/, "")
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function eventData(entry: Record<string, unknown>) {
+  return isRecord(entry.data) ? entry.data : entry
+}
+
+function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) {
+  if (typeof entry.at === "number") return entry.at
+  if (typeof data.at === "number") return data.at
+  return
+}
+
 function isStoredSchedule(value: unknown): value is StoredSchedule {
   if (!value || typeof value !== "object") return false
   const schedule = value as Partial<StoredSchedule>
@@ -131,25 +145,27 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
     }
 
     const type = baseEventType(entry.type)
+    const data = eventData(entry)
+    const at = eventAt(entry, data)
 
-    if (type === "schedule.created" && isStoredSchedule(entry.schedule)) {
-      if (entry.schedule.sessionID !== sessionID) continue
+    if (type === "schedule.created" && isStoredSchedule(data.schedule)) {
+      if (data.schedule.sessionID !== sessionID) continue
       hasState = true
-      if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
-      schedules.set(entry.schedule.id, entry.schedule)
+      if (at !== undefined) updatedAt = Math.max(updatedAt, at)
+      schedules.set(data.schedule.id, data.schedule)
       continue
     }
 
     if (type === "schedule.ran") {
-      const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
-      const ranAt = typeof entry.ranAt === "number" ? entry.ranAt : undefined
-      const status = entry.status === "ran" || entry.status === "skipped" ? entry.status : undefined
-      const nextRun = typeof entry.nextRun === "number" || entry.nextRun === null ? entry.nextRun : undefined
+      const scheduleID = typeof data.scheduleID === "string" ? data.scheduleID : undefined
+      const ranAt = typeof data.ranAt === "number" ? data.ranAt : undefined
+      const status = data.status === "ran" || data.status === "skipped" ? data.status : undefined
+      const nextRun = typeof data.nextRun === "number" || data.nextRun === null ? data.nextRun : undefined
       if (!scheduleID || ranAt === undefined || !status) continue
       const schedule = schedules.get(scheduleID)
       if (!schedule) continue
       hasState = true
-      if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
+      if (at !== undefined) updatedAt = Math.max(updatedAt, at)
       schedules.set(scheduleID, {
         ...schedule,
         lastRanAt: ranAt,
@@ -160,10 +176,10 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
     }
 
     if (type === "schedule.deleted") {
-      const scheduleID = typeof entry.scheduleID === "string" ? entry.scheduleID : undefined
+      const scheduleID = typeof data.scheduleID === "string" ? data.scheduleID : undefined
       if (!scheduleID) continue
       hasState = true
-      if (typeof entry.at === "number") updatedAt = Math.max(updatedAt, entry.at)
+      if (at !== undefined) updatedAt = Math.max(updatedAt, at)
       schedules.delete(scheduleID)
     }
   }

@@ -194,4 +194,33 @@ describe("atree todo store", () => {
       todos: [{ content: "versioned todo", status: "pending", priority: "medium" }],
     })
   })
+
+  test("replays nested todo event data from session jsonl", async () => {
+    const directory = await tempdir()
+    await writeSessionStore({
+      id: "ses_jsonl_nested" as never,
+      slug: "jsonl-nested",
+      version: "test",
+      projectID: "proj_jsonl_nested" as never,
+      directory,
+      title: "JSONL nested",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_nested" as never))!
+    await appendSessionJsonl(session, {
+      type: "todo.updated",
+      at: 10,
+      data: {
+        sessionID: "ses_jsonl_nested",
+        todos: [{ content: "nested todo", status: "pending", priority: "medium" }],
+      },
+    })
+
+    expect(await readSessionTodoProjection(directory, "ses_jsonl_nested")).toMatchObject({
+      hasState: true,
+      todos: [{ content: "nested todo", status: "pending", priority: "medium" }],
+    })
+  })
 })

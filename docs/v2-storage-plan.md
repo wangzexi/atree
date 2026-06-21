@@ -263,7 +263,8 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - schedule 触发时会把恢复到的目录上下文继续传给 prompt/loop；复制 `.agents/atree/` 后，自动化消息产生的新用户消息和后续回复会写入目标目录，而不是写回源目录或陈旧 SQLite row 指向的目录。
 - schedule 的创建、运行记录和删除会先追加到当前会话目录的 `session.jsonl`，再刷新 `schedule.json` 投影；归档会话导致的自动化清理也会留下 `schedule.deleted` 记录。即使是重启/恢复时发现 archived 会话里残留了旧 `schedule.json`，清理投影前也会补写删除事件。因此自动化消息不只是外部投影状态，也是会话原始记录的一部分。
 - schedule 到点触发的 `schedule.triggered` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`；它不改变 `schedule.json` 当前状态投影，但保留“自动化消息曾经被触发”的原始事实。
-- 当会话目录的 `schedule.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件时，schedule store 可以重放 JSONL 恢复当前自动化状态，包括最近运行状态和下次执行时间。
+- 当会话目录的 `schedule.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件时，schedule store 可以重放 JSONL 恢复当前自动化状态，包括最近运行状态和下次执行时间；这些投影读取同时接受扁平事件和 EventV2 风格的 `data` 嵌套事件。
+- todo 投影也可以从扁平或 EventV2 `data` 嵌套的 `todo.updated` 事件恢复，确保工具状态的目录内事实源和事件总线镜像格式保持兼容。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 

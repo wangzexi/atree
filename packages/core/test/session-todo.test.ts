@@ -307,6 +307,41 @@ describe("SessionTodo", () => {
     }),
   )
 
+  it.effect("restores todo state from nested session jsonl event data", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-nested-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_nested")
+      const session = {
+        id: fileSessionID,
+        projectID: Project.ID.global,
+        title: "file todo nested",
+        location: { directory: AbsolutePath.make(directory) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }
+      yield* Effect.promise(() => writeSessionStore(session))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "todo.updated",
+          at: 10,
+          data: {
+            sessionID: fileSessionID,
+            todos: [{ content: "nested core todo", status: "pending", priority: "medium" }],
+          },
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: true,
+        todos: [{ content: "nested core todo", status: "pending", priority: "medium" }],
+      })
+    }),
+  )
+
   it.effect("prefers newer todo jsonl events over a stale todo projection", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(

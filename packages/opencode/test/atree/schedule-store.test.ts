@@ -285,4 +285,57 @@ describe("atree schedule store", () => {
       },
     ])
   })
+
+  test("replays nested schedule event data from session jsonl", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_jsonl_nested",
+      sessionID: "ses_jsonl_nested",
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "recover from nested event data",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    await writeSessionStore({
+      id: "ses_jsonl_nested" as never,
+      slug: "jsonl-nested",
+      version: "test",
+      projectID: "proj_jsonl_nested" as never,
+      directory,
+      title: "JSONL nested",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_nested" as never))!
+    await appendSessionJsonl(session, {
+      type: "schedule.created",
+      at: 10,
+      data: { schedule },
+    })
+    await appendSessionJsonl(session, {
+      type: "schedule.ran",
+      at: 20,
+      data: {
+        scheduleID: "sch_jsonl_nested",
+        sessionID: "ses_jsonl_nested",
+        status: "ran",
+        ranAt: 3,
+        nextRun: null,
+      },
+    })
+
+    expect(await readSessionScheduleState(directory, "ses_jsonl_nested")).toEqual([
+      {
+        ...schedule,
+        lastRanAt: 3,
+        lastRunStatus: "ran",
+        nextRun: null,
+      },
+    ])
+  })
 })
