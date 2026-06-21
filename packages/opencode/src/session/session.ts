@@ -842,9 +842,11 @@ export const layer: Layer.Layer<
             )
           : undefined
       const fileIDs = fileSessions ? new Set(fileSessions.map((item) => item.id)) : undefined
+      const rootScopedFileIndex = !directoryInput && rootDirectory !== undefined && fileIDs !== undefined
       const byID = new Map<string, Info>()
       for (const row of rows) {
         if (directoryInput && fileIDs && !fileIDs.has(row.id)) continue
+        if (rootScopedFileIndex && !fileIDs.has(row.id)) continue
         byID.set(row.id, fromRow(row))
       }
       if (fileSessions) {

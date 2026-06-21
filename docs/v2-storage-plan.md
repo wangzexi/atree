@@ -193,6 +193,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 显式按目录读取会话列表时，目录下 `sessions/*/meta.yaml` 是成员事实源；只有 SQLite 中存在但目录文件已不存在的缓存会话不会再出现在 active、archived 或 core `SessionV2.list({ directory })` 结果里。
 - core `SessionV2.list({ directory })` 合并目录会话时也使用规范化目录比较，避免等价路径让当前目录里的 file-backed session 被过滤掉。
 - opencode `Session.listGlobal()` 在没有显式目录时也会扫描持久化 atree root 下的 file-backed sessions；即使全局 SQLite 中没有投影行，只要会话目录在当前 root 下，全局/experimental 会话列表也能恢复它。
+- opencode `Session.listGlobal()` 在已经存在持久化 atree root 且没有显式目录时，会把该 root 下的 file-backed sessions 作为成员事实源；SQLite 中只有缓存行、但 root 下没有会话目录的旧会话不会再出现在无作用域全局列表里。
 - 显式按目录读取单个会话时，如果该目录下不存在对应 `.agents/atree/sessions/<session-id>/`，则直接返回 NotFound，不再用 SQLite 里的旧 row 冒充目录事实源。
 - file-backed session 回填 SQLite 缓存时会保护已有仍有效的目录行；如果同一个 session id 已经在另一个仍有 `meta.yaml` 的目录中存在，显式读取复制目录不会把全局缓存行漂移到复制目录。
 - opencode session 模块在判断消息/part 投影缓存是否属于当前目录、以及按 path 查询旧 legacy directory session 时，也使用规范化后的目录比较，避免等价路径导致目录事实源被误判为旧缓存。
@@ -286,6 +287,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 当 SQLite 中没有 schedule row 但调用方给出目录时，删除单个 schedule 会直接扫描该目录 file-backed sessions，并从对应会话的 `schedule.json` 中移除该自动化消息。
 - 当 SQLite 中没有 schedule row 且调用方没有目录 hint 时，删除单个 schedule 会回到服务端记录的 atree root，递归查找包含该 schedule id 的会话目录并更新其 `schedule.json`。
 - schedule list 在定位到目录 projection 后会以目录状态为准：显式空 `schedule.json` 或较新的 `schedule.deleted` 事件会清理旧 `ScheduleTable` row；同 ID schedule 的 message、runAt、expression 也会从目录状态重建 DB/timer 投影，避免旧全局投影把目录里的定时任务复活或覆盖。
+- 当持久化 atree root 中的当前会话明确拥有空 schedule 状态时，空目录状态会压过 SQLite 中同 session id 的旧 schedule row，并清理旧 row，避免自动化消息从旧全局缓存复活。
 - schedule 的运行 timer 会携带创建/恢复时的目录上下文；一次性自动化消息触发后，会在同一个目录的 `schedule.json` 中清空，不再依赖全局 SQLite session cache 推断目录。
 - schedule 触发时会把恢复到的目录上下文继续传给 prompt/loop；复制 `.agents/atree/` 后，自动化消息产生的新用户消息和后续回复会写入目标目录，而不是写回源目录或陈旧 SQLite row 指向的目录。
 - 服务启动恢复 schedule 时会递归扫描当前 atree root 下的嵌套目录，并用每个 file-backed session 自己的目录恢复 timer；嵌套节点的自动化消息不再依赖旧 SQLite `SessionTable` 行才能启动。

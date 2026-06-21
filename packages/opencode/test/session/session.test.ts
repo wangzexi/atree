@@ -1313,6 +1313,33 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not list unscoped persisted-root sessions that only exist in the stale SQLite cache", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-session-global-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const cachedOnly = yield* session.create({ title: "global-root-cached-only-session" })
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const global = yield* session.listGlobal()
+
+      expect(global.map((item) => item.id)).not.toContain(cachedOnly.id)
+    }),
+  )
+
   it.instance("materializes data-url file parts into the session assets directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

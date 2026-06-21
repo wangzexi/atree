@@ -1435,6 +1435,107 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "prefers empty schedule state from the persisted root over stale database rows",
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-empty-root-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-empty-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const staleDirectory = path.join(root, "old")
+      const actualDirectory = path.join(root, "new")
+      const sessionID = "ses_empty_root_schedule" as SessionID
+      const scheduleID = "sch_empty_root_schedule"
+      const now = Date.now()
+      yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_empty_root_schedule",
+          worktree: staleDirectory,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_empty_root_schedule",
+          slug: "empty-root-schedule",
+          directory: staleDirectory,
+          title: "Empty root schedule",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale database schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "actual-empty-root-schedule",
+          version: "test",
+          projectID: "proj_actual_empty_root_schedule",
+          directory: actualDirectory,
+          path: "new",
+          title: "Actual empty root schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(actualDirectory, sessionID, []))
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+
+      expect(schedules).toEqual([])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+      expect(yield* Effect.promise(() => readSessionScheduleState(actualDirectory, sessionID))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(staleDirectory, sessionID))).toEqual([])
+    }),
+  )
+
   it.instance(
     "creates a schedule for a nested file-backed session found from the persisted atree root",
     Effect.gen(function* () {
