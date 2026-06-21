@@ -349,6 +349,44 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("replays moved events without trusting stale absolute directories", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-moved-root-")))
+      const node = path.join(root, "copied")
+      const sessionID = SessionV2.ID.make("ses_core_moved_jsonl")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Moved core session",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            version: 1,
+            at: 100,
+            type: "session.next.moved",
+            sessionID,
+            location: { directory: "/stale/absolute/path", workspaceID: "wrk_core_moved" },
+            subdirectory: "copied",
+            timestamp: 90,
+          },
+        ]),
+      )
+
+      const restored = yield* Effect.promise(() => readSessionStore(node, sessionID))
+
+      expect(restored?.location.directory).toBe(node as any)
+      expect(restored?.location.workspaceID).toBe("wrk_core_moved" as any)
+      expect(restored?.subpath).toBe("copied" as any)
+      expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(90)
+    }),
+  )
+
   it.effect("prefers an explicit directory hint over the global SQLite session row", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-hint-data-")))

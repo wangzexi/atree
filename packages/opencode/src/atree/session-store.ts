@@ -152,6 +152,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+function timestampValue(value: unknown, fallback: number) {
+  if (typeof value === "number") return value
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>
+    if (typeof record.epochMillis === "number") return record.epochMillis
+    if (typeof record.millis === "number") return record.millis
+  }
+  return fallback
+}
+
 function decodeDataURL(url: string) {
   const match = url.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/)
   if (!match) return
@@ -413,7 +423,27 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
     } catch {
       continue
     }
-    if (baseEventType(entry.type) !== "session.updated" || !isRecord(entry.patch)) continue
+    const type = baseEventType(entry.type)
+    if (type === "session.next.moved") {
+      const location = isRecord(entry.location) ? entry.location : undefined
+      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      next = {
+        ...next,
+        // The containing directory stays authoritative so copied atree
+        // directories do not keep pointing to old absolute paths.
+        workspaceID:
+          typeof location?.workspaceID === "string"
+            ? (location.workspaceID as SessionInfo["workspaceID"])
+            : next.workspaceID,
+        path: typeof entry.subdirectory === "string" ? entry.subdirectory : next.path,
+        time: {
+          ...next.time,
+          updated: Math.max(next.time.updated, updated),
+        },
+      }
+      continue
+    }
+    if (type !== "session.updated" || !isRecord(entry.patch)) continue
     const patch = entry.patch
     const time = { ...next.time }
     if (isRecord(patch.time) && "archived" in patch.time) {

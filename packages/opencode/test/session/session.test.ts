@@ -820,6 +820,33 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("replays moved events without trusting stale absolute directories", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* Effect.acquireRelease(session.create({ title: "moved-jsonl-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "session.next.moved",
+          sessionID: info.id,
+          location: { directory: "/stale/absolute/path", workspaceID: "wrk_opencode_moved" },
+          subdirectory: "nested/path",
+          timestamp: 90,
+        }),
+      )
+
+      const restored = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
+
+      expect(restored?.directory).toBe(instance.directory)
+      expect(restored?.workspaceID).toBe("wrk_opencode_moved" as any)
+      expect(restored?.path).toBe("nested/path")
+      expect(restored?.time.updated).toBeGreaterThanOrEqual(90)
+    }),
+  )
+
   it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

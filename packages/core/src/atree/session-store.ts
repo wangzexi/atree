@@ -130,6 +130,27 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
       })
       continue
     }
+    if (type === "session.next.moved") {
+      const data = eventData(entry)
+      const location = isRecord(data.location) ? data.location : undefined
+      const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      next = SessionSchema.Info.make({
+        ...next,
+        location: Location.Ref.make({
+          directory: next.location.directory,
+          workspaceID:
+            typeof location?.workspaceID === "string"
+              ? WorkspaceV2.ID.make(location.workspaceID)
+              : next.location.workspaceID,
+        }),
+        subpath: typeof data.subdirectory === "string" ? RelativePath.make(data.subdirectory) : next.subpath,
+        time: {
+          ...next.time,
+          updated: DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(next.time.updated), updated)),
+        },
+      })
+      continue
+    }
     if (type !== "session.updated" || !isRecord(entry.patch)) continue
     const patch = entry.patch
     const time = { ...next.time }
