@@ -545,7 +545,7 @@ export interface Interface {
   readonly setWorkspace: (
     input: { sessionID: SessionID; workspaceID: Info["workspaceID"] } & DirectoryOption,
   ) => Effect.Effect<void>
-  readonly diff: (sessionID: SessionID) => Effect.Effect<Snapshot.FileDiff[]>
+  readonly diff: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<Snapshot.FileDiff[]>
   readonly messages: (
     input: { sessionID: SessionID; limit?: number } & DirectoryOption,
   ) => Effect.Effect<SessionV1.WithParts[], NotFound>
@@ -1269,9 +1269,12 @@ export const layer: Layer.Layer<
       ).pipe(Effect.orDie)
     })
 
-    const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
-      void sessionID
-      return [] as Snapshot.FileDiff[]
+    const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID, options?: DirectoryOption) {
+      const info = yield* getWithDirectory(sessionID, options?.directory).pipe(
+        Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
+      )
+      if (!info) return []
+      return info.summary?.diffs ?? []
     })
 
     const filterRemovedProjection = (

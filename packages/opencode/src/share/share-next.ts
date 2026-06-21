@@ -274,7 +274,7 @@ export const layer = Layer.effect(
     const full = Effect.fn("ShareNext.full")(function* (sessionID: SessionID, options?: { directory?: string }) {
       yield* Effect.logInfo("full sync", { sessionID: sessionID })
       const info = yield* session.get(sessionID, { directory: options?.directory })
-      const diffs = yield* session.diff(sessionID)
+      const diffs = yield* session.diff(sessionID, { directory: info.directory })
       const messages = yield* session.messages({ sessionID, directory: info.directory })
       const models = yield* Effect.forEach(
         Array.from(

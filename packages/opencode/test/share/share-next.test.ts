@@ -215,6 +215,16 @@ describe("ShareNext", () => {
             ),
           )
           yield* session.setTitle({ sessionID: source.id, directory: target, title: "target share title" })
+          yield* session.setSummary({
+            sessionID: source.id,
+            directory: target,
+            summary: {
+              additions: 3,
+              deletions: 1,
+              files: 1,
+              diffs: [{ file: "target.ts", additions: 3, deletions: 1, status: "modified", patch: "@@" }],
+            },
+          })
 
           const result = yield* ShareNext.Service.use((share) => share.create(source.id, { directory: target }))
           expect(result.id).toBe("shr_target")
@@ -225,12 +235,14 @@ describe("ShareNext", () => {
             "5 seconds",
           )
 
-          const body = JSON.parse(seen[0].body) as {
-            data: Array<{ type: string; data: { title?: string; directory?: string } }>
-          }
-          const sharedSession = body.data.find((item) => item.type === "session")?.data
+          const body = JSON.parse(seen[0].body) as { data: Array<{ type: string; data: unknown }> }
+          const sharedSession = body.data.find((item) => item.type === "session")?.data as
+            | { title?: string; directory?: string }
+            | undefined
+          const sharedDiff = body.data.find((item) => item.type === "session_diff")?.data
           expect(sharedSession?.title).toBe("target share title")
           expect(sharedSession?.directory).toBe(target)
+          expect(sharedDiff).toEqual([{ file: "target.ts", additions: 3, deletions: 1, status: "modified", patch: "@@" }])
         }).pipe(Effect.provide(integrationLayer(client)))
       },
       { config: { enterprise: { url: "https://legacy-share.example.com" } } },
