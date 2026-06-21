@@ -218,6 +218,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionStore.get` 在读取到 SQLite row 后会先校验该目录是否仍有对应 file-backed session；如果旧目录文件已不存在，会继续从持久化 root 查找目录事实源，最后才回退旧 SQLite row 以兼容非 atree 旧会话。
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
 - core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。
+- core `SessionV2.create` 在真实可写目录下会先写 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl` 的 `session.created`，再发布 Created 事件刷新 SQLite projector；不可写的虚拟目录仍保留 best-effort 兼容行为。因此新会话的目录事实源不再晚于全局投影。
 - question/permission 的 asked/replied/rejected 事件会尽力追加到当前会话目录的 `session.jsonl`；dispose/reload 导致的 pending 取消也会记录为 rejected/reject。这些请求仍然是运行时 pending 状态，但会话里发生过的澄清问题和权限决策已经会随目录一起复制、归档和读取。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。

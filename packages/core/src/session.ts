@@ -310,15 +310,28 @@ export const layer = Layer.effect(
           .run()
           .pipe(Effect.orDie)
         const now = Date.now()
+        const subpath = path.relative(project.directory, input.location.directory).replaceAll("\\", "/")
+        const fileInfo = SessionSchema.Info.make({
+          id: sessionID,
+          projectID: project.id,
+          title: `New session - ${new Date(now).toISOString()}`,
+          agent: input.agent,
+          model: input.model,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: DateTime.makeUnsafe(now), updated: DateTime.makeUnsafe(now) },
+          location: input.location,
+          subpath: subpath ? RelativePath.make(subpath) : undefined,
+        })
         const info = SessionV1.SessionInfo.make({
           id: sessionID,
           slug: Slug.create(),
           version: InstallationVersion,
           projectID: project.id,
           directory: input.location.directory,
-          path: path.relative(project.directory, input.location.directory).replaceAll("\\", "/"),
+          path: subpath,
           workspaceID: input.location.workspaceID ? WorkspaceV2.ID.make(input.location.workspaceID) : undefined,
-          title: `New session - ${new Date(now).toISOString()}`,
+          title: fileInfo.title,
           agent: input.agent,
           model: input.model
             ? {
@@ -331,6 +344,8 @@ export const layer = Layer.effect(
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
           time: { created: now, updated: now },
         })
+        yield* persistFileSession(fileInfo)
+        yield* persistFileSessionCreatedEvent(fileInfo)
         const projected = yield* events
           .publish(SessionV1.Event.Created, { sessionID, info }, { location: input.location })
           .pipe(
@@ -356,7 +371,6 @@ export const layer = Layer.effect(
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         const created = yield* result.get(sessionID).pipe(Effect.orDie)
         yield* persistFileSession(created)
-        yield* persistFileSessionCreatedEvent(created)
         return created
       }),
       get: Effect.fn("V2Session.get")(function* (sessionID, options) {

@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
+import { readFile } from "fs/promises"
 import { Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { asc, eq } from "drizzle-orm"
@@ -319,6 +320,38 @@ describe("SessionV2.create", () => {
       yield* event.project(SessionV1.Event.Created, () => Effect.die(defect))
 
       expect(yield* session.create({ id, location }).pipe(Effect.catchDefect(Effect.succeed))).toBe(defect)
+    }),
+  )
+
+  it.effect("records the file-backed created event before created projectors run", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const event = yield* EventV2.Service
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const sessionID = SessionV2.ID.create()
+      const defect = new Error("created projector failed after file write")
+      yield* event.project(SessionV1.Event.Created, () => Effect.die(defect))
+
+      expect(
+        yield* session
+          .create({
+            id: sessionID,
+            location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
+          })
+          .pipe(Effect.catchDefect(Effect.succeed)),
+      ).toBe(defect)
+
+      const jsonl = yield* Effect.promise(() =>
+        readFile(path.join(tmp.path, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      expect(JSON.parse(jsonl.trim())).toMatchObject({
+        type: "session.created",
+        sessionID,
+        info: { id: sessionID, location: { directory: tmp.path } },
+      })
     }),
   )
 
