@@ -222,6 +222,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - question/permission 的 asked/replied/rejected 事件会尽力追加到当前会话目录的 `session.jsonl`；dispose/reload 导致的 pending 取消也会记录为 rejected/reject。这些请求仍然是运行时 pending 状态，但会话里发生过的澄清问题和权限决策已经会随目录一起复制、归档和读取。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
+- core `SessionV2.switchModel` 会先把 `session.next.model.switched` 追加到当前会话目录的 `session.jsonl`，再发布 EventV2 事件；读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，让目录里的事件流能恢复当前 agent/model，而不是只恢复一条展示消息。
 - core 和 opencode 的 `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名；opencode reader 也会按最后事件清理 message/part 删除 tombstone；todo/schedule 的 JSONL 投影读取也同样兼容版本化事件名。
 - core `session.jsonl` 读取会暂存先于 `message.updated` 到达的 orphan part，并在 message 到达后归并；delta/removal 也能作用到这类暂存 part，避免 JSONL 行顺序轻微乱序时丢消息内容。
 - core `SessionStore.context` 会先保持现有 SQLite 投影语义；当 SQLite 没有上下文消息、但能定位到 file-backed session 且 `session.jsonl` 可恢复出消息时，才从目录恢复上下文。这样可以覆盖“只有目录文件、没有全局投影”的恢复场景，同时不改变 runner 当前依赖的 pending/promotion/epoch 行为；`runnerContext` 的 baseline/compaction 语义暂时仍保持 SQLite 路径。

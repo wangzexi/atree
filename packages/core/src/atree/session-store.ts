@@ -64,25 +64,13 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionSchema.Info |
   const created = typeof data.createdAt === "number" ? data.createdAt : 0
   const updated = typeof data.updatedAt === "number" ? data.updatedAt : created
   const archived = typeof data.archivedAt === "number" ? data.archivedAt : undefined
-  const model =
-    data.model && typeof data.model === "object"
-      ? (data.model as { id?: unknown; providerID?: unknown; variant?: unknown })
-      : undefined
-
   return SessionSchema.Info.make({
     id: SessionSchema.ID.make(data.id),
     parentID: typeof data.parentID === "string" ? SessionSchema.ID.make(data.parentID) : undefined,
     projectID: ProjectV2.ID.make(typeof data.projectID === "string" ? data.projectID : "global"),
     title: typeof data.title === "string" ? data.title : data.id,
     agent: typeof data.agent === "string" ? AgentV2.ID.make(data.agent) : undefined,
-    model:
-      typeof model?.id === "string" && typeof model.providerID === "string"
-        ? {
-            id: ModelV2.ID.make(model.id),
-            providerID: ProviderV2.ID.make(model.providerID),
-            variant: ModelV2.VariantID.make(typeof model.variant === "string" ? model.variant : "default"),
-          }
-        : undefined,
+    model: modelRef(data.model),
     cost: typeof data.cost === "number" ? data.cost : 0,
     tokens:
       data.tokens && typeof data.tokens === "object"
@@ -115,7 +103,34 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
     } catch {
       continue
     }
-    if (baseEventType(entry.type) !== "session.updated" || !isRecord(entry.patch)) continue
+    const type = baseEventType(entry.type)
+    if (type === "session.next.agent.switched" && typeof entry.agent === "string") {
+      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      next = SessionSchema.Info.make({
+        ...next,
+        agent: AgentV2.ID.make(entry.agent),
+        time: {
+          ...next.time,
+          updated: DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(next.time.updated), updated)),
+        },
+      })
+      continue
+    }
+    if (type === "session.next.model.switched") {
+      const model = modelRef(entry.model)
+      if (!model) continue
+      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      next = SessionSchema.Info.make({
+        ...next,
+        model,
+        time: {
+          ...next.time,
+          updated: DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(next.time.updated), updated)),
+        },
+      })
+      continue
+    }
+    if (type !== "session.updated" || !isRecord(entry.patch)) continue
     const patch = entry.patch
     const time = { ...next.time }
     if (isRecord(patch.time)) {
@@ -161,10 +176,6 @@ function sessionInfoFromCreatedEvent(
   if (id !== fallbackSessionID) return
   const time = isRecord(info.time) ? info.time : {}
   const location = isRecord(info.location) ? info.location : {}
-  const model =
-    info.model && typeof info.model === "object"
-      ? (info.model as { id?: unknown; modelID?: unknown; providerID?: unknown; variant?: unknown })
-      : undefined
   const created = timestampValue(time.created, typeof entry.at === "number" ? entry.at : 0)
   const updated = timestampValue(time.updated, typeof entry.at === "number" ? entry.at : created)
   const archived = "archived" in time ? timestampValue(time.archived, Number.NaN) : Number.NaN
@@ -174,14 +185,7 @@ function sessionInfoFromCreatedEvent(
     projectID: ProjectV2.ID.make(typeof info.projectID === "string" ? info.projectID : "global"),
     title: typeof info.title === "string" ? info.title : id,
     agent: typeof info.agent === "string" ? AgentV2.ID.make(info.agent) : undefined,
-    model:
-      typeof model?.id === "string" && typeof model.providerID === "string"
-        ? {
-            id: ModelV2.ID.make(model.id),
-            providerID: ProviderV2.ID.make(model.providerID),
-            variant: ModelV2.VariantID.make(typeof model.variant === "string" ? model.variant : "default"),
-          }
-        : undefined,
+    model: modelRef(info.model),
     cost: typeof info.cost === "number" ? info.cost : 0,
     tokens:
       info.tokens && typeof info.tokens === "object"

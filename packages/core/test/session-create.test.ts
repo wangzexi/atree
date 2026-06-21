@@ -392,6 +392,39 @@ describe("SessionV2.create", () => {
     }),
   )
 
+  it.effect("mirrors model switches into the file-backed session log", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionV2.Service
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()),
+      )
+      const location = Location.Ref.make({ directory: AbsolutePath.make(tmp.path) })
+      const created = yield* session.create({ location })
+      const model = ModelV2.Ref.make({
+        id: ModelV2.ID.make("sonnet"),
+        providerID: ProviderV2.ID.anthropic,
+        variant: ModelV2.VariantID.make("high"),
+      })
+
+      yield* session.switchModel({ sessionID: created.id, model })
+
+      expect(yield* session.get(created.id, { directory: location.directory })).toMatchObject({ model })
+      const jsonl = yield* Effect.promise(() =>
+        readFile(path.join(tmp.path, ".agents", "atree", "sessions", created.id, "session.jsonl"), "utf8"),
+      )
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.at(-1)).toMatchObject({
+        type: "session.next.model.switched",
+        sessionID: created.id,
+        model,
+      })
+    }),
+  )
+
   it.effect("persists repeated switches as distinct durable Session events", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service

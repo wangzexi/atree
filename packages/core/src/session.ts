@@ -596,11 +596,30 @@ export const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "switchAgent" })
       }),
       switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
-        yield* result.get(input.sessionID)
+        const session = yield* result.get(input.sessionID)
+        const timestamp = yield* DateTime.now
+        const messageID = SessionMessage.ID.create()
+        yield* Effect.promise(() =>
+          appendSessionJsonl(session, {
+            type: SessionEvent.ModelSwitched.type,
+            sessionID: input.sessionID,
+            messageID,
+            timestamp,
+            model: input.model,
+          }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append model switch event to atree session log", {
+              sessionID: input.sessionID,
+              messageID,
+              cause,
+            }),
+          ),
+        )
         yield* events.publish(SessionEvent.ModelSwitched, {
           sessionID: input.sessionID,
-          messageID: SessionMessage.ID.create(),
-          timestamp: yield* DateTime.now,
+          messageID,
+          timestamp,
           model: input.model,
         })
       }),
