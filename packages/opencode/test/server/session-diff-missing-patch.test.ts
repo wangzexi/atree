@@ -15,6 +15,7 @@ import { Effect, Layer } from "effect"
 import { SessionPaths } from "@/server/routes/instance/httpapi/groups/session"
 import { Session } from "@/session/session"
 import { Storage } from "@/storage/storage"
+import { appendSessionJsonl, readSessionStore } from "@/atree/session-store"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { MessageID } from "@/session/schema"
 import { ProviderV2 } from "@opencode-ai/core/provider"
@@ -90,6 +91,35 @@ describe("session diff with missing patch (#26574)", () => {
 
         expect(response.status).toBe(200)
         expect(yield* response.json).toEqual([{ file: "turn.ts", additions: 1, deletions: 0, status: "modified" }])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "GET /session/<id>/diff returns directory-backed session diffs",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const session = yield* withSession({ title: "directory-session-diff" })
+        const fileSession = yield* Effect.promise(() => readSessionStore(test.directory, session.id))
+        expect(fileSession).toBeDefined()
+        yield* Effect.promise(() =>
+          appendSessionJsonl(fileSession!, {
+            type: "session.diff",
+            sessionID: session.id,
+            diff: [{ file: '"src/hello\\040world.ts"', additions: 2, deletions: 1, status: "modified" }],
+          }),
+        )
+
+        const response = yield* requestInDirectory(
+          pathFor(SessionPaths.diff, { sessionID: session.id }),
+          test.directory,
+        )
+
+        expect(response.status).toBe(200)
+        expect(yield* response.json).toEqual([
+          { file: "src/hello world.ts", additions: 2, deletions: 1, status: "modified" },
+        ])
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

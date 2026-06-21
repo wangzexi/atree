@@ -63,6 +63,15 @@ function unquoteGitPath(input: string) {
   return Buffer.from(bytes).toString()
 }
 
+function normalizeDiffs(diffs: Snapshot.FileDiff[]) {
+  return diffs.map((item) => {
+    if (item.file === undefined) return item
+    const file = unquoteGitPath(item.file)
+    if (file === item.file) return item
+    return { ...item, file }
+  })
+}
+
 export interface Interface {
   readonly summarize: (input: { sessionID: SessionID; messageID: MessageID; directory?: string }) => Effect.Effect<void>
   readonly diff: (input: { sessionID: SessionID; messageID?: MessageID; directory?: string }) => Effect.Effect<Snapshot.FileDiff[]>
@@ -134,19 +143,13 @@ export const layer = Layer.effect(
       messageID?: MessageID
       directory?: string
     }) {
-      if (!input.messageID) return []
       const current = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
+      if (!input.messageID) return normalizeDiffs(current.summary?.diffs ?? [])
       const message = (yield* sessions.messages({ sessionID: input.sessionID, directory: current.directory }).pipe(Effect.orDie)).find(
         (item) => item.info.id === input.messageID,
       )
       if (!message || message.info.role !== "user") return []
-      const diffs = message.info.summary?.diffs ?? []
-      return diffs.map((item) => {
-        if (item.file === undefined) return item
-        const file = unquoteGitPath(item.file)
-        if (file === item.file) return item
-        return { ...item, file }
-      })
+      return normalizeDiffs(message.info.summary?.diffs ?? [])
     })
 
     return Service.of({ summarize, diff, computeDiff })
