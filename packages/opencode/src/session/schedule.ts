@@ -471,9 +471,19 @@ export const layer = Layer.effect(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
       const session = yield* resolveFileSession(db, { sessionID, directory: fallbackDirectory, instanceDirectory: directory })
-      if (!session) return
-      yield* upsertFileSessionCache(session)
-      return session.directory
+      if (session) {
+        yield* upsertFileSessionCache(session)
+        return session.directory
+      }
+      if (!fallbackDirectory) {
+        const row = yield* db
+          .select({ directory: SessionTable.directory })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        if (row?.directory) return row.directory
+      }
     })
 
     const sessionArchiveState = Effect.fn("Schedule.sessionArchiveState")(function* (
@@ -484,9 +494,20 @@ export const layer = Layer.effect(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
       const session = yield* resolveFileSession(db, { sessionID, directory: fallbackDirectory, instanceDirectory: directory })
-      if (!session) return
-      yield* upsertFileSessionCache(session)
-      return { directory: session.directory, archived: session.time.archived !== undefined }
+      if (session) {
+        yield* upsertFileSessionCache(session)
+        return { directory: session.directory, archived: session.time.archived !== undefined }
+      }
+      if (!fallbackDirectory) {
+        const row = yield* db
+          .select({ directory: SessionTable.directory, archived: SessionTable.time_archived })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        if (row?.directory) return { directory: row.directory, archived: row.archived !== null }
+      }
+      return
     })
 
     const activeSchedules = Effect.fn("Schedule.activeSchedules")(function* (sessionID: SessionID) {
