@@ -811,12 +811,9 @@ export const layer = Layer.effect(
     })
 
     const remove = Effect.fn("Workspace.remove")(function* (id: WorkspaceV2.ID) {
-      const sessions = yield* db
-        .select({ id: SessionTable.id, parentID: SessionTable.parent_id })
-        .from(SessionTable)
-        .where(eq(SessionTable.workspace_id, id))
-        .all()
-        .pipe(Effect.orDie)
+      const sessions = (yield* session.listGlobal({ archived: true, limit: 1_000_000 }))
+        .filter((sessionInfo) => sessionInfo.workspaceID === id)
+        .map((sessionInfo) => ({ id: sessionInfo.id, parentID: sessionInfo.parentID }))
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
       yield* Effect.forEach(
         sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),

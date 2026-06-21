@@ -34,6 +34,7 @@ import { Vcs } from "@/project/vcs"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
+import { writeSessionStore } from "@/atree/session-store"
 
 const originalEnv = {
   OPENCODE_AUTH_CONTENT: process.env.OPENCODE_AUTH_CONTENT,
@@ -797,6 +798,44 @@ describe("workspace CRUD", () => {
             .all()
             .pipe(Effect.orDie),
         ).toEqual([])
+      })
+    },
+    { git: true },
+  )
+
+  it.instance(
+    "remove deletes directory-backed workspace sessions without SQLite rows",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const type = unique("remove-filebacked")
+        const recorded = localAdapter(path.join(dir, "remove-filebacked"))
+        registerAdapter(instance.project.id, type, recorded.adapter)
+        const info = yield* workspace.create({ type, branch: null, projectID: instance.project.id, extra: null })
+        const sessionID = "ses_workspace_filebacked" as SessionID
+        const sessionRoot = path.join(dir, ".agents", "atree", "sessions", sessionID)
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "workspace-filebacked",
+            projectID: instance.project.id,
+            workspaceID: info.id,
+            directory: dir,
+            title: "Workspace file-backed",
+            version: "test",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 2 },
+          } as SessionNs.Info),
+        )
+
+        const removed = yield* workspace.remove(info.id)
+
+        expect(removed).toEqual(info)
+        expect(yield* Effect.promise(() => Bun.file(sessionRoot).exists())).toBe(false)
+        expect(recorded.calls.remove).toEqual([info])
       })
     },
     { git: true },
