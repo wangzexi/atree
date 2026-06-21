@@ -7,7 +7,10 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { SessionID } from "../../src/session/schema"
+import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { $ } from "bun"
+import path from "path"
+import fs from "fs/promises"
 import { tmpdirScoped } from "../fixture/fixture"
 import { Effect, Layer } from "effect"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -86,6 +89,52 @@ describe("migrateFromGlobal", () => {
       )
       expect(row).toBeDefined()
       expect(row!.project_id).toBe(real.id)
+    }),
+  )
+
+  it.live("migrates directory-backed global sessions without SQLite rows", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      yield* Effect.promise(() => $`git init`.cwd(tmp).quiet())
+      yield* Effect.promise(() => $`git config user.name "Test"`.cwd(tmp).quiet())
+      yield* Effect.promise(() => $`git config user.email "test@opencode.test"`.cwd(tmp).quiet())
+      yield* Effect.promise(() => $`git config commit.gpgsign false`.cwd(tmp).quiet())
+      const projects = yield* Project.Service
+      const { project: pre } = yield* projects.fromDirectory(tmp)
+      expect(pre.id).toBe(ProjectV2.ID.global)
+
+      const now = Date.now()
+      const id = "ses_directory_global_project_migration" as SessionID
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id,
+          slug: "directory-global-project-migration",
+          version: "test",
+          projectID: ProjectV2.ID.global,
+          directory: tmp,
+          path: ".",
+          title: "directory global migration",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* Effect.promise(() => $`git commit --allow-empty -m "root"`.cwd(tmp).quiet())
+      const { project: real } = yield* projects.fromDirectory(tmp)
+      expect(real.id).not.toBe(ProjectV2.ID.global)
+
+      const stored = yield* Effect.promise(() => readSessionStore(tmp, id))
+      expect(stored?.projectID).toBe(real.id)
+      const row = yield* Database.Service.use(({ db }) =>
+        db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie),
+      )
+      expect(row).toBeUndefined()
+      const jsonl = yield* Effect.promise(() =>
+        fs.readFile(path.join(tmp, ".agents", "atree", "sessions", id, "session.jsonl"), "utf8"),
+      )
+      expect(jsonl).toContain('"type":"session.updated"')
+      expect(jsonl).toContain(`"projectID":"${real.id}"`)
     }),
   )
 

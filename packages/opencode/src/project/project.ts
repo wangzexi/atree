@@ -21,6 +21,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { appendSessionJsonl, readSessionStores, writeSessionStore } from "@/atree/session-store"
 
 const ProjectVcs = Schema.Literal("git")
 
@@ -221,6 +222,53 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
+    const migrateDirectoryFileSessionsProjectId = Effect.fn("Project.migrateDirectoryFileSessionsProjectId")(function* (
+      directory: string,
+      oldID: ProjectV2.ID,
+      newID: ProjectV2.ID,
+    ) {
+      if (oldID === newID) return
+      const sessions = yield* Effect.promise(() => readSessionStores(directory)).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to read atree sessions for project migration", { directory, oldID, newID, cause }).pipe(
+            Effect.as([]),
+          ),
+        ),
+      )
+      for (const session of sessions) {
+        if (session.projectID !== oldID) continue
+        const next = { ...session, projectID: newID }
+        yield* Effect.promise(() =>
+          appendSessionJsonl(next, {
+            type: "session.updated",
+            sessionID: next.id,
+            patch: { projectID: newID },
+          }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append atree project migration event", {
+              sessionID: next.id,
+              directory,
+              oldID,
+              newID,
+              cause,
+            }),
+          ),
+        )
+        yield* Effect.promise(() => writeSessionStore(next)).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to write atree project migration metadata", {
+              sessionID: next.id,
+              directory,
+              oldID,
+              newID,
+              cause,
+            }),
+          ),
+        )
+      }
+    })
+
     const saveProjectDirectory = Effect.fn("Project.saveProjectDirectory")(function* (input: {
       projectID: ProjectV2.ID
       directory: string
@@ -324,6 +372,7 @@ export const layer = Layer.effect(
           .where(and(eq(SessionTable.project_id, ProjectV2.ID.global), eq(SessionTable.directory, data.directory)))
           .run()
           .pipe(Effect.orDie)
+        yield* migrateDirectoryFileSessionsProjectId(data.directory, ProjectV2.ID.global, projectID)
       }
 
       yield* saveProjectDirectory({
