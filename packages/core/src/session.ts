@@ -36,8 +36,6 @@ import {
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
-  readSessionStoresDeep,
-  readWorkspaceRoot,
   writeSessionStore,
 } from "./atree/session-store"
 
@@ -431,14 +429,7 @@ export const layer = Layer.effect(
           ? yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
               Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
             )
-          : yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-              Effect.flatMap((root) =>
-                root
-                  ? Effect.promise(() => readSessionStoresDeep(root))
-                  : Effect.succeed(undefined as SessionSchema.Info[] | undefined),
-              ),
-              Effect.catchCause(() => Effect.succeed(undefined as SessionSchema.Info[] | undefined)),
-            )
+          : undefined
         const fileSessionIDs = fileSessions ? new Set(fileSessions.map((session) => session.id)) : undefined
         const byID = new Map<string, SessionSchema.Info>()
         for (const row of rows) {

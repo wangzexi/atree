@@ -319,39 +319,6 @@ export async function readSessionStores(directory: string) {
   return sessions
 }
 
-export async function readSessionStoresDeep(rootDirectory: string) {
-  const root = await fs.realpath(rootDirectory)
-  const budget = { count: 0 }
-  const sessions: SessionSchema.Info[] = []
-
-  async function walk(directory: string, depth: number) {
-    if (budget.count++ >= FindMaxNodes) return
-    sessions.push(...(await readSessionStores(directory)))
-    if (depth >= FindMaxDepth) return
-
-    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error.code === "ENOENT" || error.code === "EACCES")
-      ) {
-        return []
-      }
-      throw error
-    })
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (IgnoredDirectories.has(entry.name)) continue
-      await walk(path.join(directory, entry.name), depth + 1)
-    }
-  }
-
-  await walk(root, 0)
-  return sessions
-}
-
 export async function findSessionStore(rootDirectory: string, sessionID: SessionSchema.ID) {
   const root = await fs.realpath(rootDirectory)
   const budget = { count: 0 }
