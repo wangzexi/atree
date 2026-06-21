@@ -14,7 +14,12 @@ import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
-import { findSessionScheduleState, readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
+import {
+  findSessionScheduleState,
+  readSessionScheduleProjection,
+  readSessionScheduleState,
+  writeSessionScheduleState,
+} from "@/atree/schedule-store"
 import { appendSessionJsonl, readSessionStore, readSessionStores, touchSessionStore } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import { readWorkspaceState } from "@/atree/state"
@@ -752,31 +757,69 @@ export const layer = Layer.effect(
       for (const schedule of sorted.slice(0, MAX_PER_SESSION)) {
         if (!canRestoreStoredSchedule(schedule)) continue
         const id = schedule.id as ID
-        if (!existingIDs.has(schedule.id)) {
-          yield* db
-            .transaction((tx) =>
-              tx
-                .insert(ScheduleTable)
-                .values({
-                  id,
-                  session_id: sessionID,
-                  kind: schedule.kind,
-                  expression: schedule.expression,
-                  run_at: schedule.runAt,
-                  message: schedule.message,
-                  created_at: schedule.createdAt,
-                })
-                .run(),
-            )
-            .pipe(Effect.orDie)
-          startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge, directory)
+        if (existingIDs.has(schedule.id)) {
+          const timer = timers.get(id)
+          if (timer) {
+            stopTimer(timer)
+            timers.delete(id)
+          }
+          yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, id)).run().pipe(Effect.orDie)
+          yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, id)).run().pipe(Effect.orDie)
         }
+        yield* db
+          .transaction((tx) =>
+            tx
+              .insert(ScheduleTable)
+              .values({
+                id,
+                session_id: sessionID,
+                kind: schedule.kind,
+                expression: schedule.expression,
+                run_at: schedule.runAt,
+                message: schedule.message,
+                created_at: schedule.createdAt,
+              })
+              .run(),
+          )
+          .pipe(Effect.orDie)
+        startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge, directory)
         yield* restoreStoredRun(schedule)
       }
 
       const schedules = yield* activeSchedules(sessionID)
       if (schedules.length > 0) yield* syncScheduleState(sessionID, directory)
       return schedules
+    })
+
+    const reconcileDirectorySchedules = Effect.fn("Schedule.reconcileDirectorySchedules")(function* (
+      sessionID: SessionID,
+      directory: string,
+      schedules: ReadonlyArray<Info>,
+    ) {
+      const wantedIDs = new Set(schedules.filter(canRestoreStoredSchedule).map((schedule) => schedule.id))
+      const rows = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      const staleIDs = rows.map((row) => row.id as ID).filter((id) => !wantedIDs.has(id))
+      if (staleIDs.length > 0) {
+        for (const id of staleIDs) {
+          const timer = timers.get(id)
+          if (timer) {
+            stopTimer(timer)
+            timers.delete(id)
+          }
+        }
+        yield* db.delete(ScheduleRunTable).where(inArray(ScheduleRunTable.schedule_id, staleIDs)).run().pipe(Effect.orDie)
+        yield* db.delete(ScheduleTable).where(inArray(ScheduleTable.id, staleIDs)).run().pipe(Effect.orDie)
+      }
+      if (wantedIDs.size === 0) {
+        yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
+        return [] as Info[]
+      }
+      return yield* restoreStoredSchedules(sessionID, directory)
     })
 
     const hydrated = yield* db.select().from(ScheduleTable).all().pipe(Effect.orDie)
@@ -827,6 +870,21 @@ export const layer = Layer.effect(
         yield* clearArchivedScheduleState(sessionID, archiveState.directory)
         return [] as Info[]
       }
+      const directory = archiveState?.directory ?? (yield* sessionDirectory(sessionID, directoryHint))
+      if (directory) {
+        const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
+        if (projection.hasState) {
+          return yield* reconcileDirectorySchedules(
+            sessionID,
+            directory,
+            projection.schedules.map((schedule) => ({
+              ...schedule,
+              id: schedule.id as ID,
+              sessionID: schedule.sessionID as SessionID,
+            })),
+          )
+        }
+      }
       const rows = yield* db
         .select({
           id: ScheduleTable.id,
@@ -853,7 +911,6 @@ export const layer = Layer.effect(
         yield* syncScheduleState(sessionID, directoryHint)
         return items
       }
-      const directory = yield* sessionDirectory(sessionID, directoryHint)
       if (!directory) return items
       const restored = yield* restoreStoredSchedules(sessionID, directory)
       if (restored.length > 0) return restored

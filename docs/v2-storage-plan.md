@@ -260,6 +260,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。
 - 当 SQLite 中没有 schedule row 但调用方给出目录时，删除单个 schedule 会直接扫描该目录 file-backed sessions，并从对应会话的 `schedule.json` 中移除该自动化消息。
 - 当 SQLite 中没有 schedule row 且调用方没有目录 hint 时，删除单个 schedule 会回到服务端记录的 atree root，递归查找包含该 schedule id 的会话目录并更新其 `schedule.json`。
+- schedule list 在定位到目录 projection 后会以目录状态为准：显式空 `schedule.json` 或较新的 `schedule.deleted` 事件会清理旧 `ScheduleTable` row；同 ID schedule 的 message、runAt、expression 也会从目录状态重建 DB/timer 投影，避免旧全局投影把目录里的定时任务复活或覆盖。
 - schedule 的运行 timer 会携带创建/恢复时的目录上下文；一次性自动化消息触发后，会在同一个目录的 `schedule.json` 中清空，不再依赖全局 SQLite session cache 推断目录。
 - schedule 触发时会把恢复到的目录上下文继续传给 prompt/loop；复制 `.agents/atree/` 后，自动化消息产生的新用户消息和后续回复会写入目标目录，而不是写回源目录或陈旧 SQLite row 指向的目录。
 - schedule 的创建、运行记录和删除会先追加到当前会话目录的 `session.jsonl`，再刷新 `schedule.json` 投影；归档会话导致的自动化清理也会留下 `schedule.deleted` 记录。即使是重启/恢复时发现 archived 会话里残留了旧 `schedule.json`，清理投影前也会补写删除事件。因此自动化消息不只是外部投影状态，也是会话原始记录的一部分。

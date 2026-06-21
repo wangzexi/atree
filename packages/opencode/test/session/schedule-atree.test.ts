@@ -881,6 +881,196 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "prefers an explicit empty directory schedule state over stale database rows",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_schedule_empty_projection" as SessionID
+      const scheduleID = "sch_stale_empty_projection"
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_empty_schedule_projection",
+          worktree: directory,
+          vcs: "git",
+          name: "empty schedule projection",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_empty_schedule_projection",
+          slug: "empty-schedule-projection",
+          directory,
+          title: "Empty schedule projection",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "empty-schedule-projection",
+          version: "test",
+          projectID: "proj_empty_schedule_projection",
+          directory,
+          path: ".",
+          title: "Empty schedule projection",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale database schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+
+      expect(schedules).toEqual([])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+    }),
+  )
+
+  it.effect(
+    "prefers directory schedule details over stale database rows with the same id",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_schedule_same_id_projection" as SessionID
+      const scheduleID = "sch_same_id_projection"
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_same_id_schedule_projection",
+          worktree: directory,
+          vcs: "git",
+          name: "same id schedule projection",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_same_id_schedule_projection",
+          slug: "same-id-schedule-projection",
+          directory,
+          title: "Same id schedule projection",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "same-id-schedule-projection",
+          version: "test",
+          projectID: "proj_same_id_schedule_projection",
+          directory,
+          path: ".",
+          title: "Same id schedule projection",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "directory schedule",
+            createdAt: now + 1,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale database schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+
+      expect(schedules).toHaveLength(1)
+      expect(schedules[0]).toMatchObject({
+        id: scheduleID,
+        message: "directory schedule",
+        runAt: now + 120_000,
+      })
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("directory schedule")
+      expect(row?.run_at).toBe(now + 120_000)
+    }),
+  )
+
+  it.effect(
     "ignores a stale database directory when creating schedule state from the persisted atree root",
     Effect.gen(function* () {
       const { db } = yield* Database.Service

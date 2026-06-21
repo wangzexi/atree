@@ -215,23 +215,31 @@ export async function writeSessionScheduleState(directory: string, sessionID: st
   await removeLegacySessionSchedule(directory, sessionID)
 }
 
-export async function readSessionScheduleState(directory: string, sessionID: string) {
+export async function readSessionScheduleProjection(directory: string, sessionID: string) {
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
   if (sessionState.hasState) {
     const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return jsonlState.schedules
-    return sessionState.schedules
+    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return jsonlState
+    return sessionState
   }
 
   const state = await readState(legacyStatePath(directory))
   const jsonlState = await readSessionJsonlProjection(directory, sessionID)
   const schedules = state.sessions[sessionID]
   if (Array.isArray(schedules)) {
-    if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return jsonlState.schedules
-    return schedules.filter(isStoredSchedule)
+    if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return jsonlState
+    return {
+      hasState: true,
+      updatedAt: state.updatedAt,
+      schedules: schedules.filter(isStoredSchedule),
+    }
   }
 
-  return jsonlState.schedules
+  return jsonlState
+}
+
+export async function readSessionScheduleState(directory: string, sessionID: string) {
+  return (await readSessionScheduleProjection(directory, sessionID)).schedules
 }
 
 export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {
