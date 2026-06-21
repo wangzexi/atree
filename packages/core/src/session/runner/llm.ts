@@ -27,6 +27,7 @@ import { SessionCompaction } from "../compaction"
 import { SessionEvent } from "../event"
 import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
+import { publishSessionEvent } from "../publish-session-event"
 import { SessionSchema } from "../schema"
 import { SessionStore } from "../store"
 import { type RunError, Service, StepLimitExceededError } from "./index"
@@ -115,21 +116,28 @@ export const layer = Layer.effect(
     const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
       sessionID: SessionSchema.ID,
     ) {
+      const session = yield* getSession(sessionID)
       for (const message of yield* getContext(sessionID)) {
         if (message.type !== "assistant") continue
         for (const tool of message.content) {
           if (tool.type !== "tool" || (tool.state.status !== "pending" && tool.state.status !== "running")) continue
-          yield* events.publish(SessionEvent.Tool.Failed, {
-            sessionID,
-            timestamp: yield* DateTime.now,
-            assistantMessageID: message.id,
-            callID: tool.id,
-            error: { type: "unknown", message: "Tool execution interrupted" },
-            provider: {
-              executed: tool.provider?.executed === true,
-              ...(tool.provider?.metadata === undefined ? {} : { metadata: tool.provider.metadata }),
+          yield* publishSessionEvent(
+            events,
+            { sessionID, session },
+            SessionEvent.Tool.Failed,
+            {
+              sessionID,
+              timestamp: yield* DateTime.now,
+              assistantMessageID: message.id,
+              callID: tool.id,
+              error: { type: "unknown", message: "Tool execution interrupted" },
+              provider: {
+                executed: tool.provider?.executed === true,
+                ...(tool.provider?.metadata === undefined ? {} : { metadata: tool.provider.metadata }),
+              },
             },
-          })
+            "runner interrupted tool failure",
+          )
         }
       }
     })
@@ -293,7 +301,7 @@ export const layer = Layer.effect(
             recoverOverflow &&
             !publisher.hasAssistantStarted() &&
             isContextOverflowFailure(overflowFailure ?? failure) &&
-            (yield* restore(recoverOverflow({ sessionID: session.id, entries, model, request })))
+            (yield* restore(recoverOverflow({ sessionID: session.id, session, entries, model, request })))
           )
             return yield* Effect.die(continueAfterOverflowCompaction)
           if (overflowFailure) yield* publish(overflowFailure)
@@ -301,12 +309,18 @@ export const layer = Layer.effect(
           if (llmFailure && !publisher.hasProviderError()) {
             yield* withPublication(publisher.failUnsettledTools("Provider did not return a tool result", true))
             yield* withPublication(
-              events.publish(SessionEvent.Step.Failed, {
-                sessionID: session.id,
-                timestamp: yield* DateTime.now,
-                assistantMessageID: yield* publisher.startAssistant(),
-                error: { type: "unknown", message: llmFailure.reason.message },
-              }),
+              publishSessionEvent(
+                events,
+                { sessionID: session.id, session },
+                SessionEvent.Step.Failed,
+                {
+                  sessionID: session.id,
+                  timestamp: yield* DateTime.now,
+                  assistantMessageID: yield* publisher.startAssistant(),
+                  error: { type: "unknown", message: llmFailure.reason.message },
+                },
+                "runner step failure",
+              ),
             )
           }
           if (stream._tag === "Failure" && Cause.hasInterrupts(stream.cause)) yield* FiberSet.clear(toolFibers)

@@ -224,6 +224,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `SessionV2.switchModel` 会先把 `session.next.model.switched` 追加到当前会话目录的 `session.jsonl`，再发布 EventV2 事件；读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，让目录里的事件流能恢复当前 agent/model，而不是只恢复一条展示消息。
 - core runner 的 LLM 事件 publisher 在真实 file-backed session 上会把 provider turn 产生的 step/text/reasoning/tool 事件 best-effort 镜像到同一会话目录的 `session.jsonl`；EventV2/SQLite projector 仍是运行时投影，但模型回复和工具调用原始事件已经开始随目录一起落地。
+- core runner 里绕过 publisher 的失败路径也会带当前 session：中断未完成工具、LLM step failed，以及 provider context overflow 后触发的 compaction recovery 都会继续写回当前会话目录，而不是只写全局 EventV2/SQLite。
 - core compaction 会把 `session.next.compaction.started/ended` best-effort 镜像到当前会话目录的 `session.jsonl`，让压缩摘要也能随目录文件恢复。
 - core 和 opencode 的 `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名；opencode reader 也会按最后事件清理 message/part 删除 tombstone；todo/schedule 的 JSONL 投影读取也同样兼容版本化事件名。
 - core `session.jsonl` 读取会暂存先于 `message.updated` 到达的 orphan part，并在 message 到达后归并；delta/removal 也能作用到这类暂存 part，避免 JSONL 行顺序轻微乱序时丢消息内容。

@@ -2,9 +2,9 @@ import { ToolOutput, type LLMEvent, type ProviderMetadata, type ToolResultValue,
 import { DateTime, Effect } from "effect"
 import { EventV2 } from "../../event"
 import { ModelV2 } from "../../model"
-import { appendSessionJsonl } from "../../atree/session-store"
 import { SessionEvent } from "../event"
 import { SessionMessage } from "../message"
+import { publishSessionEvent as publishDurableSessionEvent } from "../publish-session-event"
 import { SessionSchema } from "../schema"
 
 type Input = {
@@ -73,26 +73,7 @@ export const createLLMEventPublisher = (events: EventV2.Interface, input: Input)
     definition: D,
     data: EventV2.Data<D>,
   ): Effect.Effect<EventV2.Payload<D>> =>
-    Effect.gen(function* () {
-      const payload = yield* events.publish(definition, data)
-      if (input.session) {
-        yield* Effect.promise(() =>
-          appendSessionJsonl(input.session!, {
-            type: definition.type,
-            ...(data as Record<string, unknown>),
-          }),
-        ).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("failed to mirror runner event into atree session log", {
-              sessionID: input.sessionID,
-              type: definition.type,
-              cause,
-            }),
-          ),
-        )
-      }
-      return payload
-    })
+    publishDurableSessionEvent(events, input, definition, data, "runner event")
 
   const startAssistant = Effect.fnUntraced(function* () {
     if (assistantMessageID !== undefined) return assistantMessageID

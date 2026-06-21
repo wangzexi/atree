@@ -4,9 +4,9 @@ import { LLM, LLMError, LLMEvent, Message, type LLMRequest, type Model } from "@
 import { DateTime, Effect, Stream } from "effect"
 import type { Config } from "../config"
 import type { EventV2 } from "../event"
-import { appendSessionJsonl } from "../atree/session-store"
 import { SessionEvent } from "./event"
 import { SessionMessage } from "./message"
+import { publishSessionEvent } from "./publish-session-event"
 import { SessionSchema } from "./schema"
 import { Token } from "../util/token"
 
@@ -176,31 +176,6 @@ export const buildPrompt = (input: { readonly previousSummary?: string; readonly
 
 export const make = (dependencies: Dependencies) => {
   const config = settings(dependencies.config)
-  const publishSessionEvent = <D extends EventV2.Definition>(
-    input: Input,
-    definition: D,
-    data: EventV2.Data<D>,
-  ) =>
-    Effect.gen(function* () {
-      const payload = yield* dependencies.events.publish(definition, data)
-      if (input.session) {
-        yield* Effect.promise(() =>
-          appendSessionJsonl(input.session!, {
-            type: definition.type,
-            ...(data as Record<string, unknown>),
-          }),
-        ).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("failed to mirror compaction event into atree session log", {
-              sessionID: input.sessionID,
-              type: definition.type,
-              cause,
-            }),
-          ),
-        )
-      }
-      return payload
-    })
   const compactAfterOverflow = Effect.fn("SessionCompaction.compactAfterOverflow")(function* (input: Input) {
     const context = input.model.route.defaults.limits?.context
     if (context === undefined || context <= 0) return false
@@ -215,12 +190,18 @@ export const make = (dependencies: Dependencies) => {
     const summaryOutput = Math.min(output || SUMMARY_OUTPUT_TOKENS, SUMMARY_OUTPUT_TOKENS)
     if (Token.estimate(summaryPrompt) > context - summaryOutput) return false
     const messageID = SessionMessage.ID.create()
-    yield* publishSessionEvent(input, SessionEvent.Compaction.Started, {
-      sessionID: input.sessionID,
-      messageID,
-      timestamp: yield* DateTime.now,
-      reason: "auto",
-    })
+    yield* publishSessionEvent(
+      dependencies.events,
+      input,
+      SessionEvent.Compaction.Started,
+      {
+        sessionID: input.sessionID,
+        messageID,
+        timestamp: yield* DateTime.now,
+        reason: "auto",
+      },
+      "compaction event",
+    )
 
     const chunks: string[] = []
     let failed = false
@@ -244,14 +225,20 @@ export const make = (dependencies: Dependencies) => {
       )
     const summary = chunks.join("")
     if (!summarized || failed || !summary.trim()) return false
-    yield* publishSessionEvent(input, SessionEvent.Compaction.Ended, {
-      sessionID: input.sessionID,
-      messageID,
-      timestamp: yield* DateTime.now,
-      reason: "auto",
-      text: summary,
-      recent: selected.recent,
-    })
+    yield* publishSessionEvent(
+      dependencies.events,
+      input,
+      SessionEvent.Compaction.Ended,
+      {
+        sessionID: input.sessionID,
+        messageID,
+        timestamp: yield* DateTime.now,
+        reason: "auto",
+        text: summary,
+        recent: selected.recent,
+      },
+      "compaction event",
+    )
     return true
   })
   const compactIfNeeded = Effect.fn("SessionCompaction.compactIfNeeded")(function* (input: Input) {
