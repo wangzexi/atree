@@ -8,7 +8,7 @@ import { SessionTable } from "@opencode-ai/core/session/sql"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { eq } from "drizzle-orm"
 import { Effect, Layer, Schema } from "effect"
-import { HttpRouter } from "effect/unstable/http"
+import { HttpRouter, HttpServerRequest } from "effect/unstable/http"
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import { InvalidRequestError, SessionNotFoundError } from "../errors"
 import type { LocationServices } from "../groups/location"
@@ -24,6 +24,15 @@ export class SessionLocationMiddleware extends HttpApiMiddleware.Service<
 
 const decodeSessionID = Schema.decodeUnknownEffect(SessionV2.ID)
 
+function decodeHeader(input: string | undefined) {
+  if (!input) return
+  try {
+    return decodeURIComponent(input)
+  } catch {
+    return input
+  }
+}
+
 export const sessionLocationLayer = Layer.effect(
   SessionLocationMiddleware,
   Effect.gen(function* () {
@@ -33,6 +42,8 @@ export const sessionLocationLayer = Layer.effect(
     return SessionLocationMiddleware.of((effect) =>
       Effect.gen(function* () {
         const route = yield* HttpRouter.RouteContext
+        const request = yield* HttpServerRequest.HttpServerRequest
+        const requestDirectory = decodeHeader(request.headers["x-opencode-directory"])
         const sessionID = yield* decodeSessionID(route.params.sessionID).pipe(
           Effect.mapError(
             () =>
@@ -53,16 +64,24 @@ export const sessionLocationLayer = Layer.effect(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
           : undefined
+        const hintedFileSession =
+          cachedFileSession || !requestDirectory
+            ? undefined
+            : yield* Effect.promise(() => readSessionStore(requestDirectory, sessionID)).pipe(
+                Effect.catchCause(() => Effect.succeed(undefined)),
+              )
         const rootFileSession = cachedFileSession
           ? undefined
+          : hintedFileSession
+            ? undefined
           : yield* Effect.promise(() => readWorkspaceRoot()).pipe(
               Effect.flatMap((root) =>
                 root ? Effect.promise(() => findSessionStore(root, sessionID)) : Effect.succeed(undefined),
               ),
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
-        const fileSession = cachedFileSession ?? rootFileSession
-        const directory = fileSession?.location.directory ?? row?.directory
+        const fileSession = cachedFileSession ?? hintedFileSession ?? rootFileSession
+        const directory = fileSession?.location.directory ?? row?.directory ?? requestDirectory
         const workspaceID = fileSession?.location.workspaceID ?? row?.workspaceID
         if (!directory)
           return yield* new SessionNotFoundError({
