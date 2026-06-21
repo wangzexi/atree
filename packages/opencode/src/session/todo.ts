@@ -47,6 +47,7 @@ export const layer = Layer.effect(
     const { db } = yield* Database.Service
 
     type FileSession = NonNullable<Awaited<ReturnType<typeof readSessionStore>>>
+    const currentInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 
     const ensureFileSessionProject = Effect.fn("Todo.ensureFileSessionProject")(function* (session: FileSession) {
       const existing = yield* db
@@ -74,7 +75,7 @@ export const layer = Layer.effect(
     })
 
     const upsertFileSessionCache = Effect.fn("Todo.upsertFileSessionCache")(function* (session: FileSession) {
-      const instance = yield* InstanceRef
+      const instance = yield* currentInstance
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
       const projectID = instance?.project.id ?? session.projectID
       yield* ensureFileSessionProject({ ...session, projectID })
@@ -121,7 +122,7 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
-      const instance = yield* InstanceRef
+      const instance = yield* currentInstance
       const fileSession = yield* resolveFileSession(db, {
         sessionID,
         directory: fallbackDirectory,
@@ -136,7 +137,7 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
-      const instance = yield* InstanceRef
+      const instance = yield* currentInstance
       const fileSession = yield* resolveFileSession(db, {
         sessionID,
         directory: fallbackDirectory,

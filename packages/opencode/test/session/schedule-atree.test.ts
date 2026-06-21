@@ -365,7 +365,11 @@ describe("atree schedule restore", () => {
 
       const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
       expect(schedules).toHaveLength(1)
-      expect(schedules[0]).toMatchObject({ id: "sch_explicit_list", sessionID, message: "list with explicit directory" })
+      expect(schedules[0]).toMatchObject({
+        id: "sch_explicit_list",
+        sessionID,
+        message: "list with explicit directory",
+      })
 
       const row = yield* Database.Service.use(({ db }) =>
         db
@@ -570,7 +574,9 @@ describe("atree schedule restore", () => {
         } as any),
       )
       yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [storedSchedule]))
-      yield* Effect.promise(() => fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
 
       yield* schedules.clear(sessionID, { directory: target })
 
@@ -857,11 +863,7 @@ describe("atree schedule restore", () => {
         .split("\n")
         .map((line) => JSON.parse(line) as Record<string, any>)
 
-      expect(entries.map((entry) => entry.type)).toEqual([
-        "schedule.created",
-        "schedule.ran",
-        "schedule.deleted",
-      ])
+      expect(entries.map((entry) => entry.type)).toEqual(["schedule.created", "schedule.ran", "schedule.deleted"])
       expect(entries[0]?.schedule).toMatchObject({
         id: created.id,
         sessionID,
