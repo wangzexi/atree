@@ -50,6 +50,7 @@ import {
   listSessionSchedules,
   type SessionScheduleSummary,
 } from "@/utils/session-schedule"
+import { visibleDirectoryTabs } from "./titlebar-tabs"
 
 type TauriDesktopWindow = {
   startDragging?: () => Promise<void>
@@ -459,23 +460,14 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
             const tabDirectory = (tab: Tab) =>
               tab.type === "draft" ? tab.directory : (decode64(tab.dirBase64) ?? undefined)
             const visibleTabs = createMemo(() => {
-              const directory = currentDirectory()
-              const currentServer = currentServerKey()
-              if (!directory || !currentServer) return [] as Tab[]
-              const group = tabs.directoryGroup()
-              const groupActive =
-                group?.server === currentServer && pathKey(group.directory) === pathKey(directory)
-              if (groupActive) {
-                return tabsStore.filter(
-                  (tab) => tab.server === currentServer && pathKey(tabDirectory(tab) ?? "") === pathKey(directory),
-                )
-              }
-              const current = currentTab()
-              return current &&
-                current.server === currentServer &&
-                pathKey(tabDirectory(current) ?? "") === pathKey(directory)
-                ? [current]
-                : []
+              return visibleDirectoryTabs({
+                tabs: tabsStore,
+                current: currentTab(),
+                currentDirectory: currentDirectory(),
+                currentServer: currentServerKey(),
+                directoryGroup: tabs.directoryGroup(),
+                tabDirectory,
+              })
             })
             const currentDirectoryDraft = createMemo(() => {
               const directory = currentDirectory()
