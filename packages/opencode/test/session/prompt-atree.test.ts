@@ -6,6 +6,7 @@ import path from "path"
 import { Session } from "@/session/session"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionCompaction } from "../../src/session/compaction"
+import { Schedule } from "../../src/session/schedule"
 import { SessionSummary } from "../../src/session/summary"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -235,6 +236,43 @@ it.live("mirrors compaction completion into the directory session log", () =>
           expect.objectContaining({
             type: "session.compacted",
             sessionID: session.id,
+          }),
+        ]),
+      )
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("mirrors triggered schedules into the directory session log", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "schedule trigger jsonl" })
+
+      yield* events.publish(Schedule.Event.Triggered, {
+        scheduleID: "sch_trigger_jsonl" as never,
+        sessionID: session.id,
+        message: "scheduled hello",
+      })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(session.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "schedule.triggered",
+            scheduleID: "sch_trigger_jsonl",
+            sessionID: session.id,
+            message: "scheduled hello",
           }),
         ]),
       )
