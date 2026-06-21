@@ -1,13 +1,20 @@
 import { expect, test } from "bun:test"
-import { Effect, Schema, Stream } from "effect"
+import { Effect, DateTime, Schema, Stream } from "effect"
+import path from "path"
+import { readFile } from "fs/promises"
 import { LLMEvent } from "@opencode-ai/llm"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { ModelV2 } from "@opencode-ai/core/model"
+import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
+import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { createLLMEventPublisher } from "@opencode-ai/core/session/runner/publish-llm-event"
+import { tmpdir } from "./fixture/tmpdir"
 
 const sessionID = SessionV2.ID.make("ses_tool_event_test")
 const base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
@@ -37,6 +44,7 @@ const capture = () => {
     claim: () => Effect.void,
   })
   return {
+    events,
     published,
     publisher: createLLMEventPublisher(events, {
       sessionID,
@@ -110,6 +118,43 @@ test("binary failure emits no success event", async () => {
   )
   expect(published.some((event) => event.type === "session.next.tool.success.1")).toBe(false)
   expect(published.some((event) => event.type === "session.next.tool.failed.1")).toBe(true)
+})
+
+test("runner events are mirrored into file-backed session jsonl", async () => {
+  await using tmp = await tmpdir()
+  const session = SessionV2.Info.make({
+    id: SessionV2.ID.make("ses_tool_event_jsonl"),
+    projectID: ProjectV2.ID.global,
+    title: "Tool event jsonl",
+    cost: 0,
+    tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+    location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
+  })
+  await writeSessionStore(session)
+  const { events } = capture()
+  const publisherWithSession = createLLMEventPublisher(events, {
+    sessionID: session.id,
+    agent: "build",
+    model: {
+      id: ModelV2.ID.make("model"),
+      providerID: ProviderV2.ID.make("provider"),
+    },
+    session,
+  })
+
+  await Effect.runPromise(publisherWithSession.publish(LLMEvent.textStart({ id: "text-jsonl" })))
+  await Effect.runPromise(publisherWithSession.publish(LLMEvent.textDelta({ id: "text-jsonl", text: "Hello" })))
+  await Effect.runPromise(publisherWithSession.publish(LLMEvent.textEnd({ id: "text-jsonl" })))
+  await Effect.runPromise(publisherWithSession.publish(LLMEvent.stepFinish({ index: 0, reason: "stop" })))
+
+  const entries = (await readFile(path.join(tmp.path, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+  expect(entries.some((entry) => entry.type === "session.next.text.ended" && entry.text === "Hello")).toBe(true)
+  expect(entries.some((entry) => entry.type === "session.next.step.ended")).toBe(true)
+  expect(entries.find((entry) => entry.type === "session.next.step.started")).not.toHaveProperty("session")
 })
 
 test("old success event data containing result still decodes", () => {
