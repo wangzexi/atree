@@ -87,6 +87,17 @@ export const layer = Layer.effect(
             })
           }
         }
+        if (event.type === "session.diff") {
+          const data = event.data as Record<string, unknown>
+          if (typeof data.sessionID === "string") {
+            const sessionID = data.sessionID as SessionID
+            yield* appendAtreeSessionEventBestEffort(event.location?.directory, sessionID, {
+              type: event.type,
+              sessionID,
+              diff: data.diff,
+            })
+          }
+        }
         GlobalBus.emit("event", {
           directory: event.location?.directory ?? ctx?.directory,
           project: ctx?.project.id,

@@ -280,3 +280,36 @@ it.live("mirrors triggered schedules into the directory session log", () =>
     { config: providerConfig },
   ),
 )
+
+it.live("mirrors session diffs into the directory session log", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "diff jsonl" })
+      const diff = [{ file: "a.txt", additions: 1, deletions: 0, status: "added" as const, patch: "+hello" }]
+
+      yield* events.publish(Session.Event.Diff, { sessionID: session.id, diff })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(session.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "session.diff",
+            sessionID: session.id,
+            diff,
+          }),
+        ]),
+      )
+    }),
+    { config: providerConfig },
+  ),
+)
