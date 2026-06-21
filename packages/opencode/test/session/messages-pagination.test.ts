@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Database } from "@opencode-ai/core/database/database"
 import { Effect, Layer, Option } from "effect"
+import { Global } from "@opencode-ai/core/global"
 import { Session as SessionNs } from "@/session/session"
 import { MessageV2 } from "../../src/session/message-v2"
 import { MessageID, PartID, type SessionID } from "../../src/session/schema"
@@ -16,6 +17,7 @@ import { testEffect } from "../lib/effect"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { TestInstance } from "../fixture/fixture"
+import { writeWorkspaceRoot } from "@/atree/state"
 
 const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Database.defaultLayer))
 
@@ -1051,6 +1053,62 @@ describe("MessageV2 consistency", () => {
       expect(got.parts).toEqual(parts)
       expect(parts[0]).toMatchObject({ id: targetPartID, type: "text", text: "target only" })
       expect(page.items.map((item) => item.info.id)).toContain(sourceMessageID)
+    }),
+  )
+
+  it.instance("reads copied file-backed parts from the persisted root without a directory hint", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-test-message-v2-parts-"))),
+        (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+      )
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-test-message-v2-data-"))),
+        (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      const database = yield* Database.Service
+
+      const created = yield* session.create({ title: "message-v2 copied parts source" })
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      yield* Effect.promise(() => writeWorkspaceRoot(target))
+
+      const targetMessageID = MessageID.ascending()
+      const targetPartID = PartID.ascending()
+      yield* session.updateMessage(
+        {
+          id: targetMessageID,
+          sessionID: created.id,
+          role: "user",
+          time: { created: Date.now() + 1 },
+          agent: "test",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as SessionV1.Info,
+        { directory: target },
+      )
+      yield* session.updatePart(
+        {
+          id: targetPartID,
+          sessionID: created.id,
+          messageID: targetMessageID,
+          type: "text",
+          text: "target part from root",
+        },
+        { directory: target },
+      )
+      yield* database.db.delete(PartTable).where(eq(PartTable.id, targetPartID)).run().pipe(Effect.orDie)
+
+      const parts = yield* MessageV2.parts(targetMessageID, { sessionID: created.id })
+
+      expect(parts[0]).toMatchObject({ id: targetPartID, type: "text", text: "target part from root" })
     }),
   )
 

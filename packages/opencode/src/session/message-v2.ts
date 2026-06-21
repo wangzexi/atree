@@ -538,7 +538,7 @@ export function stream(sessionID: SessionID, options?: { directory?: string }) {
 export function parts(messageID: MessageID, options?: { sessionID?: SessionID; directory?: string }) {
   return Effect.gen(function* () {
     const { db } = yield* Database.Service
-    if (options?.sessionID && options.directory) {
+    if (options?.sessionID) {
       const fileSession = yield* resolveFileSession(db, { directory: options.directory, sessionID: options.sessionID })
       if (fileSession) {
         const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
