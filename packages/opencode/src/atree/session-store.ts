@@ -9,6 +9,7 @@ import type { SessionV1 } from "@opencode-ai/core/v1/session"
 type SessionInfo = Session.Info & {
   id: SessionID
 }
+type SessionModel = NonNullable<SessionInfo["model"]>
 
 function yamlString(value: string | undefined) {
   return JSON.stringify(value ?? null)
@@ -160,6 +161,17 @@ function timestampValue(value: unknown, fallback: number) {
     if (typeof record.millis === "number") return record.millis
   }
   return fallback
+}
+
+function modelRef(value: unknown): SessionInfo["model"] | undefined {
+  if (!isRecord(value) || typeof value.providerID !== "string") return
+  const id = typeof value.id === "string" ? value.id : typeof value.modelID === "string" ? value.modelID : undefined
+  if (!id) return
+  return {
+    id: id as SessionModel["id"],
+    providerID: value.providerID as SessionModel["providerID"],
+    ...(typeof value.variant === "string" ? { variant: value.variant } : {}),
+  }
 }
 
 function decodeDataURL(url: string) {
@@ -424,6 +436,32 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       continue
     }
     const type = baseEventType(entry.type)
+    if (type === "session.next.agent.switched" && typeof entry.agent === "string") {
+      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      next = {
+        ...next,
+        agent: entry.agent,
+        time: {
+          ...next.time,
+          updated: Math.max(next.time.updated, updated),
+        },
+      }
+      continue
+    }
+    if (type === "session.next.model.switched") {
+      const model = modelRef(entry.model)
+      if (!model) continue
+      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      next = {
+        ...next,
+        model,
+        time: {
+          ...next.time,
+          updated: Math.max(next.time.updated, updated),
+        },
+      }
+      continue
+    }
     if (type === "session.next.moved") {
       const location = isRecord(entry.location) ? entry.location : undefined
       const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)

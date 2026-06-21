@@ -847,6 +847,46 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("replays agent and model switches from session jsonl", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* Effect.acquireRelease(session.create({ title: "switched-jsonl-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const model = { providerID: "anthropic", modelID: "claude-sonnet-4", variant: "max" }
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "session.next.agent.switched",
+          sessionID: info.id,
+          messageID: MessageID.ascending(),
+          agent: "research",
+          timestamp: 90,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "session.next.model.switched",
+          sessionID: info.id,
+          messageID: MessageID.ascending(),
+          model,
+          timestamp: 100,
+        }),
+      )
+
+      const restored = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
+
+      expect(restored?.agent).toBe("research")
+      expect(restored?.model).toMatchObject({
+        id: model.modelID,
+        providerID: model.providerID,
+        variant: model.variant,
+      })
+      expect(restored?.time.updated).toBeGreaterThanOrEqual(100)
+    }),
+  )
+
   it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
