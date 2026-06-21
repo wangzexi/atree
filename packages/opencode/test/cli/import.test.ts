@@ -1,10 +1,23 @@
 import { test, expect } from "bun:test"
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
+import { eq } from "drizzle-orm"
+import { Effect, Layer } from "effect"
+import { Database } from "@opencode-ai/core/database/database"
+import { MessageTable, PartTable } from "@opencode-ai/core/session/sql"
+import { ProjectV2 } from "@opencode-ai/core/project"
+import { readSessionJsonlMessages, readSessionStore } from "@/atree/session-store"
 import {
+  persistImportedSession,
   parseShareUrl,
   shouldAttachShareAuthHeaders,
   transformShareData,
   type ShareData,
 } from "../../src/cli/cmd/import"
+import { testEffect } from "../lib/effect"
+
+const it = testEffect(Layer.mergeAll(Database.defaultLayer))
 
 // parseShareUrl tests
 test("parses valid share URLs", () => {
@@ -52,3 +65,68 @@ test("returns null for invalid share data", () => {
   expect(transformShareData([{ type: "message", data: {} as any }])).toBeNull()
   expect(transformShareData([{ type: "session", data: { id: "s" } as any }])).toBeNull() // no messages
 })
+
+it.effect("persists imported sessions into the directory-backed atree store", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-import-session-"))),
+      (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+    )
+    const sessionID = "ses_import_filebacked" as any
+    const messageID = "msg_import_user" as any
+    const partID = "prt_import_text" as any
+
+    const imported = yield* persistImportedSession(
+      {
+        info: {
+          id: sessionID,
+          slug: "imported",
+          title: "Imported session",
+          version: "test",
+          time: { created: 10, updated: 20 },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        } as any,
+        messages: [
+          {
+            info: {
+              id: messageID,
+              sessionID,
+              role: "user",
+              time: { created: 30 },
+              agent: "build",
+              model: { providerID: "test", modelID: "test-model" },
+            } as any,
+            parts: [{ id: partID, sessionID, messageID, type: "text", text: "from imported share" } as any],
+          },
+        ],
+      },
+      {
+        project: { id: ProjectV2.ID.global },
+        directory,
+        worktree: directory,
+      } as any,
+    )
+
+    const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+    expect(stored?.title).toBe("Imported session")
+
+    const { db } = yield* Database.Service
+    yield* db.delete(PartTable).where(eq(PartTable.session_id, sessionID)).run().pipe(Effect.orDie)
+    yield* db.delete(MessageTable).where(eq(MessageTable.session_id, sessionID)).run().pipe(Effect.orDie)
+
+    const messages = yield* Effect.promise(() => readSessionJsonlMessages(imported))
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.info).toMatchObject({ id: messageID, role: "user" })
+    expect(messages[0]?.parts[0]).toMatchObject({ id: partID, type: "text", text: "from imported share" })
+
+    const raw = yield* Effect.promise(() =>
+      fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+    )
+    const eventTypes = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line).type)
+    expect(eventTypes).toEqual(["session.created", "message.updated", "message.part.updated"])
+  }),
+)
