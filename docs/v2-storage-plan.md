@@ -243,8 +243,8 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core compaction 会把 `session.next.compaction.started/ended` best-effort 镜像到当前会话目录的 `session.jsonl`，让压缩摘要也能随目录文件恢复。
 - core 和 opencode 的 `session.jsonl` reader 会同时接受无版本事件名和 EventV2 sync 使用的 `.1` / `.2` 等版本化事件名；opencode reader 也会按最后事件清理 message/part 删除 tombstone；todo/schedule 的 JSONL 投影读取也同样兼容版本化事件名。
 - core `session.jsonl` 读取会暂存先于 `message.updated` 到达的 orphan part，并在 message 到达后归并；delta/removal 也能作用到这类暂存 part，避免 JSONL 行顺序轻微乱序时丢消息内容。
-- core `SessionStore.context` 会先保持现有 SQLite 投影语义；当 SQLite 没有上下文消息、但能定位到 file-backed session 且 `session.jsonl` 可恢复出消息时，才从目录恢复上下文。这样可以覆盖“只有目录文件、没有全局投影”的恢复场景，同时不改变 runner 当前依赖的 pending/promotion/epoch 行为；`runnerContext` 的 baseline/compaction 语义暂时仍保持 SQLite 路径。
-- core `SessionStore.runnerContext` 也具备同样的无投影 fallback：SQLite runner 上下文为空时，会从目录 `session.jsonl` 恢复消息；当前 runner 主循环仍直接使用 SQLite `SessionHistory.entriesForRunner`，后续迁移需要单独处理 baseline/epoch。
+- core `SessionStore.context` 会先尝试从当前 root 的 file-backed session 读取 `session.jsonl`；只有目录消息缺失时才回退现有 SQLite 投影，避免复制目录后旧投影盖过当前目录事实源。
+- core `SessionStore.runnerContext` 也采用同样的目录优先策略；当前 runner 主循环仍可能通过其他路径使用 SQLite `SessionHistory.entriesForRunner`，后续迁移需要继续处理 baseline/epoch 的目录事实源语义。
 - core `SessionStore.message` 会优先从持久化 atree root 的 file-backed sessions 查找对应 `session.jsonl` 消息；只有目录事实源没有这条消息时才回退现有 SQLite 单条消息查询，避免同 message id 的陈旧全局投影盖过目录记录。
 - core `SessionStore.get/context/runnerContext` 和 `SessionTodo` 的无显式目录读取会优先扫描持久化 atree root；只有当前 root 内找不到对应会话时，才回退 SQLite 中仍有效的旧目录缓存。这样复制 `.agents/atree/` 后，当前 root 副本不会被旧绝对路径压过。
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。

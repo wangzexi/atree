@@ -83,8 +83,6 @@ export const layer = Layer.effect(
         return yield* resolveFileSession(sessionID)
       }),
       context: Effect.fn("SessionStore.context")(function* (sessionID) {
-        const stored = yield* SessionHistory.load(db, sessionID)
-        if (stored.length > 0) return stored
         const fileSession = yield* resolveFileSession(sessionID)
         if (fileSession) {
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
@@ -92,11 +90,10 @@ export const layer = Layer.effect(
           )
           if (messages.length > 0) return messages
         }
+        const stored = yield* SessionHistory.load(db, sessionID)
         return stored
       }),
       runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq) {
-        const stored = yield* SessionHistory.loadForRunner(db, sessionID, baselineSeq)
-        if (stored.length > 0) return stored
         const fileSession = yield* resolveFileSession(sessionID)
         if (fileSession) {
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
@@ -104,6 +101,7 @@ export const layer = Layer.effect(
           )
           if (messages.length > 0) return messages
         }
+        const stored = yield* SessionHistory.loadForRunner(db, sessionID, baselineSeq)
         return stored
       }),
       message: Effect.fn("SessionStore.message")(function* (messageID) {

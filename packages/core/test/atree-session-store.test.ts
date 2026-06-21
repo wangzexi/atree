@@ -828,6 +828,95 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("prefers file-backed SessionStore context over stale SQLite messages", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_context_stale")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core store context stale",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_store_context_file",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_context_file",
+              messageID: "msg_core_store_context_file",
+              type: "text",
+              text: "context from current root",
+            },
+          },
+        ]),
+      )
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "context-stale",
+          directory: node,
+          title: "Core store context stale",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionMessageTable)
+        .values({
+          id: SessionMessage.ID.make("msg_core_store_context_sqlite"),
+          session_id: sessionID,
+          type: "user",
+          seq: 1,
+          time_created: 5,
+          data: {
+            time: { created: 5 },
+            text: "stale sqlite context",
+            files: [],
+            agents: [],
+          },
+        } as typeof SessionMessageTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      const context = yield* store.context(sessionID)
+      const runnerContext = yield* store.runnerContext(sessionID, 0)
+
+      expect(context.map((message) => message.id)).toEqual([SessionMessage.ID.make("msg_core_store_context_file")])
+      expect(runnerContext.map((message) => message.id)).toEqual([
+        SessionMessage.ID.make("msg_core_store_context_file"),
+      ])
+    }),
+  )
+
   storeIt.effect("loads core SessionStore runner context from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-runner-context-data-")))
