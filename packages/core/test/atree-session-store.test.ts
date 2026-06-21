@@ -302,6 +302,52 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("replays core session info fields from session jsonl when meta is stale", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-jsonl-info-root-")))
+      const node = path.join(root, "info")
+      const sessionID = SessionV2.ID.make("ses_core_jsonl_info")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Stale info",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            version: 1,
+            at: 120,
+            type: "session.updated",
+            sessionID,
+            patch: {
+              title: "JSONL info",
+              agent: "build",
+              model: { providerID: "test-provider", modelID: "test-model", variant: "fast" },
+              cost: 1.25,
+              tokens: { input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } },
+              time: { created: 5, updated: 110 },
+            },
+          },
+        ]),
+      )
+
+      const restored = yield* Effect.promise(() => readSessionStore(node, sessionID))
+
+      expect(restored?.title).toBe("JSONL info")
+      expect(restored?.agent).toBe("build" as any)
+      expect(restored?.model).toMatchObject({ providerID: "test-provider", id: "test-model", variant: "fast" } as any)
+      expect(restored?.cost).toBe(1.25)
+      expect(restored?.tokens).toEqual({ input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } })
+      expect(DateTime.toEpochMillis(restored!.time.created)).toBe(5)
+      expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(120)
+    }),
+  )
+
   it.effect("rebuilds file metadata from session.created when meta.yaml is missing", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-created-root-")))

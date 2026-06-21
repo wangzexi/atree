@@ -151,10 +151,14 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
       })
       continue
     }
-    if (type !== "session.updated" || !isRecord(entry.patch)) continue
-    const patch = entry.patch
+    if (type !== "session.updated") continue
+    const patch = isRecord(entry.patch) ? entry.patch : isRecord(entry.info) ? entry.info : undefined
+    if (!patch) continue
     const time = { ...next.time }
     if (isRecord(patch.time)) {
+      if (typeof patch.time.created === "number") {
+        time.created = DateTime.makeUnsafe(patch.time.created)
+      }
       if ("archived" in patch.time) {
         const archived = patch.time.archived
         if (typeof archived === "number") time.archived = DateTime.makeUnsafe(archived)
@@ -169,9 +173,25 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
     if (typeof entry.at === "number") {
       time.updated = DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(time.updated), entry.at))
     }
+    const location = isRecord(patch.location) ? patch.location : undefined
+    const tokens = tokensValue(patch.tokens)
     next = SessionSchema.Info.make({
       ...next,
+      ...(typeof patch.projectID === "string" ? { projectID: ProjectV2.ID.make(patch.projectID) } : {}),
+      ...("parentID" in patch
+        ? {
+            parentID: typeof patch.parentID === "string" ? SessionSchema.ID.make(patch.parentID) : undefined,
+          }
+        : {}),
       ...(typeof patch.title === "string" ? { title: patch.title } : {}),
+      ...("agent" in patch
+        ? {
+            agent: typeof patch.agent === "string" ? AgentV2.ID.make(patch.agent) : undefined,
+          }
+        : {}),
+      ...("model" in patch ? { model: modelRef(patch.model) } : {}),
+      ...(typeof patch.cost === "number" ? { cost: patch.cost } : {}),
+      ...(tokens ? { tokens } : {}),
       ...("workspaceID" in patch
         ? {
             location: Location.Ref.make({
@@ -179,6 +199,18 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
               workspaceID: typeof patch.workspaceID === "string" ? WorkspaceV2.ID.make(patch.workspaceID) : undefined,
             }),
           }
+        : typeof location?.workspaceID === "string"
+          ? {
+              location: Location.Ref.make({
+                directory: next.location.directory,
+                workspaceID: WorkspaceV2.ID.make(location.workspaceID),
+              }),
+            }
+          : {}),
+      ...(typeof patch.subpath === "string"
+        ? { subpath: RelativePath.make(patch.subpath) }
+        : typeof patch.path === "string"
+          ? { subpath: RelativePath.make(patch.path) }
         : {}),
       time,
     })
