@@ -27,7 +27,7 @@ export const layer = Layer.effect(
       const conf = yield* cfg.get()
       if (conf.share === "disabled") throw new Error("Sharing is disabled in configuration")
       const current = yield* session.get(sessionID, { directory: options?.directory })
-      const result = yield* shareNext.create(sessionID)
+      const result = yield* shareNext.create(sessionID, { directory: current.directory })
       yield* session.setShare({ sessionID, directory: current.directory, share: { url: result.url } })
       return result
     })

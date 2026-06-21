@@ -1,4 +1,7 @@
 import { beforeEach, describe, expect } from "bun:test"
+import fs from "fs/promises"
+import os from "os"
+import path from "path"
 import { Effect, Exit, Layer, Option } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
@@ -171,6 +174,63 @@ describe("ShareNext", () => {
           expect(seen).toHaveLength(1)
           expect(seen[0].method).toBe("POST")
           expect(seen[0].url).toBe("https://legacy-share.example.com/api/share")
+        }).pipe(Effect.provide(integrationLayer(client)))
+      },
+      { config: { enterprise: { url: "https://legacy-share.example.com" } } },
+    ),
+  )
+
+  it.live("full sync reads copied file-backed session metadata from the explicit directory", () =>
+    provideTmpdirInstance(
+      () => {
+        const seen: Array<{ url: string; body: string }> = []
+        const client = HttpClient.make((req) => {
+          if (req.url.endsWith("/api/share")) {
+            return Effect.succeed(
+              json(req, {
+                id: "shr_target",
+                url: "https://legacy-share.example.com/share/target",
+                secret: "sec_target",
+              }),
+            )
+          }
+          if (req.url.endsWith("/sync") && req.body._tag === "Uint8Array") {
+            seen.push({ url: req.url, body: new TextDecoder().decode(req.body.body) })
+          }
+          return Effect.succeed(json(req, { ok: true }))
+        })
+        return Effect.gen(function* () {
+          const session = yield* Session.Service
+          const source = yield* session.create({ title: "source share title" })
+          const target = yield* Effect.acquireRelease(
+            Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-share-target-"))),
+            (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })).pipe(Effect.ignore),
+          )
+
+          yield* Effect.promise(() =>
+            fs.cp(
+              path.join(source.directory, ".agents"),
+              path.join(target, ".agents"),
+              { recursive: true },
+            ),
+          )
+          yield* session.setTitle({ sessionID: source.id, directory: target, title: "target share title" })
+
+          const result = yield* ShareNext.Service.use((share) => share.create(source.id, { directory: target }))
+          expect(result.id).toBe("shr_target")
+
+          yield* pollWithTimeout(
+            Effect.sync(() => (seen.length === 1 ? true : undefined)),
+            "timed out waiting for target share sync",
+            "5 seconds",
+          )
+
+          const body = JSON.parse(seen[0].body) as {
+            data: Array<{ type: string; data: { title?: string; directory?: string } }>
+          }
+          const sharedSession = body.data.find((item) => item.type === "session")?.data
+          expect(sharedSession?.title).toBe("target share title")
+          expect(sharedSession?.directory).toBe(target)
         }).pipe(Effect.provide(integrationLayer(client)))
       },
       { config: { enterprise: { url: "https://legacy-share.example.com" } } },

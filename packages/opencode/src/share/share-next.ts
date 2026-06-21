@@ -74,7 +74,7 @@ export interface Interface {
   readonly init: () => Effect.Effect<void, unknown>
   readonly url: () => Effect.Effect<string, unknown>
   readonly request: () => Effect.Effect<Req, unknown>
-  readonly create: (sessionID: SessionID) => Effect.Effect<Share, unknown>
+  readonly create: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<Share, unknown>
   readonly remove: (sessionID: SessionID) => Effect.Effect<void, unknown>
 }
 
@@ -271,11 +271,11 @@ export const layer = Layer.effect(
       }
     })
 
-    const full = Effect.fn("ShareNext.full")(function* (sessionID: SessionID) {
+    const full = Effect.fn("ShareNext.full")(function* (sessionID: SessionID, options?: { directory?: string }) {
       yield* Effect.logInfo("full sync", { sessionID: sessionID })
-      const info = yield* session.get(sessionID)
+      const info = yield* session.get(sessionID, { directory: options?.directory })
       const diffs = yield* session.diff(sessionID)
-      const messages = yield* session.messages({ sessionID })
+      const messages = yield* session.messages({ sessionID, directory: info.directory })
       const models = yield* Effect.forEach(
         Array.from(
           new Map(
@@ -307,7 +307,7 @@ export const layer = Layer.effect(
       return (yield* request()).baseUrl
     })
 
-    const create = Effect.fn("ShareNext.create")(function* (sessionID: SessionID) {
+    const create = Effect.fn("ShareNext.create")(function* (sessionID: SessionID, options?: { directory?: string }) {
       if (disabled) return { id: "", url: "", secret: "" }
       yield* Effect.logInfo("creating share", { sessionID: sessionID })
       const req = yield* request()
@@ -328,7 +328,7 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
       const s = yield* InstanceState.get(state)
       s.shared.set(sessionID, result)
-      yield* full(sessionID).pipe(
+      yield* full(sessionID, { directory: options?.directory }).pipe(
         Effect.catchCause((cause) => Effect.logError("share full sync failed", { sessionID: sessionID, cause: cause })),
         Effect.forkIn(s.scope),
       )
