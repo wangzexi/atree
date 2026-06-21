@@ -714,7 +714,9 @@ export const layer: Layer.Layer<
       }
       if (!directoryHint && cached?.directory) {
         const cachedFileSession = yield* Effect.promise(() => readSessionStore(cached.directory, id)).pipe(
-          Effect.catchCause(() => Effect.succeed<ReturnType<typeof readSessionStore>>(undefined)),
+          Effect.catchCause(() =>
+            Effect.succeed<Awaited<ReturnType<typeof readSessionStore>>>(undefined),
+          ),
         )
         if (cachedFileSession) {
           const merged = mergeFileSession(cached, localizeFileSession(cachedFileSession, ctx))
