@@ -30,6 +30,7 @@ import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
 import {
+  appendSessionJsonl,
   appendPromptJsonl,
   readSessionJsonlMessages,
   readSessionStore,
@@ -277,6 +278,22 @@ export const layer = Layer.effect(
       )
     })
 
+    const persistFileSessionCreatedEvent = Effect.fn("V2Session.persistFileSessionCreatedEvent")(function* (
+      session: SessionSchema.Info,
+    ) {
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "session.created",
+          sessionID: session.id,
+          info: session,
+        }),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to append atree session.created event", { sessionID: session.id, cause }),
+        ),
+      )
+    })
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
@@ -339,6 +356,7 @@ export const layer = Layer.effect(
         // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
         const created = yield* result.get(sessionID).pipe(Effect.orDie)
         yield* persistFileSession(created)
+        yield* persistFileSessionCreatedEvent(created)
         return created
       }),
       get: Effect.fn("V2Session.get")(function* (sessionID, options) {

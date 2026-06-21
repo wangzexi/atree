@@ -150,6 +150,77 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
   return next
 }
 
+function sessionInfoFromCreatedEvent(
+  entry: Record<string, unknown>,
+  fallbackDirectory: string,
+  fallbackSessionID: SessionSchema.ID,
+) {
+  if (baseEventType(entry.type) !== "session.created" || !isRecord(entry.info)) return
+  const info = entry.info
+  const id = typeof info.id === "string" ? info.id : fallbackSessionID
+  if (id !== fallbackSessionID) return
+  const time = isRecord(info.time) ? info.time : {}
+  const location = isRecord(info.location) ? info.location : {}
+  const model =
+    info.model && typeof info.model === "object"
+      ? (info.model as { id?: unknown; modelID?: unknown; providerID?: unknown; variant?: unknown })
+      : undefined
+  const created = timestampValue(time.created, typeof entry.at === "number" ? entry.at : 0)
+  const updated = timestampValue(time.updated, typeof entry.at === "number" ? entry.at : created)
+  const archived = "archived" in time ? timestampValue(time.archived, Number.NaN) : Number.NaN
+  return SessionSchema.Info.make({
+    id: fallbackSessionID,
+    parentID: typeof info.parentID === "string" ? SessionSchema.ID.make(info.parentID) : undefined,
+    projectID: ProjectV2.ID.make(typeof info.projectID === "string" ? info.projectID : "global"),
+    title: typeof info.title === "string" ? info.title : id,
+    agent: typeof info.agent === "string" ? AgentV2.ID.make(info.agent) : undefined,
+    model:
+      typeof model?.id === "string" && typeof model.providerID === "string"
+        ? {
+            id: ModelV2.ID.make(model.id),
+            providerID: ProviderV2.ID.make(model.providerID),
+            variant: ModelV2.VariantID.make(typeof model.variant === "string" ? model.variant : "default"),
+          }
+        : undefined,
+    cost: typeof info.cost === "number" ? info.cost : 0,
+    tokens:
+      info.tokens && typeof info.tokens === "object"
+        ? (info.tokens as SessionSchema.Info["tokens"])
+        : { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    location: Location.Ref.make({
+      directory: AbsolutePath.make(fallbackDirectory),
+      workspaceID: typeof location.workspaceID === "string" ? WorkspaceV2.ID.make(location.workspaceID) : undefined,
+    }),
+    subpath: typeof info.subpath === "string" ? RelativePath.make(info.subpath) : undefined,
+    time: {
+      created: DateTime.makeUnsafe(created),
+      updated: DateTime.makeUnsafe(updated),
+      archived: Number.isFinite(archived) ? DateTime.makeUnsafe(archived) : undefined,
+    },
+  })
+}
+
+async function readSessionCreatedEvent(directory: string, sessionID: SessionSchema.ID) {
+  const raw = await fs
+    .readFile(path.join(sessionRootByID(directory, sessionID), "session.jsonl"), "utf8")
+    .catch((error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+      throw error
+    })
+  let created: SessionSchema.Info | undefined
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    let entry: Record<string, unknown>
+    try {
+      entry = JSON.parse(line) as Record<string, unknown>
+    } catch {
+      continue
+    }
+    created = sessionInfoFromCreatedEvent(entry, directory, sessionID) ?? created
+  }
+  return created ? applySessionUpdatedEvents(created) : undefined
+}
+
 export async function readWorkspaceRoot() {
   try {
     const raw = await fs.readFile(stateFile(), "utf8")
@@ -167,7 +238,7 @@ export async function readSessionStore(directory: string, sessionID: SessionSche
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return undefined
     throw error
   })
-  if (!raw) return
+  if (!raw) return readSessionCreatedEvent(directory, sessionID)
   const parsed = parseMeta(raw, directory)
   if (!parsed) return
   return applySessionUpdatedEvents(parsed)

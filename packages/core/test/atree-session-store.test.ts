@@ -13,6 +13,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { readSessionStore } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer } from "effect"
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "fs/promises"
@@ -101,7 +102,16 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(directoryMeta).toContain('source: "atree"')
       expect(meta).toContain('id: "ses_core_create_store"')
       expect(meta).toContain("createdAt:")
-      expect(jsonl).toBe("")
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toHaveLength(1)
+      expect(entries[0]).toMatchObject({
+        type: "session.created",
+        sessionID: "ses_core_create_store",
+        info: { id: "ses_core_create_store" },
+      })
       expect(assets).toEqual([])
 
       const { db } = yield* Database.Service
@@ -286,9 +296,56 @@ describe("atree file-backed SessionV2 discovery", () => {
       const loaded = yield* sessions.get(sessionID, { directory: AbsolutePath.make(node) })
 
       expect(loaded.title).toBe("JSONL core title")
-      expect(loaded.location.workspaceID).toBe("wrk_core_jsonl")
+      expect(loaded.location.workspaceID).toBe("wrk_core_jsonl" as any)
       expect(loaded.time.archived).toBeUndefined()
       expect(DateTime.toEpochMillis(loaded.time.updated)).toBe(110)
+    }),
+  )
+
+  it.effect("rebuilds file metadata from session.created when meta.yaml is missing", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-created-root-")))
+      const node = path.join(root, "created")
+      const sessionID = SessionV2.ID.make("ses_core_created_jsonl")
+      yield* Effect.promise(() => mkdir(path.join(node, ".agents", "atree", "sessions", sessionID), { recursive: true }))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            version: 1,
+            at: 100,
+            type: "session.created",
+            sessionID,
+            info: {
+              id: sessionID,
+              slug: "core-created-jsonl",
+              version: "test",
+              projectID: "global",
+              location: { directory: "/stale/source", workspaceID: "wrk_core_created" },
+              subpath: ".",
+              title: "Created from core JSONL",
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              time: { created: 10, updated: 20, archived: 30 },
+            },
+          },
+          {
+            version: 1,
+            at: 110,
+            type: "session.updated",
+            sessionID,
+            patch: { title: "Updated from core JSONL", time: { archived: null } },
+          },
+        ]),
+      )
+
+      const restored = yield* Effect.promise(() => readSessionStore(node, sessionID))
+      expect(restored?.id).toBe(sessionID)
+      expect(restored?.location.directory).toBe(node as any)
+      expect(restored?.location.workspaceID).toBe("wrk_core_created" as any)
+      expect(restored?.title).toBe("Updated from core JSONL")
+      expect(restored?.time.archived).toBeUndefined()
+      expect(DateTime.toEpochMillis(restored!.time.created)).toBe(10)
+      expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(110)
     }),
   )
 
@@ -681,7 +738,7 @@ describe("atree file-backed SessionV2 discovery", () => {
           time_initialized: null,
           sandboxes: [],
           commands: null,
-        })
+        } as unknown as typeof ProjectTable.$inferInsert)
         .onConflictDoNothing()
         .run()
         .pipe(Effect.orDie)
@@ -717,7 +774,7 @@ describe("atree file-backed SessionV2 discovery", () => {
           time_updated: 10,
           time_compacting: null,
           time_archived: null,
-        })
+        } as typeof SessionTable.$inferInsert)
         .run()
         .pipe(Effect.orDie)
       yield* db
@@ -735,7 +792,7 @@ describe("atree file-backed SessionV2 discovery", () => {
             agents: {},
             time: { created: 10 },
           },
-        })
+        } as typeof SessionMessageTable.$inferInsert)
         .run()
         .pipe(Effect.orDie)
 
