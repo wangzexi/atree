@@ -87,7 +87,7 @@ describe("Session.plan", () => {
     )
   })
 
-  test("keeps git project plans in the worktree .opencode directory", () => {
+  test("stores git project plans inside the session assets directory", () => {
     const sessionID = "ses_plan_git" as SessionID
     const plan = SessionNs.plan(
       { id: sessionID, slug: "git-plan", time: { created: 456 } },
@@ -104,7 +104,18 @@ describe("Session.plan", () => {
       },
     )
 
-    expect(plan).toBe(path.join("/workspace/repo", ".opencode", "plans", "456-git-plan.md"))
+    expect(plan).toBe(
+      path.join(
+        "/workspace/repo/packages/app",
+        ".agents",
+        "atree",
+        "sessions",
+        sessionID,
+        "assets",
+        "plans",
+        "456-git-plan.md",
+      ),
+    )
   })
 })
 

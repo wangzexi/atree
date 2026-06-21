@@ -419,9 +419,7 @@ export const Event = {
 }
 
 export function plan(input: { id: SessionID; slug: string; time: { created: number } }, instance: InstanceContext) {
-  const base = instance.project.vcs
-    ? path.join(instance.worktree, ".opencode", "plans")
-    : path.join(instance.directory, ".agents", "atree", "sessions", input.id, "assets", "plans")
+  const base = path.join(instance.directory, ".agents", "atree", "sessions", input.id, "assets", "plans")
   return path.join(base, [input.time.created, input.slug].join("-") + ".md")
 }
 
