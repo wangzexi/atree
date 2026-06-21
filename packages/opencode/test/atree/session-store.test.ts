@@ -182,10 +182,14 @@ describe("atree session store", () => {
       type: "session.updated",
       patch: { time: { archived: null } },
     })
+    await appendSessionJsonl(session, {
+      type: "session.updated",
+      data: { patch: { title: "Nested JSONL title", metadata: { icon: "🧪" } } },
+    })
 
     const restored = await readSessionStore(directory, "ses_jsonl_meta" as any)
-    expect(restored?.title).toBe("JSONL title")
-    expect(restored?.metadata).toEqual({ icon: "🧭" })
+    expect(restored?.title).toBe("Nested JSONL title")
+    expect(restored?.metadata).toEqual({ icon: "🧪" })
     expect(restored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
     expect(restored?.workspaceID).toBe("workspace-jsonl" as any)
     expect(restored?.share).toEqual({ url: "https://example.com/share" })
@@ -222,15 +226,53 @@ describe("atree session store", () => {
       sessionID: session.id,
       diff,
     })
+    await appendSessionJsonl(session, {
+      type: "session.diff",
+      sessionID: session.id,
+      data: {
+        diff: [{ file: "nested.txt", additions: 4, deletions: 1, status: "modified" as const, patch: "@@" }],
+      },
+    })
 
     const restored = await readSessionStore(directory, "ses_jsonl_diff" as any)
     expect(restored?.summary).toEqual({
-      additions: 3,
-      deletions: 3,
-      files: 2,
-      diffs: diff,
+      additions: 4,
+      deletions: 1,
+      files: 1,
+      diffs: [{ file: "nested.txt", additions: 4, deletions: 1, status: "modified", patch: "@@" }],
     })
     expect(restored?.time.updated).toBeGreaterThan(2)
+  })
+
+  test("replays nested agent and model switch events into session metadata", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_nested_switches",
+      slug: "nested-switches",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      title: "Nested switches",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "session.next.agent.switched",
+      data: { agent: "build", timestamp: 10 },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.model.switched",
+      data: { model: { providerID: "test", modelID: "model-nested", variant: "fast" }, timestamp: 11 },
+    })
+
+    const restored = await readSessionStore(directory, "ses_nested_switches" as any)
+    expect(restored?.agent).toBe("build")
+    expect(restored?.model).toMatchObject({ providerID: "test", id: "model-nested", variant: "fast" } as any)
+    expect(restored?.time.updated).toBeGreaterThanOrEqual(11)
   })
 
   test("rebuilds session metadata from session.created when meta.yaml is missing", async () => {

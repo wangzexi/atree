@@ -163,6 +163,10 @@ function timestampValue(value: unknown, fallback: number) {
   return fallback
 }
 
+function eventData(entry: Record<string, unknown>) {
+  return isRecord(entry.data) ? entry.data : entry
+}
+
 function modelRef(value: unknown): SessionInfo["model"] | undefined {
   if (!isRecord(value) || typeof value.providerID !== "string") return
   const id = typeof value.id === "string" ? value.id : typeof value.modelID === "string" ? value.modelID : undefined
@@ -450,11 +454,12 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       continue
     }
     const type = baseEventType(entry.type)
-    if (type === "session.next.agent.switched" && typeof entry.agent === "string") {
-      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+    const data = eventData(entry)
+    if (type === "session.next.agent.switched" && typeof data.agent === "string") {
+      const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
       next = {
         ...next,
-        agent: entry.agent,
+        agent: data.agent,
         time: {
           ...next.time,
           updated: Math.max(next.time.updated, updated),
@@ -463,9 +468,9 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       continue
     }
     if (type === "session.next.model.switched") {
-      const model = modelRef(entry.model)
+      const model = modelRef(data.model)
       if (!model) continue
-      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
       next = {
         ...next,
         model,
@@ -477,8 +482,8 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       continue
     }
     if (type === "session.next.moved") {
-      const location = isRecord(entry.location) ? entry.location : undefined
-      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      const location = isRecord(data.location) ? data.location : undefined
+      const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
       next = {
         ...next,
         // The containing directory stays authoritative so copied atree
@@ -487,7 +492,7 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
           typeof location?.workspaceID === "string"
             ? (location.workspaceID as SessionInfo["workspaceID"])
             : next.workspaceID,
-        path: typeof entry.subdirectory === "string" ? entry.subdirectory : next.path,
+        path: typeof data.subdirectory === "string" ? data.subdirectory : next.path,
         time: {
           ...next.time,
           updated: Math.max(next.time.updated, updated),
@@ -496,7 +501,7 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       continue
     }
     if (type === "session.diff") {
-      const summary = diffSummary(entry.diff)
+      const summary = diffSummary(data.diff)
       if (!summary) continue
       next = {
         ...next,
@@ -508,8 +513,9 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       }
       continue
     }
-    if (type !== "session.updated" || !isRecord(entry.patch)) continue
-    const patch = entry.patch
+    if (type !== "session.updated") continue
+    const patch = isRecord(data.patch) ? data.patch : isRecord(data.info) ? data.info : undefined
+    if (!patch) continue
     const time = { ...next.time }
     if (isRecord(patch.time) && "archived" in patch.time) {
       const archived = patch.time.archived

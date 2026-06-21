@@ -333,18 +333,34 @@ describe("atree file-backed SessionV2 discovery", () => {
               time: { created: 5, updated: 110 },
             },
           },
+          {
+            version: 1,
+            at: 130,
+            type: "session.updated",
+            sessionID,
+            data: {
+              info: {
+                title: "Nested JSONL info",
+                agent: "review",
+                model: { providerID: "nested-provider", id: "nested-model", variant: "accurate" },
+                cost: 2.5,
+                tokens: { input: 11, output: 22, reasoning: 4, cache: { read: 6, write: 7 } },
+                time: { updated: 125 },
+              },
+            },
+          },
         ]),
       )
 
       const restored = yield* Effect.promise(() => readSessionStore(node, sessionID))
 
-      expect(restored?.title).toBe("JSONL info")
-      expect(restored?.agent).toBe("build" as any)
-      expect(restored?.model).toMatchObject({ providerID: "test-provider", id: "test-model", variant: "fast" } as any)
-      expect(restored?.cost).toBe(1.25)
-      expect(restored?.tokens).toEqual({ input: 10, output: 20, reasoning: 3, cache: { read: 4, write: 5 } })
+      expect(restored?.title).toBe("Nested JSONL info")
+      expect(restored?.agent).toBe("review" as any)
+      expect(restored?.model).toMatchObject({ providerID: "nested-provider", id: "nested-model", variant: "accurate" } as any)
+      expect(restored?.cost).toBe(2.5)
+      expect(restored?.tokens).toEqual({ input: 11, output: 22, reasoning: 4, cache: { read: 6, write: 7 } })
       expect(DateTime.toEpochMillis(restored!.time.created)).toBe(5)
-      expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(120)
+      expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(130)
     }),
   )
 
@@ -414,6 +430,20 @@ describe("atree file-backed SessionV2 discovery", () => {
         appendSessionJsonl(node, sessionID, [
           {
             version: 1,
+            at: 80,
+            type: "session.next.agent.switched",
+            sessionID,
+            data: { agent: "build", timestamp: 80 },
+          },
+          {
+            version: 1,
+            at: 85,
+            type: "session.next.model.switched",
+            sessionID,
+            data: { model: { providerID: "switch-provider", modelID: "switch-model", variant: "fast" }, timestamp: 85 },
+          },
+          {
+            version: 1,
             at: 100,
             type: "session.next.moved",
             sessionID,
@@ -429,6 +459,8 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(restored?.location.directory).toBe(node as any)
       expect(restored?.location.workspaceID).toBe("wrk_core_moved" as any)
       expect(restored?.subpath).toBe("copied" as any)
+      expect(restored?.agent).toBe("build" as any)
+      expect(restored?.model).toMatchObject({ providerID: "switch-provider", id: "switch-model", variant: "fast" } as any)
       expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(90)
     }),
   )

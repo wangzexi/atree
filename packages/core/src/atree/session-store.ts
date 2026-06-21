@@ -104,11 +104,12 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
       continue
     }
     const type = baseEventType(entry.type)
-    if (type === "session.next.agent.switched" && typeof entry.agent === "string") {
-      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+    const data = eventData(entry)
+    if (type === "session.next.agent.switched" && typeof data.agent === "string") {
+      const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
       next = SessionSchema.Info.make({
         ...next,
-        agent: AgentV2.ID.make(entry.agent),
+        agent: AgentV2.ID.make(data.agent),
         time: {
           ...next.time,
           updated: DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(next.time.updated), updated)),
@@ -117,9 +118,9 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
       continue
     }
     if (type === "session.next.model.switched") {
-      const model = modelRef(entry.model)
+      const model = modelRef(data.model)
       if (!model) continue
-      const updated = timestampValue(entry.timestamp, typeof entry.at === "number" ? entry.at : 0)
+      const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
       next = SessionSchema.Info.make({
         ...next,
         model,
@@ -131,7 +132,6 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
       continue
     }
     if (type === "session.next.moved") {
-      const data = eventData(entry)
       const location = isRecord(data.location) ? data.location : undefined
       const updated = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
       next = SessionSchema.Info.make({
@@ -152,7 +152,7 @@ async function applySessionUpdatedEvents(info: SessionSchema.Info) {
       continue
     }
     if (type !== "session.updated") continue
-    const patch = isRecord(entry.patch) ? entry.patch : isRecord(entry.info) ? entry.info : undefined
+    const patch = isRecord(data.patch) ? data.patch : isRecord(data.info) ? data.info : undefined
     if (!patch) continue
     const time = { ...next.time }
     if (isRecord(patch.time)) {

@@ -221,6 +221,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。
 - core `SessionV2.create` 在真实可写目录下会先写 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl` 的 `session.created`，再发布 Created 事件刷新 SQLite projector；不可写的虚拟目录仍保留 best-effort 兼容行为。因此新会话的目录事实源不再晚于全局投影。
 - core 读取 file-backed session 时会从 `session.updated` JSONL 重放 `title`、`agent`、`model`、`cost`、`tokens`、`projectID`、`parentID`、`workspaceID`、`subpath/path` 和时间字段；即使 `meta.yaml` 是陈旧投影，core 层也会以目录事件流为准。
+- core/opencode 的会话元数据 replay 同时兼容目录事件的顶层字段形态和原始 EventV2 `data` 嵌套形态；后续把更多 EventV2 原始日志搬进 `session.jsonl` 时，不需要先把字段拍平成专用格式。
 - question/permission 的 asked/replied/rejected 事件会尽力追加到当前会话目录的 `session.jsonl`；dispose/reload 导致的 pending 取消也会记录为 rejected/reject。这些请求仍然是运行时 pending 状态，但会话里发生过的澄清问题和权限决策已经会随目录一起复制、归档和读取。
 - opencode `session.error` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`；显式 event location 优先，缺失时再回退当前 instance 或服务端记录的 atree root。
 - opencode `command.executed` 事件也会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`，让通过 slash/command 入口触发过的命令成为目录会话原始记录的一部分。
