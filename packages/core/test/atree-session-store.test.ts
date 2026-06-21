@@ -622,6 +622,42 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("prefers the persisted root copy over a still-valid SQLite directory row", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => mkdir(target, { recursive: true }))
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_store_root_copy")
+      yield* sessions.create({
+        id: sessionID,
+        location: Location.Ref.make({ directory: AbsolutePath.make(source) }),
+      })
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target root copy",
+          createdAt: 100,
+          updatedAt: 300,
+        }),
+      )
+
+      const loaded = yield* sessions.get(sessionID)
+
+      expect(loaded.title).toBe("Target root copy")
+      expect(loaded.location.directory).toBe(AbsolutePath.make(yield* Effect.promise(() => realpath(target))))
+    }),
+  )
+
   it.effect("reads file-backed session.jsonl messages through v2 APIs", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

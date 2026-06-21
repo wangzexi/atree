@@ -39,18 +39,18 @@ export const layer = Layer.effect(
     const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (sessionID: SessionSchema.ID) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
       const cached = row ? fromRow(row) : undefined
-      if (cached) {
-        const fileSession = yield* Effect.promise(() => readSessionStore(cached.location.directory, sessionID)).pipe(
-          Effect.catchCause(() => Effect.succeed(undefined)),
-        )
-        if (fileSession) return fileSession
-      }
       const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
       if (root) {
         const fileSession = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
           Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
+        )
+        if (fileSession) return fileSession
+      }
+      if (cached) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(cached.location.directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileSession) return fileSession
       }

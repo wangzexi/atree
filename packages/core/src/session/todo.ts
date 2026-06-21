@@ -45,6 +45,15 @@ export const layer = Layer.effect(
     const events = yield* EventV2.Service
 
     const fileSession = Effect.fn("SessionTodo.fileSession")(function* (sessionID: SessionSchema.ID) {
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (root) {
+        const session = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (session) return session
+      }
       const row = yield* db
         .select({ directory: SessionTable.directory })
         .from(SessionTable)
@@ -57,13 +66,6 @@ export const layer = Layer.effect(
         )
         if (session) return session
       }
-      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
-      if (!root) return
-      return yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
-        Effect.catchCause(() => Effect.succeed(undefined)),
-      )
     })
 
     const update = Effect.fn("SessionTodo.update")(function* (input: {

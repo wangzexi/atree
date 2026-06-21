@@ -246,12 +246,13 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionStore.context` 会先保持现有 SQLite 投影语义；当 SQLite 没有上下文消息、但能定位到 file-backed session 且 `session.jsonl` 可恢复出消息时，才从目录恢复上下文。这样可以覆盖“只有目录文件、没有全局投影”的恢复场景，同时不改变 runner 当前依赖的 pending/promotion/epoch 行为；`runnerContext` 的 baseline/compaction 语义暂时仍保持 SQLite 路径。
 - core `SessionStore.runnerContext` 也具备同样的无投影 fallback：SQLite runner 上下文为空时，会从目录 `session.jsonl` 恢复消息；当前 runner 主循环仍直接使用 SQLite `SessionHistory.entriesForRunner`，后续迁移需要单独处理 baseline/epoch。
 - core `SessionStore.message` 会优先从持久化 atree root 的 file-backed sessions 查找对应 `session.jsonl` 消息；只有目录事实源没有这条消息时才回退现有 SQLite 单条消息查询，避免同 message id 的陈旧全局投影盖过目录记录。
+- core `SessionStore.get/context/runnerContext` 和 `SessionTodo` 的无显式目录读取会优先扫描持久化 atree root；只有当前 root 内找不到对应会话时，才回退 SQLite 中仍有效的旧目录缓存。这样复制 `.agents/atree/` 后，当前 root 副本不会被旧绝对路径压过。
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
 - core `SessionTodo` 会在能定位到 file-backed session 时把 todo 状态镜像到同一会话目录的 `todo.json`，读取时目录状态优先；即使 SQLite todo 投影缺失，也能从目录恢复。
 - core `SessionTodo` 的文件态行为已经和 opencode 侧保持一致：写入 todo 时会确保 `session.jsonl` / `assets/` 骨架存在，读取旧 `extensions/todo/state.json` 作为迁移兼容，重写该会话 todo 后会从旧扩展状态中移除对应 session，并推进会话 `meta.yaml` 的更新时间。
 - core 和 opencode 的 todo 更新会先追加到当前会话目录的 `session.jsonl`，再刷新 SQLite/`todo.json` 投影；当会话目录的 `todo.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `todo.updated` 事件时，todo store 可以从最近一条事件恢复当前 todo 状态，并保留“显式空 todo”和“缺失 todo 状态”的区别。
 - todo/schedule 的无显式目录解析不再直接信任 SQLite 中缓存的 `SessionTable.directory`；只有该目录仍能读到对应 `meta.yaml` 时才接受，否则继续从当前 instance 或持久化 root 查找真实 file-backed session。
-- opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、仍有效的 SQLite 缓存目录、持久化 atree root 扫描。复制或移动 `.agents/atree/` 后，如果旧 SQLite 目录已经失效，相关读写会继续定位到当前目录事实源。
+- opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、持久化 atree root 扫描、最后才回退仍有效的 SQLite 缓存目录。复制 `.agents/atree/` 到当前 root 后，即使旧 SQLite 目录仍然存在，相关读写也会优先定位到当前 root 内的目录事实源。
 - core `ToolOutputStore` 在能通过 `SessionStore` 定位到 file-backed session 时，会把超长工具输出写入该会话的 `assets/tool-output/`；不能定位会话目录时仍回退到全局 `tool-output`，保持旧链路兼容。
 - opencode V1 工具截断链路也会携带当前 `sessionID`：普通工具、插件工具、shell 输出和 session tools 的超长输出会优先写入 `.agents/atree/sessions/<session-id>/assets/tool-output/`；缺少会话或 instance 上下文时仍回退全局 `tool-output`。
 - plan 文件不再写入全局 `plans/` 或 git 项目的 `.opencode/plans/`，而是统一写入当前会话的 `assets/plans/`。plan agent 默认权限已经允许编辑会话内 `assets/plans/*.md`。

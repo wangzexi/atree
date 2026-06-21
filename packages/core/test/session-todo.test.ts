@@ -3,6 +3,7 @@ import { asc, eq } from "drizzle-orm"
 import { DateTime, Effect, Layer } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Global } from "@opencode-ai/core/global"
 import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { readSessionTodoProjection } from "@opencode-ai/core/atree/todo-store"
 import { Project } from "@opencode-ai/core/project"
@@ -12,7 +13,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
 import { testEffect } from "./lib/effect"
-import { mkdir, mkdtemp, readFile, rm } from "fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 
@@ -152,6 +153,87 @@ describe("SessionTodo", () => {
         todos: state,
       })
       expect(yield* todos.get(fileSessionID)).toEqual(state)
+    }),
+  )
+
+  it.effect("prefers todo state from the persisted root copy over a still-valid SQLite directory row", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+      yield* Effect.promise(() => mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => mkdir(target, { recursive: true }))
+
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_root_copy")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(source), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo-root-copy",
+          directory: source,
+          title: "source todo",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sourceSession = {
+        id: fileSessionID,
+        projectID: Project.ID.global,
+        title: "source todo",
+        location: { directory: AbsolutePath.make(source) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }
+      const targetSession = {
+        ...sourceSession,
+        title: "target todo",
+        location: { directory: AbsolutePath.make(target) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(2) },
+      }
+      yield* Effect.promise(() => writeSessionStore(sourceSession))
+      yield* Effect.promise(() => writeSessionStore(targetSession))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(sourceSession, {
+          type: "todo.updated",
+          sessionID: fileSessionID,
+          todos: [{ content: "source todo", status: "pending", priority: "low" }],
+        }),
+      )
+      const targetTodos = [{ content: "target todo", status: "in_progress", priority: "high" }]
+      yield* Effect.promise(() =>
+        appendSessionJsonl(targetSession, {
+          type: "todo.updated",
+          sessionID: fileSessionID,
+          todos: targetTodos,
+        }),
+      )
+
+      expect(yield* todos.get(fileSessionID)).toEqual(targetTodos)
     }),
   )
 

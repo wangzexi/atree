@@ -40,6 +40,16 @@ export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function
     : yield* tryDirectory(input.instanceDirectory)
   if (instance) return instance
 
+  const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+    Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+  )
+  if (state.rootDirectory) {
+    const found = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, input.sessionID)).pipe(
+      Effect.catchCause(() => Effect.succeed(undefined)),
+    )
+    if (found) return found
+  }
+
   const row = yield* db
     .select({ directory: SessionTable.directory })
     .from(SessionTable)
@@ -48,10 +58,4 @@ export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function
     .pipe(Effect.orDie)
   const cached = yield* tryDirectory(row?.directory)
   if (cached) return cached
-
-  const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-    Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-  )
-  if (!state.rootDirectory) return
-  return yield* Effect.promise(() => findSessionStore(state.rootDirectory!, input.sessionID))
 })
