@@ -224,6 +224,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `SessionV2.switchModel` 会先把 `session.next.model.switched` 追加到当前会话目录的 `session.jsonl`，再发布 EventV2 事件；读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，让目录里的事件流能恢复当前 agent/model，而不是只恢复一条展示消息。
+- core `SessionV2.interrupt` 会把 `session.next.interrupt.requested` 镜像到当前会话目录的 `session.jsonl`，同时保留原有 EventV2 seq 传给 execution 的控制语义。
 - core runner 的 LLM 事件 publisher 在真实 file-backed session 上会把 provider turn 产生的 step/text/reasoning/tool 事件 best-effort 镜像到同一会话目录的 `session.jsonl`；EventV2/SQLite projector 仍是运行时投影，但模型回复和工具调用原始事件已经开始随目录一起落地。
 - core runner 里绕过 publisher 的失败路径也会带当前 session：中断未完成工具、LLM step failed，以及 provider context overflow 后触发的 compaction recovery 都会继续写回当前会话目录，而不是只写全局 EventV2/SQLite。
 - core compaction 会把 `session.next.compaction.started/ended` best-effort 镜像到当前会话目录的 `session.jsonl`，让压缩摘要也能随目录文件恢复。

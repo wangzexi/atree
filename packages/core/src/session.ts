@@ -29,6 +29,7 @@ import { logFailure } from "./session/logging"
 import { MessageDecodeError } from "./session/error"
 import { SessionEvent } from "./session/event"
 import { SessionInput } from "./session/input"
+import { publishSessionEvent } from "./session/publish-session-event"
 import {
   appendSessionJsonl,
   appendPromptJsonl,
@@ -640,10 +641,16 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             const session = yield* store.get(sessionID)
             if (!session) return yield* execution.interrupt(sessionID)
-            const event = yield* events.publish(SessionEvent.InterruptRequested, {
-              sessionID,
-              timestamp: yield* DateTime.now,
-            })
+            const event = yield* publishSessionEvent(
+              events,
+              { sessionID, session },
+              SessionEvent.InterruptRequested,
+              {
+                sessionID,
+                timestamp: yield* DateTime.now,
+              },
+              "interrupt request event",
+            )
             if (event.seq === undefined)
               return yield* Effect.die("Interrupt request event is missing aggregate sequence")
             yield* execution.interrupt(sessionID, event.seq)
