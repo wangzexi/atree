@@ -14,6 +14,7 @@ import { TestConfig } from "../fixture/config"
 import { provideInstance, testInstanceStoreLayer, tmpdirScoped } from "../fixture/fixture"
 import { SessionID } from "@/session/schema"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 
 const FIXTURES_DIR = path.join(import.meta.dir, "fixtures")
 const ROOT = path.resolve(import.meta.dir, "..", "..")
@@ -210,6 +211,20 @@ describe("Truncate", () => {
       Effect.gen(function* () {
         const directory = yield* tmpdirScoped()
         const sessionID = "ses_truncate_assets" as SessionID
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "truncate-assets",
+            version: "test",
+            projectID: "global" as never,
+            directory,
+            path: ".",
+            title: "Truncate assets",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 1 },
+          } as never),
+        )
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
         const result = yield* svc.output(lines, { maxLines: 10, sessionID }).pipe(provideInstance(directory))
@@ -219,6 +234,43 @@ describe("Truncate", () => {
         expect(result.outputPath).toContain(path.join(directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"))
         const fsys = yield* FSUtil.Service
         expect(yield* fsys.readFileString(result.outputPath)).toBe(lines)
+      }),
+    )
+
+    instanceIt.live("writes nested session output to the nested session assets directory", () =>
+      Effect.gen(function* () {
+        const root = yield* tmpdirScoped()
+        const nodeDirectory = path.join(root, "node")
+        const fs = yield* FileSystem.FileSystem
+        yield* fs.makeDirectory(nodeDirectory, { recursive: true })
+        const sessionID = "ses_nested_truncate_assets" as SessionID
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "nested-truncate-assets",
+            version: "test",
+            projectID: "global" as never,
+            directory: nodeDirectory,
+            path: ".",
+            title: "Nested truncate assets",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 1 },
+          } as never),
+        )
+        const svc = yield* Truncate.Service
+        const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
+        const result = yield* svc.output(lines, { maxLines: 10, sessionID }).pipe(provideInstance(root))
+
+        expect(result.truncated).toBe(true)
+        if (!result.truncated) throw new Error("expected truncated")
+        expect(result.outputPath).toContain(
+          path.join(nodeDirectory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"),
+        )
+        expect(yield* fs.exists(path.join(root, ".agents", "atree", "sessions", sessionID))).toBe(false)
+        const fsys = yield* FSUtil.Service
+        expect(yield* fsys.readFileString(result.outputPath)).toBe(lines)
+        expect((yield* Effect.promise(() => readSessionStore(nodeDirectory, sessionID)))?.time.updated).toBe(1)
       }),
     )
 

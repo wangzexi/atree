@@ -6,11 +6,13 @@ import type { Agent } from "../agent/agent"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { evaluate } from "@/permission/evaluate"
 import { Config } from "@/config/config"
+import { Database } from "@opencode-ai/core/database/database"
 import { Identifier } from "../id/id"
 import { ToolID } from "./schema"
 import { TRUNCATION_DIR } from "./truncation-dir"
 import { InstanceState } from "@/effect/instance-state"
-import { ensureSessionPayloadFilesByID } from "@/atree/session-store"
+import { ensureSessionPayloadFilesByID, findSessionStore } from "@/atree/session-store"
+import { resolveFileSession } from "@/atree/session-resolver"
 import type { SessionID } from "@/session/schema"
 
 const RETENTION = Duration.days(7)
@@ -63,11 +65,21 @@ export const layer = Layer.effect(
       const sessionID = options?.sessionID
       if (!sessionID) return TRUNCATION_DIR
       const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      if (!ctx) return TRUNCATION_DIR
-      yield* Effect.promise(() => ensureSessionPayloadFilesByID(ctx.directory, sessionID)).pipe(
+      const database = yield* Effect.serviceOption(Database.Service)
+      const session = Option.isSome(database)
+        ? yield* resolveFileSession(database.value.db, { sessionID, instanceDirectory: ctx?.directory }).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+        : ctx
+          ? yield* Effect.promise(() => findSessionStore(ctx.directory, sessionID)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+          : undefined
+      if (!session) return TRUNCATION_DIR
+      yield* Effect.promise(() => ensureSessionPayloadFilesByID(session.directory, sessionID)).pipe(
         Effect.catchCause(() => Effect.void),
       )
-      return path.join(ctx.directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output")
+      return path.join(session.directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output")
     })
 
     const cleanup = Effect.fn("Truncate.cleanup")(function* () {
