@@ -56,6 +56,10 @@ const awaitDeferred = <T>(deferred: Deferred.Deferred<T>, message: string) =>
 
 const remove = (id: SessionID) => SessionNs.use.remove(id)
 
+test("does not expose a top-level SQLite-only global session list bypass", () => {
+  expect((SessionNs as unknown as { listGlobal?: unknown }).listGlobal).toBeUndefined()
+})
+
 describe("Session.plan", () => {
   test("stores non-VCS plans inside the session assets directory", () => {
     const sessionID = "ses_plan_assets" as SessionID
