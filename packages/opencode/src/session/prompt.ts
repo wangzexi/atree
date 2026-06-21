@@ -7,6 +7,7 @@ import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
 import { Session } from "./session"
+import { appendSessionJsonl } from "@/atree/session-store"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
 
@@ -709,12 +710,23 @@ export const layer = Layer.effect(
       }
 
       if (currentAgent !== info.agent) {
-        yield* events.publish(SessionEvent.AgentSwitched, {
+        const data = {
           sessionID: input.sessionID,
           messageID: SessionMessage.ID.create(),
           timestamp: DateTime.makeUnsafe(info.time.created),
           agent: info.agent,
-        })
+        }
+        yield* Effect.promise(() =>
+          appendSessionJsonl(input.session, { type: SessionEvent.AgentSwitched.type, ...data }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append agent switch event to atree session log", {
+              sessionID: input.sessionID,
+              cause,
+            }),
+          ),
+        )
+        yield* events.publish(SessionEvent.AgentSwitched, data)
       }
       const currentModelChanged =
         !currentModelValue ||
@@ -722,7 +734,7 @@ export const layer = Layer.effect(
         currentModelValue.id !== info.model.modelID ||
         (currentModelValue.variant === "default" ? undefined : currentModelValue.variant) !== info.model.variant
       if (currentModelChanged) {
-        yield* events.publish(SessionEvent.ModelSwitched, {
+        const data = {
           sessionID: input.sessionID,
           messageID: SessionMessage.ID.create(),
           timestamp: DateTime.makeUnsafe(info.time.created),
@@ -731,7 +743,18 @@ export const layer = Layer.effect(
             providerID: ProviderV2.ID.make(info.model.providerID),
             variant: ModelV2.VariantID.make(info.model.variant ?? "default"),
           },
-        })
+        }
+        yield* Effect.promise(() =>
+          appendSessionJsonl(input.session, { type: SessionEvent.ModelSwitched.type, ...data }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append model switch event to atree session log", {
+              sessionID: input.sessionID,
+              cause,
+            }),
+          ),
+        )
+        yield* events.publish(SessionEvent.ModelSwitched, data)
       }
 
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
