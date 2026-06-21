@@ -193,6 +193,55 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("uses the persisted atree root as the member source for unscoped v2 lists", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const stale = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-stale-")))
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_global_file",
+          title: "Core global file",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(stale), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make("ses_core_global_stale"),
+          project_id: Project.ID.global,
+          slug: "global-stale",
+          directory: AbsolutePath.make(stale),
+          title: "Stale global SQLite session",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sessions = yield* SessionV2.Service
+      const listed = yield* sessions.list({ limit: 10 })
+
+      expect(listed.map((session) => session.id)).toEqual([SessionV2.ID.make("ses_core_global_file")])
+      expect(listed[0]?.title).toBe("Core global file")
+    }),
+  )
+
   it.effect("excludes archived file-backed sessions from directory lists by default", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-archive-data-")))
