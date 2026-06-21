@@ -208,6 +208,7 @@ export const layer = Layer.effect(
         const projection = yield* Effect.promise(() => readSessionTodoProjection(directory, sessionID))
         if (projection.hasState) return projection.todos
       }
+      if (options?.directory) return []
 
       const rows = yield* db
         .select()

@@ -95,6 +95,36 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.instance("does not read explicit directory todos from stale database rows", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const todo = yield* Todo.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+      const session = yield* sessions.create({ title: "todo-cached-only" })
+
+      yield* todo.update({
+        sessionID: session.id,
+        todos: [{ content: "stale explicit todo", status: "pending", priority: "low" }],
+      })
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", session.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const rows = yield* db
+        .select()
+        .from(TodoTable)
+        .where(eq(TodoTable.session_id, session.id))
+        .all()
+        .pipe(Effect.orDie)
+      expect(rows).toHaveLength(1)
+      expect(yield* todo.get(session.id, { directory: instance.directory })).toEqual([])
+    }),
+  )
+
   it.instance("reads todo state for a file-backed session without a database row", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service
