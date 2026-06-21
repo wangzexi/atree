@@ -22,6 +22,7 @@ import {
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
+  readSessionStoresDeep,
   writeSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
@@ -515,7 +516,11 @@ export interface Interface {
     workspaceID?: WorkspaceV2.ID
     directory?: string
   }) => Effect.Effect<Info>
-  readonly fork: (input: { sessionID: SessionID; messageID?: MessageID; directory?: string }) => Effect.Effect<Info, NotFound>
+  readonly fork: (input: {
+    sessionID: SessionID
+    messageID?: MessageID
+    directory?: string
+  }) => Effect.Effect<Info, NotFound>
   readonly touch: (sessionID: SessionID, options?: DirectoryOption) => Effect.Effect<void>
   readonly get: (id: SessionID, options?: DirectoryOption) => Effect.Effect<Info, NotFound>
   readonly setTitle: (input: { sessionID: SessionID; title: string } & DirectoryOption) => Effect.Effect<void>
@@ -714,9 +719,7 @@ export const layer: Layer.Layer<
       }
       if (!directoryHint && cached?.directory) {
         const cachedFileSession = yield* Effect.promise(() => readSessionStore(cached.directory, id)).pipe(
-          Effect.catchCause(() =>
-            Effect.succeed<Awaited<ReturnType<typeof readSessionStore>>>(undefined),
-          ),
+          Effect.catchCause(() => Effect.succeed<Awaited<ReturnType<typeof readSessionStore>>>(undefined)),
         )
         if (cachedFileSession) {
           const merged = mergeFileSession(cached, localizeFileSession(cachedFileSession, ctx))
@@ -771,6 +774,26 @@ export const layer: Layer.Layer<
         .slice(0, input.limit ?? 100)
     })
 
+    const mergeAtreePathIndex = Effect.fn("Session.mergeAtreePathIndex")(function* (
+      items: Info[],
+      input?: ListInput,
+      ctx?: InstanceContext,
+    ) {
+      if (!input?.path || !ctx?.worktree) return items
+      const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(ctx.worktree))
+      const byID = new Map<string, Info>()
+      for (const item of items) byID.set(item.id, item)
+      for (const fileSession of fileSessions) {
+        const item = localizeFileSession(fileSession, ctx)
+        byID.delete(item.id)
+        if (!matchesListInput(item, input)) continue
+        byID.set(item.id, item)
+      }
+      return [...byID.values()]
+        .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+        .slice(0, input.limit ?? 100)
+    })
+
     const list = Effect.fn("Session.list")(function* (input?: ListInput) {
       const ctx = yield* InstanceState.context
       const items = yield* listByProject(db, {
@@ -778,7 +801,8 @@ export const layer: Layer.Layer<
         experimentalWorkspaces: flags.experimentalWorkspaces,
         ...input,
       })
-      return yield* mergeAtreeDirectoryIndex(items, input, ctx)
+      const withDirectory = yield* mergeAtreeDirectoryIndex(items, input, ctx)
+      return yield* mergeAtreePathIndex(withDirectory, input, ctx)
     })
 
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {
@@ -1151,11 +1175,7 @@ export const layer: Layer.Layer<
       permission: PermissionV1.Ruleset
       directory?: string
     }) {
-      yield* recordSessionPatch(
-        input.sessionID,
-        { permission: [...input.permission] },
-        { directory: input.directory },
-      )
+      yield* recordSessionPatch(input.sessionID, { permission: [...input.permission] }, { directory: input.directory })
       yield* patch(
         input.sessionID,
         { permission: [...input.permission], time: { updated: Date.now() } },

@@ -7,7 +7,7 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cron } from "croner"
 import { desc, eq, inArray, sql as drizzleSql } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer, Option, Schema } from "effect"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
@@ -29,7 +29,7 @@ import {
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import { readWorkspaceState } from "@/atree/state"
-import { InstanceState } from "@/effect/instance-state"
+import { InstanceRef } from "@/effect/instance-ref"
 
 export const MAX_PER_SESSION = 1
 export const MIN_INTERVAL_MS = 60_000
@@ -242,7 +242,6 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
     const { db } = yield* Database.Service
-
     const timers = new Map<ID, Timer>()
     yield* Effect.addFinalizer(() =>
       Effect.sync(() => {
@@ -252,6 +251,8 @@ export const layer = Layer.effect(
         timers.clear()
       }),
     )
+
+    const currentInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 
     const clearRuntimeState = Effect.fn("Schedule.clearRuntimeState")(function* (sessionID: SessionID) {
       stopSessionTimers(timers, sessionID)
@@ -315,8 +316,7 @@ export const layer = Layer.effect(
           .pipe(Effect.orDie)
         yield* events.publish(Event.Ran, { scheduleID, sessionID, status: runStatus, ranAt })
         const timer = timers.get(scheduleID)
-        const nextRun =
-          timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
+        const nextRun = timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
         yield* appendScheduleSessionEventBestEffort(
           sessionID,
           {
@@ -420,7 +420,7 @@ export const layer = Layer.effect(
     })
 
     const upsertFileSessionCache = Effect.fn("Schedule.upsertFileSessionCache")(function* (session: FileSession) {
-      const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      const ctx = yield* currentInstance
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
       const projectID = ctx?.project.id ?? session.projectID
       yield* ensureFileSessionProject({ ...session, projectID })
@@ -467,10 +467,12 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
-      const directory = yield* InstanceState.directory.pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
-      const session = yield* resolveFileSession(db, { sessionID, directory: fallbackDirectory, instanceDirectory: directory })
+      const directory = (yield* currentInstance)?.directory
+      const session = yield* resolveFileSession(db, {
+        sessionID,
+        directory: fallbackDirectory,
+        instanceDirectory: directory,
+      })
       if (session) {
         yield* upsertFileSessionCache(session)
         return session.directory
@@ -490,10 +492,12 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       fallbackDirectory?: string,
     ) {
-      const directory = yield* InstanceState.directory.pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
-      const session = yield* resolveFileSession(db, { sessionID, directory: fallbackDirectory, instanceDirectory: directory })
+      const directory = (yield* currentInstance)?.directory
+      const session = yield* resolveFileSession(db, {
+        sessionID,
+        directory: fallbackDirectory,
+        instanceDirectory: directory,
+      })
       if (session) {
         yield* upsertFileSessionCache(session)
         return { directory: session.directory, archived: session.time.archived !== undefined }
@@ -656,8 +660,10 @@ export const layer = Layer.effect(
         sessionID,
         message,
       })
-      const status = yield* SessionStatus.Service
-      const sessionStatus = yield* status.get(sessionID)
+      const statusService = yield* Effect.serviceOption(SessionStatus.Service)
+      const sessionStatus = Option.isSome(statusService)
+        ? yield* statusService.value.get(sessionID)
+        : { type: "idle" as const }
       const ranAt = Date.now()
       if (sessionStatus.type === "busy") {
         yield* recordRun(scheduleID, sessionID, "skipped", ranAt, { directory: directoryHint })
@@ -667,8 +673,15 @@ export const layer = Layer.effect(
         return
       }
       const { SessionPrompt } = yield* Effect.promise(() => import("./prompt"))
-      const prompt = yield* SessionPrompt.Service
-      yield* prompt
+      const promptService = yield* Effect.serviceOption(SessionPrompt.Service)
+      if (Option.isNone(promptService)) {
+        yield* recordRun(scheduleID, sessionID, "skipped", ranAt, { directory: directoryHint })
+        if (kind === "once") {
+          yield* completeOnce(scheduleID, sessionID, directoryHint)
+        }
+        return
+      }
+      yield* promptService.value
         .prompt({
           sessionID,
           directory: directoryHint,
@@ -839,7 +852,11 @@ export const layer = Layer.effect(
             timers.delete(id)
           }
         }
-        yield* db.delete(ScheduleRunTable).where(inArray(ScheduleRunTable.schedule_id, staleIDs)).run().pipe(Effect.orDie)
+        yield* db
+          .delete(ScheduleRunTable)
+          .where(inArray(ScheduleRunTable.schedule_id, staleIDs))
+          .run()
+          .pipe(Effect.orDie)
         yield* db.delete(ScheduleTable).where(inArray(ScheduleTable.id, staleIDs)).run().pipe(Effect.orDie)
       }
       if (wantedIDs.size === 0) {

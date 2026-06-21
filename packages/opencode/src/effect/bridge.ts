@@ -55,8 +55,9 @@ export function make(): Effect.Effect<Shape> {
   return Effect.gen(function* () {
     const ctx = yield* Effect.context()
     const captured = captureSync()
-    const instance = (yield* InstanceRef) ?? captured.instance
-    const workspace = (yield* WorkspaceRef) ?? captured.workspace
+    const instance = (yield* InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))) ?? captured.instance
+    const workspace =
+      (yield* WorkspaceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))) ?? captured.workspace
     const wrap = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       attachWith(effect.pipe(Effect.provide(ctx)) as Effect.Effect<A, E, never>, { instance, workspace })
 

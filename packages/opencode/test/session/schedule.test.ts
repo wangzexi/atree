@@ -42,7 +42,11 @@ const promptLayer = Layer.effect(
 
 const events = EventV2Bridge.defaultLayer
 const status = SessionStatus.layer.pipe(Layer.provideMerge(events))
-const schedule = Schedule.layer.pipe(Layer.provideMerge(events))
+const schedule = Schedule.layer.pipe(
+  Layer.provideMerge(promptLayer),
+  Layer.provideMerge(status),
+  Layer.provideMerge(events),
+)
 
 const testLayer = Layer.mergeAll(promptLayer, events, status, schedule).pipe(Layer.provideMerge(Database.defaultLayer))
 

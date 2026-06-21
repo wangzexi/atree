@@ -16,6 +16,9 @@ import { Context, Effect, Layer } from "effect"
 
 export class Service extends Context.Service<Service, EventV2.Interface>()("@opencode/EventV2Bridge") {}
 
+const optionalInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+const optionalWorkspace = WorkspaceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -24,9 +27,9 @@ export const layer = Layer.effect(
     const publish: EventV2.Interface["publish"] = (definition, data, options) =>
       Effect.gen(function* () {
         if (options?.location) return yield* events.publish(definition, data, options)
-        const ctx = yield* InstanceRef
+        const ctx = yield* optionalInstance
         if (!ctx) return yield* events.publish(definition, data, options)
-        const workspaceID = yield* WorkspaceRef
+        const workspaceID = yield* optionalWorkspace
         return yield* events.publish(definition, data, {
           ...options,
           location: new Location.Info({
@@ -39,8 +42,8 @@ export const layer = Layer.effect(
 
     const unsubscribe = yield* events.listen((event) =>
       Effect.gen(function* () {
-        const ctx = yield* InstanceRef
-        const workspaceID = (yield* WorkspaceRef) ?? event.location?.workspaceID
+        const ctx = yield* optionalInstance
+        const workspaceID = (yield* optionalWorkspace) ?? event.location?.workspaceID
         if (event.type === "session.error") {
           const data = event.data as Record<string, unknown>
           if (typeof data.sessionID === "string") {

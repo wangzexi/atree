@@ -65,18 +65,20 @@ export const layer = Layer.effect(
     const state = yield* InstanceState.make(
       Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
     )
+    const fallbackState = new Map<SessionID, Info>()
+    const currentState = InstanceState.get(state).pipe(Effect.catchCause(() => Effect.succeed(fallbackState)))
 
     const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID) {
-      const data = yield* InstanceState.get(state)
+      const data = yield* currentState
       return data.get(sessionID) ?? { type: "idle" as const }
     })
 
     const list = Effect.fn("SessionStatus.list")(function* () {
-      return new Map(yield* InstanceState.get(state))
+      return new Map(yield* currentState)
     })
 
     const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
-      const data = yield* InstanceState.get(state)
+      const data = yield* currentState
       yield* events.publish(Event.Status, { sessionID, status })
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })
