@@ -712,6 +712,9 @@ export const layer: Layer.Layer<
         yield* syncFileSessionCache(merged)
         return merged
       }
+      if (directoryHint) {
+        return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+      }
       if (!cached) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
       return cached
     })
