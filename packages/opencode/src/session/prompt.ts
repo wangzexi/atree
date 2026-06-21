@@ -84,6 +84,10 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
+function sameDirectory(left: string, right: string) {
+  return path.resolve(left) === path.resolve(right)
+}
+
 export interface Interface {
   readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
@@ -642,7 +646,7 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.id, session.id))
         .get()
         .pipe(Effect.orDie)
-      if (current?.model && current.directory === session.directory) {
+      if (current?.model && sameDirectory(current.directory, session.directory)) {
         return {
           providerID: ProviderV2.ID.make(current.model.providerID),
           modelID: ModelV2.ID.make(current.model.id),
@@ -682,8 +686,9 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.id, input.sessionID))
         .get()
         .pipe(Effect.orDie)
-      const currentAgent = current?.directory === input.session.directory ? current.agent : input.session.agent
-      const currentModelValue = current?.directory === input.session.directory ? current.model : input.session.model
+      const currentBelongsToSession = current && sameDirectory(current.directory, input.session.directory) ? current : undefined
+      const currentAgent = currentBelongsToSession ? currentBelongsToSession.agent : input.session.agent
+      const currentModelValue = currentBelongsToSession ? currentBelongsToSession.model : input.session.model
       const model = input.model ?? ag.model ?? (yield* currentModel(input.session))
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
