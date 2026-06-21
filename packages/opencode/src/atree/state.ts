@@ -21,6 +21,7 @@ export type TreeNode = {
 const MaxTreeDepth = 8
 const MaxTreeNodes = 2_000
 const IgnoredDirectories = new Set([
+  ".agents",
   ".git",
   ".hg",
   ".svn",

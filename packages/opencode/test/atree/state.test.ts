@@ -48,6 +48,7 @@ describe("atree workspace state", () => {
     const root = await tempdir("atree-state-tree-")
     await fs.mkdir(path.join(root, "inbox"), { recursive: true })
     await fs.mkdir(path.join(root, "archive", "nested"), { recursive: true })
+    await fs.mkdir(path.join(root, ".agents", "atree", "sessions"), { recursive: true })
     await fs.mkdir(path.join(root, "node_modules", "ignored"), { recursive: true })
     await fs.mkdir(path.join(root, ".git", "ignored"), { recursive: true })
 

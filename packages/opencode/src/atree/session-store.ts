@@ -93,6 +93,7 @@ function sessionRootByID(directory: string, sessionID: string) {
 const FindMaxDepth = 8
 const FindMaxNodes = 2_000
 const IgnoredDirectories = new Set([
+  ".agents",
   ".git",
   ".hg",
   ".svn",
