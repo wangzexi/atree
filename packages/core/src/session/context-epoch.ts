@@ -7,6 +7,7 @@ import { readSessionStore } from "../atree/session-store"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { Location } from "../location"
+import { ProjectTable } from "../project/sql"
 import { SystemContext } from "../system-context/index"
 import { ContextSnapshotDecodeError } from "./error"
 import { SessionEvent } from "./event"
@@ -201,6 +202,7 @@ const insert = Effect.fnUntraced(function* (
   agent: AgentV2.ID,
   generation: SystemContext.Generation,
 ) {
+  yield* ensurePlacedSession(db, sessionID, location)
   return yield* db
     .transaction(
       () =>
@@ -243,6 +245,80 @@ const insert = Effect.fnUntraced(function* (
         }),
       { behavior: "immediate" },
     )
+    .pipe(Effect.orDie)
+})
+
+const ensurePlacedSession = Effect.fnUntraced(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  location: Location.Ref,
+) {
+  const placed = yield* db
+    .select({ id: SessionTable.id })
+    .from(SessionTable)
+    .where(
+      and(
+        eq(SessionTable.id, sessionID),
+        eq(SessionTable.directory, location.directory),
+        location.workspaceID === undefined
+          ? isNull(SessionTable.workspace_id)
+          : eq(SessionTable.workspace_id, location.workspaceID),
+      ),
+    )
+    .get()
+    .pipe(Effect.orDie)
+  if (placed) return
+  const session = yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(undefined)),
+  )
+  if (!session) return
+  yield* db
+    .insert(ProjectTable)
+    .values({
+      id: session.projectID,
+      worktree: location.directory,
+      vcs: null,
+      name: null,
+      time_created: DateTime.toEpochMillis(session.time.created),
+      time_updated: DateTime.toEpochMillis(session.time.updated),
+      sandboxes: [],
+    } as typeof ProjectTable.$inferInsert)
+    .onConflictDoNothing()
+    .run()
+    .pipe(Effect.orDie)
+  const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  yield* db
+    .insert(SessionTable)
+    .values({
+      id: session.id,
+      project_id: session.projectID,
+      workspace_id: session.location.workspaceID ?? null,
+      parent_id: session.parentID ?? null,
+      slug: session.id,
+      directory: session.location.directory,
+      path: session.subpath ?? null,
+      title: session.title,
+      agent: session.agent ?? null,
+      model: session.model
+        ? {
+            id: session.model.id,
+            providerID: session.model.providerID,
+            variant: session.model.variant,
+          }
+        : null,
+      version: "core",
+      cost: session.cost ?? 0,
+      tokens_input: tokens.input,
+      tokens_output: tokens.output,
+      tokens_reasoning: tokens.reasoning,
+      tokens_cache_read: tokens.cache.read,
+      tokens_cache_write: tokens.cache.write,
+      time_created: DateTime.toEpochMillis(session.time.created),
+      time_updated: DateTime.toEpochMillis(session.time.updated),
+      time_archived: session.time.archived ? DateTime.toEpochMillis(session.time.archived) : null,
+    } as typeof SessionTable.$inferInsert)
+    .onConflictDoNothing()
+    .run()
     .pipe(Effect.orDie)
 })
 

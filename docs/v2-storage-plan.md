@@ -218,6 +218,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - opencode session 模块已删除旧的顶层 `listGlobal` 生成器；全局会话列表只保留 `Session.Service.listGlobal()` 这一条会合并目录事实源的路径，避免出现纯 SQLite 列表旁路。
 - Schedule 服务启动时会读取持久化 atree root，自动恢复 root 下 file-backed sessions 的 `schedule.json`/`session.jsonl` schedule 投影；即使没有 SQLite session row，目录里的自动化消息也会在服务重启后恢复到运行时缓存。
 - core `SessionTodo.update` 在找到 file-backed session 但没有 SQLite session row 时，会只写当前目录的 `todo.json` 和 `session.jsonl`，不再强行写 `TodoTable` 导致目录-only 会话被全局 DB 外键卡住。
+- core `SessionContextEpoch.prepare` 在只有 file-backed session、没有 SQLite session row 时，会从目录会话恢复一个可重建的运行时投影，再继续原有 epoch 流程；系统上下文更新仍会写回当前目录的 `session.jsonl`。
 - 工具执行上下文会携带当前 session 目录；schedule、todowrite、task 和 plan_exit 读取当前会话时会优先使用该目录，避免工具通过同 session id 的全局 SQLite 投影把状态写回旧目录。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
 - core `SessionContextEpoch.prepare` 产生的上下文更新事件会在保留原有 commit guard 的同时追加到当前目录会话的 `session.jsonl`；系统上下文变化不再只是全局 EventV2/SQLite 投影。
