@@ -210,6 +210,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - Summary diff/summarize 读取和写入也接受目录上下文；HTTP diff 会用解析出的当前 session 目录读取消息摘要，避免同 session id 的旧缓存目录影响 diff 展示。
 - Revert/unrevert 也接受目录上下文；HTTP revert/unrevert 会把当前 session 目录传给回滚链路，让 revert 状态、message/part 清理继续落在目录会话内。
 - Share/unshare 写入 share 元数据时也接受目录上下文；HTTP share/unshare 会把当前 session 目录传给 metadata 写入链路。
+- ShareNext 创建分享后的 full sync 也会继续使用显式目录上下文；复制 `.agents/atree/` 到目标目录后，首次分享同步出去的 session/messages 会来自目标目录事实源，而不是源目录或全局 SQLite 缓存。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。
 - core `SessionContextEpoch.prepare` 产生的上下文更新事件会在保留原有 commit guard 的同时追加到当前目录会话的 `session.jsonl`；系统上下文变化不再只是全局 EventV2/SQLite 投影。
 - plan/reminder 相关 synthetic 消息和 part 写入开始携带当前 session 目录上下文，避免 plan agent 切换、plan_exit 工具产生的内部消息落到错误目录。
