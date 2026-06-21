@@ -156,6 +156,58 @@ describe("SessionTodo", () => {
     }),
   )
 
+  it.effect("updates a file-backed todo list without a SQLite session row", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-no-row-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-no-row-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const directory = path.join(root, "node")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+      yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_no_row")
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          projectID: Project.ID.global,
+          title: "file todo no row",
+          location: { directory: AbsolutePath.make(directory) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+
+      const state = [{ content: "directory-only todo", status: "pending", priority: "high" }]
+      yield* todos.update({ sessionID: fileSessionID, todos: state })
+
+      expect(yield* todos.get(fileSessionID)).toEqual(state)
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: true,
+        todos: state,
+      })
+      expect(
+        yield* db.select().from(SessionTable).where(eq(SessionTable.id, fileSessionID)).get().pipe(Effect.orDie),
+      ).toBeUndefined()
+      expect(
+        yield* db.select().from(TodoTable).where(eq(TodoTable.session_id, fileSessionID)).all().pipe(Effect.orDie),
+      ).toEqual([])
+    }),
+  )
+
   it.effect("prefers todo state from the persisted root copy over a still-valid SQLite directory row", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
