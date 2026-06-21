@@ -166,6 +166,16 @@ export const layer = Layer.effect(
       directory?: string
     }) {
       const fileSession = yield* fileSessionForTodo(input.sessionID, input.directory)
+      if (fileSession) {
+        yield* appendTodoSessionEvent(fileSession, input.todos).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append todo event to atree session log", {
+              sessionID: input.sessionID,
+              cause,
+            }),
+          ),
+        )
+      }
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
@@ -187,14 +197,6 @@ export const layer = Layer.effect(
         )
         .pipe(Effect.orDie)
       if (fileSession) {
-        yield* appendTodoSessionEvent(fileSession, input.todos).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("failed to append todo event to atree session log", {
-              sessionID: input.sessionID,
-              cause,
-            }),
-          ),
-        )
         yield* Effect.promise(() => writeSessionTodoState(fileSession.directory, input.sessionID, input.todos))
       }
       yield* events.publish(Event.Updated, input)

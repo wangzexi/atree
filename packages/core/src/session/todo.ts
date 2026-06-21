@@ -71,6 +71,22 @@ export const layer = Layer.effect(
       readonly todos: ReadonlyArray<Info>
     }) {
       const session = yield* fileSession(input.sessionID)
+      if (session) {
+        yield* Effect.promise(() =>
+          appendSessionJsonl(session, {
+            type: "todo.updated",
+            sessionID: input.sessionID,
+            todos: input.todos,
+          }),
+        ).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to append todo event to atree session log", {
+              sessionID: input.sessionID,
+              cause,
+            }),
+          ),
+        )
+      }
       yield* db
         .transaction((tx) =>
           Effect.gen(function* () {
@@ -92,20 +108,6 @@ export const layer = Layer.effect(
         )
         .pipe(Effect.orDie)
       if (session) {
-        yield* Effect.promise(() =>
-          appendSessionJsonl(session, {
-            type: "todo.updated",
-            sessionID: input.sessionID,
-            todos: input.todos,
-          }),
-        ).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("failed to append todo event to atree session log", {
-              sessionID: input.sessionID,
-              cause,
-            }),
-          ),
-        )
         yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
       }
       yield* events.publish(Event.Updated, input)
