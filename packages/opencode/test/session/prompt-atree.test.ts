@@ -10,6 +10,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { readSessionStore } from "@/atree/session-store"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { Command } from "@/command"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
@@ -163,6 +164,45 @@ it.live("mirrors session errors into the directory session log", () =>
             type: "session.error",
             sessionID: session.id,
             error,
+          }),
+        ]),
+      )
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("mirrors executed commands into the directory session log", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "command jsonl" })
+
+      yield* events.publish(Command.Event.Executed, {
+        name: "init",
+        sessionID: session.id,
+        arguments: "now",
+        messageID: "msg_command_jsonl" as never,
+      })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(session.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "command.executed",
+            name: "init",
+            sessionID: session.id,
+            arguments: "now",
+            messageID: "msg_command_jsonl",
           }),
         ]),
       )

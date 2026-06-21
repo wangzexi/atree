@@ -52,6 +52,19 @@ export const layer = Layer.effect(
             })
           }
         }
+        if (event.type === "command.executed") {
+          const data = event.data as Record<string, unknown>
+          if (typeof data.sessionID === "string") {
+            const sessionID = data.sessionID as SessionID
+            yield* appendAtreeSessionEventBestEffort(event.location?.directory, sessionID, {
+              type: event.type,
+              name: data.name,
+              sessionID,
+              arguments: data.arguments,
+              messageID: data.messageID,
+            })
+          }
+        }
         GlobalBus.emit("event", {
           directory: event.location?.directory ?? ctx?.directory,
           project: ctx?.project.id,
