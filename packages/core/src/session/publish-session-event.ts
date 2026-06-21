@@ -14,9 +14,10 @@ export const publishSessionEvent = <D extends EventV2.Definition>(
   definition: D,
   data: EventV2.Data<D>,
   context: string,
+  options?: EventV2.PublishOptions,
 ): Effect.Effect<EventV2.Payload<D>> =>
   Effect.gen(function* () {
-    const payload = yield* events.publish(definition, data)
+    const payload = yield* events.publish(definition, data, options)
     if (input.session) {
       yield* Effect.promise(() =>
         appendSessionJsonl(input.session!, {

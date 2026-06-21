@@ -3,6 +3,7 @@ export * as SessionContextEpoch from "./context-epoch"
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
 import { AgentV2 } from "../agent"
+import { readSessionStore } from "../atree/session-store"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { Location } from "../location"
@@ -11,6 +12,7 @@ import { ContextSnapshotDecodeError } from "./error"
 import { SessionEvent } from "./event"
 import { SessionInput } from "./input"
 import { SessionMessageID } from "./message-id"
+import { publishSessionEvent } from "./publish-session-event"
 import { SessionSchema } from "./schema"
 import { SessionContextEpochTable, SessionTable } from "./sql"
 
@@ -101,9 +103,15 @@ const prepareOnce = Effect.fnUntraced(function* (
     return { baseline: result.generation.baseline, baselineSeq: replacementSeq, revision: stored.revision + 1 }
   }
 
-  yield* events.publish(
+  const session = yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(undefined)),
+  )
+  yield* publishSessionEvent(
+    events,
+    { sessionID, session },
     SessionEvent.ContextUpdated,
     { sessionID, messageID: SessionMessageID.ID.create(), timestamp: yield* DateTime.now, text: result.text },
+    "context update event",
     { commit: () => advance(db, sessionID, stored.revision, result.snapshot).pipe(Effect.orDie) },
   )
   return { baseline: stored.baseline, baselineSeq: stored.baseline_seq, revision: stored.revision + 1 }
