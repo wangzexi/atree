@@ -978,7 +978,7 @@ export const layer: Layer.Layer<
         .where(eq(SessionTable.id, session.id))
         .get()
         .pipe(Effect.orDie)
-      return row?.directory === session.directory
+      return row ? sameDirectory(row.directory, session.directory) : false
     })
 
     const hasDirectorySessionStore = Effect.fn("Session.hasDirectorySessionStore")(function* (session: Info) {
@@ -1543,7 +1543,8 @@ function listByProject(
 function matchesListInput(item: Info, input: ListInput) {
   if (input.path !== undefined && input.path) {
     const pathMatches = item.path === input.path || item.path?.startsWith(`${input.path}/`)
-    const legacyDirectoryMatch = item.path === undefined && item.directory === input.directory
+    const legacyDirectoryMatch =
+      item.path === undefined && input.directory !== undefined && sameDirectory(item.directory, input.directory)
     if (!pathMatches && !legacyDirectoryMatch) return false
   }
   if (input.roots && item.parentID) return false
