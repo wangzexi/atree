@@ -224,6 +224,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - opencode `session.error` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`；显式 event location 优先，缺失时再回退当前 instance 或服务端记录的 atree root。
 - opencode `command.executed` 事件也会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`，让通过 slash/command 入口触发过的命令成为目录会话原始记录的一部分。
 - opencode `session.compacted` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`，作为一次压缩已经完成的高层会话事实；具体 compaction started/ended 事件仍由 compaction 链路记录。
+- opencode `session.diff` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`，先保留 diff 事件原始事实；全局 `session_diff` storage 仍作为现有 HTTP/UI 兼容投影，后续再单独迁移。
 - core `SessionV2.prompt` 写入 file-backed session 时，会把 prompt file 的 data URL 物化到同一会话目录的 `assets/`，并在 `session.jsonl` 中只保留 `assets/...` 相对路径；读取时可恢复成现有 v2 message 的 file attachment。
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `SessionV2.switchModel` 会先把 `session.next.model.switched` 追加到当前会话目录的 `session.jsonl`，再发布 EventV2 事件；读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，让目录里的事件流能恢复当前 agent/model，而不是只恢复一条展示消息。
