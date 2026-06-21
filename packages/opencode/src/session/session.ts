@@ -838,7 +838,7 @@ export const layer: Layer.Layer<
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
         : rootDirectory
           ? yield* Effect.promise(() => readSessionStoresDeep(rootDirectory)).pipe(
-              Effect.catchCause(() => Effect.succeed([])),
+              Effect.catchCause(() => Effect.succeed(undefined)),
             )
           : undefined
       const fileIDs = fileSessions ? new Set(fileSessions.map((item) => item.id)) : undefined

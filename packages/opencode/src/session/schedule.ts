@@ -871,7 +871,9 @@ export const layer = Layer.effect(
     })
 
     const restoreFileBackedSchedules = Effect.fn("Schedule.restoreFileBackedSchedules")(function* (directory: string) {
-      const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(directory))
+      const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(directory)).pipe(
+        Effect.catchCause(() => Effect.succeed([])),
+      )
       yield* Effect.forEach(
         fileSessions,
         (session) =>
