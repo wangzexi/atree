@@ -109,6 +109,7 @@ describe("ToolOutputStore", () => {
             SessionStore.Service.of({
               get: () => Effect.succeed(info),
               context: () => Effect.succeed([]),
+              runnerEntries: () => Effect.succeed([]),
               runnerContext: () => Effect.succeed([]),
               message: () => Effect.succeed(undefined),
             }),

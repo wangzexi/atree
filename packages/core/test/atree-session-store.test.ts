@@ -908,9 +908,13 @@ describe("atree file-backed SessionV2 discovery", () => {
 
       const store = yield* SessionStore.Service
       const context = yield* store.context(sessionID)
+      const entries = yield* store.runnerEntries(sessionID, 0)
       const runnerContext = yield* store.runnerContext(sessionID, 0)
 
       expect(context.map((message) => message.id)).toEqual([SessionMessage.ID.make("msg_core_store_context_file")])
+      expect(entries.map((entry) => [entry.seq, entry.message.id])).toEqual([
+        [1, SessionMessage.ID.make("msg_core_store_context_file")],
+      ])
       expect(runnerContext.map((message) => message.id)).toEqual([
         SessionMessage.ID.make("msg_core_store_context_file"),
       ])

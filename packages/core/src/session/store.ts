@@ -20,6 +20,10 @@ import {
 export interface Interface {
   readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
   readonly context: (sessionID: SessionSchema.ID) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
+  readonly runnerEntries: (
+    sessionID: SessionSchema.ID,
+    baselineSeq: number,
+  ) => Effect.Effect<Array<{ readonly seq: number; readonly message: SessionMessage.Message }>, MessageDecodeError>
   readonly runnerContext: (
     sessionID: SessionSchema.ID,
     baselineSeq: number,
@@ -78,6 +82,24 @@ export const layer = Layer.effect(
       return found ? { sessionID: found.session.id, message: found.message } : undefined
     })
 
+    const runnerEntries = Effect.fn("SessionStore.runnerEntries")(function* (
+      sessionID: SessionSchema.ID,
+      baselineSeq: number,
+    ) {
+      const fileSession = yield* resolveFileSession(sessionID)
+      if (fileSession) {
+        const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+        )
+        if (messages.length > 0) {
+          return messages
+            .map((message, index) => ({ seq: index + 1, message }))
+            .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
+        }
+      }
+      return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
+    })
+
     return Service.of({
       get: Effect.fn("SessionStore.get")(function* (sessionID) {
         return yield* resolveFileSession(sessionID)
@@ -93,16 +115,9 @@ export const layer = Layer.effect(
         const stored = yield* SessionHistory.load(db, sessionID)
         return stored
       }),
+      runnerEntries,
       runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq) {
-        const fileSession = yield* resolveFileSession(sessionID)
-        if (fileSession) {
-          const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
-            Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
-          )
-          if (messages.length > 0) return messages
-        }
-        const stored = yield* SessionHistory.loadForRunner(db, sessionID, baselineSeq)
-        return stored
+        return (yield* runnerEntries(sessionID, baselineSeq)).map((entry) => entry.message)
       }),
       message: Effect.fn("SessionStore.message")(function* (messageID) {
         const row = yield* db

@@ -25,7 +25,6 @@ import { ToolOutputStore } from "../../tool-output-store"
 import { SessionContextEpoch } from "../context-epoch"
 import { SessionCompaction } from "../compaction"
 import { SessionEvent } from "../event"
-import { SessionHistory } from "../history"
 import { SessionInput } from "../input"
 import { publishSessionEvent } from "../publish-session-event"
 import { SessionSchema } from "../schema"
@@ -220,7 +219,7 @@ export const layer = Layer.effect(
       if ((yield* agents.select(current.agent)).id !== agent.id || !sameModel(current.model, session.model))
         return yield* Effect.die(rebuildPreparedTurn())
       const model = yield* models.resolve(session)
-      const entries = yield* SessionHistory.entriesForRunner(db, session.id, system.baselineSeq)
+      const entries = yield* store.runnerEntries(session.id, system.baselineSeq)
       const context = entries.map((entry) => entry.message)
       const toolMaterialization = yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id
