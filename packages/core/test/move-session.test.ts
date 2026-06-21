@@ -178,6 +178,49 @@ describe("MoveSession", () => {
     }),
   )
 
+  it.live("moves a file-backed session store into the destination directory", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+      )
+      yield* Effect.promise(() => initRepo(root.path))
+      const source = abs(yield* Effect.promise(() => fs.realpath(root.path)))
+      const destination = abs(path.join(source, "packages"))
+      yield* Effect.promise(() => fs.mkdir(destination))
+
+      const created = yield* SessionV2.Service.use((service) =>
+        service.create({ location: { directory: source } }),
+      )
+      const sourceStore = path.join(source, ".agents", "atree", "sessions", created.id)
+      const destinationStore = path.join(destination, ".agents", "atree", "sessions", created.id)
+      yield* Effect.promise(() => fs.writeFile(path.join(sourceStore, "assets", "note.txt"), "kept\n"))
+
+      yield* MoveSession.Service.use((service) =>
+        service.moveSession({ sessionID: created.id, destination: { directory: destination }, moveChanges: false }),
+      )
+
+      expect(yield* Effect.promise(() => Bun.file(sourceStore).exists())).toBe(false)
+      expect(yield* Effect.promise(() => fs.readFile(path.join(destinationStore, "assets", "note.txt"), "utf8"))).toBe(
+        "kept\n",
+      )
+      const jsonl = yield* Effect.promise(() => fs.readFile(path.join(destinationStore, "session.jsonl"), "utf8"))
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.map((entry) => entry.type)).toContain("session.created")
+      expect(entries.at(-1)).toMatchObject({
+        type: "session.next.moved",
+        sessionID: created.id,
+        location: { directory: destination },
+      })
+      expect(
+        yield* SessionV2.Service.use((service) => service.get(created.id, { directory: destination })),
+      ).toMatchObject({ location: { directory: destination } })
+    }),
+  )
+
   it.live("moves nested session changes without cleaning unrelated files", () =>
     Effect.gen(function* () {
       const root = yield* Effect.acquireRelease(

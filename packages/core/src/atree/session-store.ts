@@ -493,6 +493,53 @@ export async function writeSessionStore(info: SessionSchema.Info) {
   await writeAtomic(path.join(root, "meta.yaml"), metaYaml(info))
 }
 
+async function exists(target: string) {
+  return fs.access(target).then(
+    () => true,
+    (error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return false
+      throw error
+    },
+  )
+}
+
+async function moveDirectory(source: string, destination: string) {
+  await fs.mkdir(path.dirname(destination), { recursive: true })
+  try {
+    await fs.rename(source, destination)
+  } catch (error) {
+    if (!error || typeof error !== "object" || !("code" in error) || error.code !== "EXDEV") throw error
+    await fs.cp(source, destination, { recursive: true, force: false, errorOnExist: true })
+    await fs.rm(source, { recursive: true, force: true })
+  }
+}
+
+export async function moveSessionStore(
+  info: SessionSchema.Info,
+  destinationDirectory: string,
+  updatedAt = Date.now(),
+) {
+  const sourceRoot = sessionRoot(info)
+  if (!(await exists(sourceRoot))) return
+  const next = SessionSchema.Info.make({
+    ...info,
+    location: Location.Ref.make({
+      directory: AbsolutePath.make(destinationDirectory),
+      workspaceID: info.location.workspaceID,
+    }),
+    time: {
+      ...info.time,
+      updated: DateTime.makeUnsafe(Math.max(DateTime.toEpochMillis(info.time.updated), updatedAt)),
+    },
+  })
+  const destinationRoot = sessionRoot(next)
+  if (path.resolve(sourceRoot) !== path.resolve(destinationRoot)) {
+    await moveDirectory(sourceRoot, destinationRoot)
+  }
+  await writeSessionStore(next)
+  return next
+}
+
 export async function ensureSessionPayloadFilesByID(directory: string, sessionID: string) {
   await writeIfMissing(path.join(directory, ".agents", "atree", "meta.yaml"), 'version: 1\nsource: "atree"\n')
   const root = sessionRootByID(directory, sessionID)

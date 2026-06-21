@@ -8,7 +8,9 @@ import { ProjectV2 } from "../project"
 import { SessionV2 } from "../session"
 import { SessionExecution } from "../session/execution"
 import { SessionEvent } from "../session/event"
+import { publishSessionEvent } from "../session/publish-session-event"
 import { SessionSchema } from "../session/schema"
+import { moveSessionStore } from "../atree/session-store"
 import { AbsolutePath, RelativePath } from "../schema"
 import path from "path"
 
@@ -96,12 +98,36 @@ export const layer = Layer.effect(
           .pipe(Effect.mapError((error) => new ApplyChangesError({ message: error.message })))
       }
 
-      yield* events.publish(SessionEvent.Moved, {
+      const timestamp = yield* DateTime.now
+      const movedFileSession = yield* Effect.promise(() =>
+        moveSessionStore(current, directory, DateTime.toEpochMillis(timestamp)),
+      ).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("failed to move atree session store", {
+            sessionID: input.sessionID,
+            source: current.location.directory,
+            destination: directory,
+            cause,
+          }),
+        ),
+      )
+      const moved = {
         sessionID: input.sessionID,
         location: Location.Ref.make({ directory }),
         subdirectory: RelativePath.make(path.relative(destination.directory, directory).replaceAll("\\", "/")),
-        timestamp: yield* DateTime.now,
-      })
+        timestamp,
+      }
+      if (movedFileSession) {
+        yield* publishSessionEvent(
+          events,
+          { sessionID: input.sessionID, session: movedFileSession },
+          SessionEvent.Moved,
+          moved,
+          "move session event",
+        )
+      } else {
+        yield* events.publish(SessionEvent.Moved, moved)
+      }
 
       if (patch) {
         yield* git.softResetChanges(current.location.directory).pipe(
