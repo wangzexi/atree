@@ -12,6 +12,19 @@ const findSessionInRoot = (rootDirectory: string | undefined, sessionID: Session
     )
   })
 
+export const appendAtreeSessionEventInDirectory = (
+  directory: string | undefined,
+  sessionID: SessionID,
+  entry: Record<string, unknown>,
+): Effect.Effect<boolean> =>
+  Effect.gen(function* () {
+    const session = yield* findSessionInRoot(directory, sessionID)
+    if (!session) return false
+    yield* Effect.promise(() => appendSessionJsonl(session, entry))
+    yield* Effect.promise(() => touchSessionStore(session.directory, session.id))
+    return true
+  })
+
 export const appendAtreeSessionEventByID = (
   sessionID: SessionID,
   entry: Record<string, unknown>,
@@ -41,5 +54,15 @@ export const appendAtreeSessionEventByIDBestEffort = (
   entry: Record<string, unknown>,
 ): Effect.Effect<void> =>
   appendAtreeSessionEventByID(sessionID, entry).pipe(
+    Effect.catchCause((cause) => Effect.logWarning("failed to append atree session event", { sessionID, cause })),
+  )
+
+export const appendAtreeSessionEventBestEffort = (
+  directory: string | undefined,
+  sessionID: SessionID,
+  entry: Record<string, unknown>,
+): Effect.Effect<void> =>
+  appendAtreeSessionEventInDirectory(directory, sessionID, entry).pipe(
+    Effect.flatMap((written) => (written ? Effect.void : appendAtreeSessionEventByID(sessionID, entry))),
     Effect.catchCause((cause) => Effect.logWarning("failed to append atree session event", { sessionID, cause })),
   )

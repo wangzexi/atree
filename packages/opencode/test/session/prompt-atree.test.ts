@@ -1,12 +1,15 @@
 import { expect } from "bun:test"
 import { Effect, Layer } from "effect"
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
+import fs from "fs/promises"
+import path from "path"
 import { Session } from "@/session/session"
 import { SessionPrompt } from "../../src/session/prompt"
 import { SessionSummary } from "../../src/session/summary"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { readSessionStore } from "@/atree/session-store"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { TestLLMServer } from "../lib/llm-server"
@@ -64,6 +67,7 @@ const root = LayerNode.group([
   SessionProjector.node,
   SessionSummary.node,
   Database.node,
+  EventV2Bridge.node,
   CrossSpawnSpawner.node,
   LayerNode.make(TestLLMServer.layer, []),
 ])
@@ -129,6 +133,39 @@ it.live("mirrors prompt agent and model switches into the directory session log"
         id: "test-model",
         providerID: "test",
       })
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("mirrors session errors into the directory session log", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "session error jsonl" })
+      const error = { name: "ContentFilterError", data: { message: "failed" } } as const
+
+      yield* events.publish(Session.Event.Error, { sessionID: session.id, error })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(session.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "session.error",
+            sessionID: session.id,
+            error,
+          }),
+        ]),
+      )
     }),
     { config: providerConfig },
   ),

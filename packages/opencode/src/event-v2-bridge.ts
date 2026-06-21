@@ -3,6 +3,8 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { InstanceRef, WorkspaceRef } from "@/effect/instance-ref"
 import { GlobalBus } from "@/bus/global"
+import { appendAtreeSessionEventBestEffort } from "@/atree/session-event"
+import type { SessionID } from "@/session/schema"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Location } from "@opencode-ai/core/location"
 import { Project } from "@opencode-ai/core/project"
@@ -39,6 +41,17 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const ctx = yield* InstanceRef
         const workspaceID = (yield* WorkspaceRef) ?? event.location?.workspaceID
+        if (event.type === "session.error") {
+          const data = event.data as Record<string, unknown>
+          if (typeof data.sessionID === "string") {
+            const sessionID = data.sessionID as SessionID
+            yield* appendAtreeSessionEventBestEffort(event.location?.directory, sessionID, {
+              type: event.type,
+              sessionID,
+              error: data.error,
+            })
+          }
+        }
         GlobalBus.emit("event", {
           directory: event.location?.directory ?? ctx?.directory,
           project: ctx?.project.id,
