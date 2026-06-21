@@ -112,6 +112,10 @@ export class LimitExceeded extends Schema.TaggedErrorClass<LimitExceeded>()("Sch
   limit: Schema.Number,
 }) {}
 
+export class SessionNotFound extends Schema.TaggedErrorClass<SessionNotFound>()("ScheduleSessionNotFound", {
+  sessionID: SessionID,
+}) {}
+
 export class NotFound extends Schema.TaggedErrorClass<NotFound>()("ScheduleNotFound", {
   scheduleID: ID,
 }) {}
@@ -125,7 +129,7 @@ export interface Interface {
     runAt?: number
     message: string
     directory?: string
-  }) => Effect.Effect<Info, InvalidExpression | InvalidRunAt | IntervalTooShort | LimitExceeded>
+  }) => Effect.Effect<Info, InvalidExpression | InvalidRunAt | IntervalTooShort | LimitExceeded | SessionNotFound>
   readonly delete: (scheduleID: ID, options?: { directory?: string }) => Effect.Effect<void, NotFound>
   /** Manually fire the tick for a schedule (publishes Triggered). */
   readonly tick: (scheduleID: ID) => Effect.Effect<void>
@@ -984,8 +988,12 @@ export const layer = Layer.effect(
         }
         yield* validateExpression(expression)
       }
-      yield* restoreStoredSchedules(input.sessionID, input.directory)
-      yield* cleanupCompletedOnceForSession(input.sessionID, input.directory)
+      const directory = yield* sessionDirectory(input.sessionID, input.directory)
+      if (input.directory && !directory) {
+        return yield* Effect.fail(new SessionNotFound({ sessionID: input.sessionID }))
+      }
+      yield* restoreStoredSchedules(input.sessionID, directory)
+      yield* cleanupCompletedOnceForSession(input.sessionID, directory)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })
         .from(ScheduleTable)
@@ -995,7 +1003,6 @@ export const layer = Layer.effect(
       if ((count?.c ?? 0) >= MAX_PER_SESSION) {
         return yield* Effect.fail(new LimitExceeded({ sessionID: input.sessionID, limit: MAX_PER_SESSION }))
       }
-      const directory = yield* sessionDirectory(input.sessionID, input.directory)
       const id = Identifier.create("sch", "ascending") as ID
       const createdAt = Date.now()
       yield* db

@@ -467,6 +467,73 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not create a database-only schedule for a missing explicit directory session",
+    Effect.gen(function* () {
+      const source = yield* tempdir
+      const target = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_missing_explicit_create_schedule" as SessionID
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_missing_explicit_create_schedule",
+          worktree: source,
+          vcs: "git",
+          name: "missing explicit create schedule",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_missing_explicit_create_schedule",
+          slug: "missing-explicit-create-schedule",
+          directory: source,
+          title: "Missing explicit create schedule",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule
+          .create({
+            sessionID,
+            directory: target,
+            kind: "once",
+            runAt: now + 60_000,
+            message: "should not be created",
+          })
+          .pipe(Effect.exit),
+      )
+      expect(Exit.isFailure(created)).toBe(true)
+
+      const rows = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      expect(rows).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
+    }),
+  )
+
+  it.effect(
     "deletes a file-backed schedule from an explicit directory without a database row",
     Effect.gen(function* () {
       const directory = yield* tempdir

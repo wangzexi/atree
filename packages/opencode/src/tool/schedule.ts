@@ -137,6 +137,13 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
                       metadata: { action: "create" } satisfies Metadata,
                     }),
                   ),
+                  Effect.catchTag("ScheduleSessionNotFound", (e) =>
+                    Effect.succeed({
+                      title: "Session not found",
+                      output: `Cannot create an automation message because session "${e.sessionID}" is not present in this directory.`,
+                      metadata: { action: "create" } satisfies Metadata,
+                    }),
+                  ),
                 )
             }
             case "delete": {
