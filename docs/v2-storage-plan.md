@@ -216,6 +216,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - processor 会使用 assistant message 的 `path.cwd` 作为目录 hint 解析当前会话；流式文本、reasoning、step、patch、cleanup 等 assistant 写入都会显式落到该目录的 `session.jsonl`，复制 `.agents/atree/` 后不会把新回复写回源目录。
 - compaction 的 prune/create/process 会接受并传递目录 hint；压缩标记、summary assistant、replay/continue 用户消息和被裁剪 tool part 都会写入当前会话目录。
 - `MessageV2.page/stream/get/parts` 开始支持可选目录 hint；当目标目录存在对应 session store 时，会直接从该目录的 `session.jsonl` 投影读取，即使全局 SQLite message/part 投影被删除也能恢复。
+- `MessageV2.page/get/parts` 在调用方显式传入目录时，如果该目录下没有对应 file-backed session，不再继续读取全局 SQLite 中残留的 message/part 投影；`page/get` 返回 NotFound，`parts` 保持旧契约返回空数组。
 - `MessageV2.page/get/parts` 在没有目录 hint 时也会通过共享 resolver 优先扫描持久化 atree root；只有当前 root 内没有 file-backed session 时才回退旧 SQLite message/part 投影，避免同 session id 复制后直接读到旧目录缓存。
 - core `SessionV2.get/messages/context/prompt` 开始支持可选目录 hint；当同一 session id 被复制到另一个目录时，显式传入目标目录会优先读取和写入目标目录的 `meta.yaml` / `session.jsonl`，而不是先命中全局 SQLite row。
 - core `SessionStore.get` 会优先从持久化 atree root 查找目录事实源；只有当前 root 内没有 file-backed session 时，才回退 SQLite 中仍有效的旧目录 row 以兼容非 atree 旧会话。

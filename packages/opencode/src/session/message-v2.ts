@@ -473,6 +473,9 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     return pageFileMessages(projection.messages, { limit: input.limit, before })
   }
+  if (input.directory) {
+    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+  }
 
   const where = before
     ? and(eq(MessageTable.session_id, input.sessionID), older(before))
@@ -544,6 +547,9 @@ export function parts(messageID: MessageID, options?: { sessionID?: SessionID; d
         const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
         return projection.messages.find((message) => message.info.id === messageID)?.parts ?? []
       }
+      if (options.directory) {
+        return []
+      }
     }
 
     const rows = yield* db
@@ -569,6 +575,9 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
     const message = projection.messages.find((item) => item.info.id === input.messageID)
     if (!message) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
     return message
+  }
+  if (input.directory) {
+    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
   }
 
   const row = yield* db
