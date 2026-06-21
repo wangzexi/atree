@@ -138,9 +138,24 @@ export const layer = Layer.effect(
     })
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new RejectedError()), {
-        discard: true,
-      }).pipe(
+      Effect.forEach(
+        pending.values(),
+        (item) =>
+          publish(item.request.sessionID, Event.Rejected, {
+            sessionID: item.request.sessionID,
+            requestID: item.request.id,
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to reject pending question during finalization", {
+                sessionID: item.request.sessionID,
+                requestID: item.request.id,
+                cause,
+              }),
+            ),
+            Effect.andThen(Deferred.fail(item.deferred, new RejectedError())),
+          ),
+        { discard: true },
+      ).pipe(
         Effect.ensuring(
           Effect.sync(() => {
             pending.clear()

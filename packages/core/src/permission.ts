@@ -153,9 +153,25 @@ export const layer = Layer.effect(
     })
 
     yield* EffectRuntime.addFinalizer(() =>
-      EffectRuntime.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new RejectedError()), {
-        discard: true,
-      }).pipe(
+      EffectRuntime.forEach(
+        pending.values(),
+        (item) =>
+          publish(item.request.sessionID, Event.Replied, {
+            sessionID: item.request.sessionID,
+            requestID: item.request.id,
+            reply: "reject",
+          }).pipe(
+            EffectRuntime.catchCause((cause) =>
+              EffectRuntime.logWarning("failed to reject pending permission during finalization", {
+                sessionID: item.request.sessionID,
+                requestID: item.request.id,
+                cause,
+              }),
+            ),
+            EffectRuntime.andThen(Deferred.fail(item.deferred, new RejectedError())),
+          ),
+        { discard: true },
+      ).pipe(
         EffectRuntime.ensuring(
           EffectRuntime.sync(() => {
             pending.clear()
