@@ -12,6 +12,7 @@ import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import { eq } from "drizzle-orm"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { SessionID } from "@/session/schema"
+import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { Cause, Effect, Exit, Layer, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
@@ -202,7 +203,9 @@ describe("Project.fromDirectory", () => {
       const rootProject = rootResult.project
       const remoteID = remoteProjectID("github.com/acme/app")
       const sessionID = crypto.randomUUID() as SessionID
+      const fileSessionID = "ses_remote_project_file_migration" as SessionID
       const workspaceID = WorkspaceV2.ID.ascending()
+      const now = Date.now()
 
       yield* db
         .insert(SessionTable)
@@ -213,11 +216,25 @@ describe("Project.fromDirectory", () => {
           directory: tmp,
           title: "test",
           version: "0.0.0-test",
-          time_created: Date.now(),
-          time_updated: Date.now(),
+          time_created: now,
+          time_updated: now,
         })
         .run()
         .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          slug: "remote-project-file-migration",
+          version: "0.0.0-test",
+          projectID: rootProject.id,
+          directory: tmp,
+          path: ".",
+          title: "file-backed remote migration",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
       yield* db
         .insert(WorkspaceTable)
         .values({ id: workspaceID, type: "local", name: "test", project_id: rootProject.id })
@@ -235,6 +252,11 @@ describe("Project.fromDirectory", () => {
         (yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie))
           ?.project_id,
       ).toBe(remoteID)
+      const fileSession = yield* Effect.promise(() => readSessionStore(tmp, fileSessionID))
+      expect(fileSession?.projectID).toBe(remoteID)
+      expect(
+        yield* db.select().from(SessionTable).where(eq(SessionTable.id, fileSessionID)).get().pipe(Effect.orDie),
+      ).toBeUndefined()
       expect(
         (yield* db.select().from(WorkspaceTable).where(eq(WorkspaceTable.id, workspaceID)).get().pipe(Effect.orDie))
           ?.project_id,

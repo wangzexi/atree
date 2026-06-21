@@ -214,7 +214,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - ShareNext 创建分享后的 full sync 也会继续使用显式目录上下文；复制 `.agents/atree/` 到目标目录后，首次分享同步出去的 session/messages/diffs 会来自目标目录事实源，而不是源目录或全局 SQLite 缓存。
 - CLI `import` 导入分享或 JSON 文件时，会先写入当前目录的 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl`，再刷新 SQLite 兼容投影；导入来的会话不再只是全局数据库里的会话。
 - CLI `stats` 聚合会话时会通过 `Session.listGlobal()` 和带目录上下文的 `Session.messages()` 读取；只有目录事实源、没有 SQLite session row 的会话也会被统计。
-- Project 识别从 global 升级为真实 git project 时，会同步迁移当前目录下 file-backed sessions 的 `projectID`，并把 `session.updated` 写入各自 `session.jsonl`；即使没有 SQLite session row，目录会话也不会停留在旧 global project 归属。
+- Project 识别从 global 或旧 root project 升级为真实 git/remote project 时，会同步迁移当前目录下 file-backed sessions 的 `projectID`，并把 `session.updated` 写入各自 `session.jsonl`；即使没有 SQLite session row，目录会话也不会停留在旧 project 归属。
 - opencode session 模块已删除旧的顶层 `listGlobal` 生成器；全局会话列表只保留 `Session.Service.listGlobal()` 这一条会合并目录事实源的路径，避免出现纯 SQLite 列表旁路。
 - 工具执行上下文会携带当前 session 目录；schedule、todowrite、task 和 plan_exit 读取当前会话时会优先使用该目录，避免工具通过同 session id 的全局 SQLite 投影把状态写回旧目录。
 - prompt 用户消息、自动标题、主循环 assistant 初始化/收尾、subtask assistant/tool 写入、shell 工具执行记录、summary/revert 清理、processor tool-call 元数据写入开始显式携带 session 目录上下文，减少对外层 InstanceState 和全局 SQLite row 的隐性依赖。

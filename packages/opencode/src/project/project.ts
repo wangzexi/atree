@@ -295,7 +295,11 @@ export const layer = Layer.effect(
 
       // Phase 2: upsert
       const projectID = ProjectV2.ID.make(data.id)
-      yield* migrateProjectId(data.previous ? ProjectV2.ID.make(data.previous) : undefined, projectID)
+      const previousProjectID = data.previous ? ProjectV2.ID.make(data.previous) : undefined
+      yield* migrateProjectId(previousProjectID, projectID)
+      if (previousProjectID && projectID !== ProjectV2.ID.global) {
+        yield* migrateDirectoryFileSessionsProjectId(data.directory, previousProjectID, projectID)
+      }
       const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, projectID)).get().pipe(Effect.orDie)
       const existing = row
         ? fromRow(row)
