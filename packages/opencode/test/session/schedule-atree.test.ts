@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm"
 import { readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
 import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 import { writeWorkspaceRoot } from "../../src/atree/state"
+import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Schedule } from "../../src/session/schedule"
 import { ScheduleTable } from "../../src/session/schedule.sql"
 import type { SessionID } from "../../src/session/schema"
@@ -18,7 +19,11 @@ import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { InstanceState } from "@/effect/instance-state"
 
-const it = testEffect(Layer.mergeAll(Schedule.defaultLayer, Database.defaultLayer))
+const database = Database.layerFromPath(":memory:")
+const events = EventV2Bridge.defaultLayer
+const baseLayer = Layer.mergeAll(database, events)
+const schedule = Schedule.layer.pipe(Layer.provide(baseLayer))
+const it = testEffect(Layer.mergeAll(baseLayer, schedule))
 
 const tempdir = Effect.acquireRelease(
   Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-restore-"))),
