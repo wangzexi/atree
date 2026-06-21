@@ -5,6 +5,7 @@ import { EventV2 } from "./event"
 import { Location } from "./location"
 import { AgentV2 } from "./agent"
 import { SessionV2 } from "./session"
+import { publishSessionEvent } from "./session/publish-session-event"
 import { SessionStore } from "./session/store"
 import { withStatics } from "./schema"
 import { Identifier } from "./util/identifier"
@@ -142,6 +143,15 @@ export const layer = Layer.effect(
     const saved = yield* PermissionSaved.Service
     const pending = new Map<ID, Pending>()
 
+    const publish = EffectRuntime.fn("PermissionV2.publish")(function* <D extends EventV2.Definition>(
+      sessionID: SessionV2.ID,
+      definition: D,
+      data: EventV2.Data<D>,
+    ) {
+      const session = yield* sessions.get(sessionID)
+      return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "permission event")
+    })
+
     yield* EffectRuntime.addFinalizer(() =>
       EffectRuntime.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new RejectedError()), {
         discard: true,
@@ -206,8 +216,7 @@ export const layer = Layer.effect(
           const item = { request, agent, deferred }
           if (pending.has(request.id)) return yield* EffectRuntime.die(`Duplicate pending permission ID: ${request.id}`)
           pending.set(request.id, item)
-          yield* events
-            .publish(Event.Asked, request)
+          yield* publish(request.sessionID, Event.Asked, request)
             .pipe(EffectRuntime.onError(() => EffectRuntime.sync(() => pending.delete(request.id))))
           return item
         }),
@@ -247,7 +256,7 @@ export const layer = Layer.effect(
         EffectRuntime.gen(function* () {
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
-          yield* events.publish(Event.Replied, {
+          yield* publish(existing.request.sessionID, Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
             reply: input.reply,
@@ -261,7 +270,7 @@ export const layer = Layer.effect(
             pending.delete(input.requestID)
             for (const [id, item] of pending) {
               if (item.request.sessionID !== existing.request.sessionID) continue
-              yield* events.publish(Event.Replied, {
+              yield* publish(item.request.sessionID, Event.Replied, {
                 sessionID: item.request.sessionID,
                 requestID: item.request.id,
                 reply: "reject",
@@ -298,7 +307,7 @@ export const layer = Layer.effect(
               )
             )
               continue
-            yield* events.publish(Event.Replied, {
+            yield* publish(item.request.sessionID, Event.Replied, {
               sessionID: item.request.sessionID,
               requestID: item.request.id,
               reply: "always",

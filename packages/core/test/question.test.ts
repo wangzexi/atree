@@ -1,15 +1,26 @@
 import { describe, expect } from "bun:test"
-import { Context, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
+import path from "path"
+import { readFile } from "fs/promises"
+import { Context, DateTime, Deferred, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Location } from "@opencode-ai/core/location"
+import { ProjectV2 } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { QuestionV2 } from "@opencode-ai/core/question"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionStore } from "@opencode-ai/core/session/store"
+import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { testEffect } from "./lib/effect"
+import { tmpdir } from "./fixture/tmpdir"
 
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
-const questions = QuestionV2.layer.pipe(Layer.provide(events))
-const it = testEffect(Layer.mergeAll(database, events, questions))
+const store = SessionStore.layer.pipe(Layer.provide(database))
+const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store))
+const it = testEffect(Layer.mergeAll(database, events, store, questions))
 
 const sessionID = SessionV2.ID.make("ses_question_test")
 const question: QuestionV2.Info = {
@@ -58,6 +69,64 @@ describe("QuestionV2", () => {
         [QuestionV2.Event.Asked.type, request],
         [QuestionV2.Event.Replied.type, { sessionID, requestID: request.id, answers: [["One"]] }],
       ])
+    }),
+  )
+
+  it.effect("mirrors question lifecycle into file-backed session jsonl", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const directory = AbsolutePath.make(tmp.path)
+      const fileSessionID = SessionV2.ID.make("ses_question_jsonl")
+      const session = SessionV2.Info.make({
+        id: fileSessionID,
+        projectID: ProjectV2.ID.global,
+        title: "Question jsonl",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        location: Location.Ref.make({ directory }),
+      })
+      yield* Effect.promise(() => writeSessionStore(session))
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: ProjectV2.ID.global, worktree: directory, sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: ProjectV2.ID.global,
+          slug: "question-jsonl",
+          directory,
+          title: "Question jsonl",
+          version: "core",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const service = yield* QuestionV2.Service
+      const { fiber, request } = yield* waitForAsk(service, { sessionID: fileSessionID, questions: [question] })
+      yield* service.reply({ requestID: request.id, answers: [["One"]] })
+      expect(yield* Fiber.join(fiber)).toEqual([["One"]])
+
+      const entries = (
+        yield* Effect.promise(() =>
+          readFile(path.join(tmp.path, ".agents", "atree", "sessions", fileSessionID, "session.jsonl"), "utf8"),
+        )
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.some((entry) => entry.type === QuestionV2.Event.Asked.type && entry.id === request.id)).toBe(true)
+      expect(
+        entries.some((entry) => entry.type === QuestionV2.Event.Replied.type && entry.requestID === request.id),
+      ).toBe(true)
     }),
   )
 

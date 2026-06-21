@@ -4,7 +4,9 @@ import { Context, Deferred, Effect, Layer, Schema } from "effect"
 import { EventV2 } from "./event"
 import { Identifier } from "./id/id"
 import { withStatics } from "./schema"
+import { publishSessionEvent } from "./session/publish-session-event"
 import { SessionSchema } from "./session/schema"
+import { SessionStore } from "./session/store"
 
 export const ID = Schema.String.check(Schema.isStartsWith("que")).pipe(
   Schema.brand("QuestionV2.ID"),
@@ -123,7 +125,17 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const sessions = yield* SessionStore.Service
     const pending = new Map<ID, Pending>()
+
+    const publish = Effect.fn("QuestionV2.publish")(function* <D extends EventV2.Definition>(
+      sessionID: SessionSchema.ID,
+      definition: D,
+      data: EventV2.Data<D>,
+    ) {
+      const session = yield* sessions.get(sessionID)
+      return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "question event")
+    })
 
     yield* Effect.addFinalizer(() =>
       Effect.forEach(pending.values(), (item) => Deferred.fail(item.deferred, new RejectedError()), {
@@ -144,7 +156,7 @@ export const layer = Layer.effect(
           const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
           const request: Request = { id, ...input }
           pending.set(id, { request, deferred })
-          return yield* events.publish(Event.Asked, request).pipe(
+          return yield* publish(request.sessionID, Event.Asked, request).pipe(
             Effect.andThen(restore(Deferred.await(deferred))),
             Effect.ensuring(
               Effect.sync(() => {
@@ -161,7 +173,7 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
-          yield* events.publish(Event.Replied, {
+          yield* publish(existing.request.sessionID, Event.Replied, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
             answers: input.answers.map((answer) => [...answer]),
@@ -177,7 +189,7 @@ export const layer = Layer.effect(
         Effect.gen(function* () {
           const existing = pending.get(requestID)
           if (!existing) return yield* new NotFoundError({ requestID })
-          yield* events.publish(Event.Rejected, {
+          yield* publish(existing.request.sessionID, Event.Rejected, {
             sessionID: existing.request.sessionID,
             requestID: existing.request.id,
           })

@@ -1,5 +1,7 @@
 import { describe, expect } from "bun:test"
-import { Deferred, Effect, Fiber, Layer } from "effect"
+import path from "path"
+import { readFile } from "fs/promises"
+import { DateTime, Deferred, Effect, Fiber, Layer } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
@@ -14,9 +16,11 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
+import { tmpdir } from "./fixture/tmpdir"
 
 const database = Database.layerFromPath(":memory:")
 const current = Layer.succeed(
@@ -123,6 +127,81 @@ describe("PermissionV2", () => {
       yield* setRules([])
       expect(yield* service.ask(assertion())).toEqual({ id: PermissionV2.ID.create("per_test"), effect: "ask" })
       expect(yield* service.get(PermissionV2.ID.create("per_test"))).toBeDefined()
+    }),
+  )
+
+  it.effect("mirrors permission lifecycle into file-backed session jsonl", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const directory = AbsolutePath.make(tmp.path)
+      const sessionID = SessionV2.ID.make("ses_permission_jsonl")
+      const session = SessionV2.Info.make({
+        id: sessionID,
+        projectID: Project.ID.global,
+        title: "Permission jsonl",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        location: Location.Ref.make({ directory }),
+        agent: AgentV2.ID.make("test"),
+      })
+      yield* Effect.promise(() => writeSessionStore(session))
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: directory, sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "permission-jsonl",
+          directory,
+          title: "Permission jsonl",
+          version: "core",
+          agent: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* setRules([])
+
+      const service = yield* PermissionV2.Service
+      const events = yield* EventV2.Service
+      const asked = yield* Deferred.make<PermissionV2.Request>()
+      const unsubscribe = yield* events.listen((event) =>
+        event.type === PermissionV2.Event.Asked.type
+          ? Deferred.succeed(asked, event.data as PermissionV2.Request).pipe(Effect.asVoid)
+          : Effect.void,
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+      const fiber = yield* service.assert(assertion({ id: PermissionV2.ID.create("per_jsonl"), sessionID })).pipe(
+        Effect.forkScoped,
+      )
+      const request = yield* Deferred.await(asked)
+      expect(request.id).toBe(PermissionV2.ID.create("per_jsonl"))
+      yield* service.reply({ requestID: request.id, reply: "once" })
+      yield* Fiber.join(fiber)
+
+      const entries = (
+        yield* Effect.promise(() =>
+          readFile(path.join(tmp.path, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+        )
+      )
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.some((entry) => entry.type === PermissionV2.Event.Asked.type && entry.id === request.id)).toBe(
+        true,
+      )
+      expect(
+        entries.some((entry) => entry.type === PermissionV2.Event.Replied.type && entry.requestID === request.id),
+      ).toBe(true)
     }),
   )
 

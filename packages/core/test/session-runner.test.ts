@@ -58,9 +58,9 @@ import { testEffect } from "./lib/effect"
 
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
-const questions = QuestionV2.layer.pipe(Layer.provide(events))
 const projector = SessionProjector.layer.pipe(Layer.provide(events), Layer.provide(database))
 const store = SessionStore.layer.pipe(Layer.provide(database))
+const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store))
 const requests: LLMRequest[] = []
 let response: LLMEvent[] = []
 let responses: LLMEvent[][] | undefined
