@@ -236,6 +236,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.prompt` 在已经从目录事实源解析出 file-backed session 时，只会在 SQLite 投影行属于同一目录时才走旧的 `SessionInput.admit` 路径；如果同 session id 的 SQLite row 指向旧目录，用户消息会直接追加到当前目录的 `session.jsonl`，不再污染旧全局投影。
 - core `SessionStore.get` 会优先从持久化 atree root 查找目录事实源；只有当前 root 内没有 file-backed session 时，才回退 SQLite 中仍有效的旧目录 row 以兼容非 atree 旧会话。
 - server 包的 `SessionLocationMiddleware` 会优先校验 SQLite 缓存目录中的 file-backed session，旧目录失效时从持久化 root 查找目录事实源；V2 `session.get`、`session.prompt`、`session.context` 和 `session.messages` handler 会把解析出的当前目录继续传给 core `SessionV2`。
+- instance HTTP event stream 过滤事件时也使用规范化目录比较；用等价目录路径打开页面时，仍能收到当前目录会话的 `session.created` 等事件。
 - core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。
 - core `SessionV2.create` 在真实可写目录下会先写 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl` 的 `session.created`，再发布 Created 事件刷新 SQLite projector；不可写的虚拟目录仍保留 best-effort 兼容行为。因此新会话的目录事实源不再晚于全局投影。
 - core 读取 file-backed session 时会从 `session.updated` JSONL 重放 `title`、`agent`、`model`、`cost`、`tokens`、`projectID`、`parentID`、`workspaceID`、`subpath/path` 和时间字段；即使 `meta.yaml` 是陈旧投影，core 层也会以目录事件流为准。

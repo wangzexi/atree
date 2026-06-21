@@ -7,6 +7,7 @@ import * as Stream from "effect/Stream"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
+import path from "path"
 import { EventApi } from "../groups/event"
 
 function eventData(data: unknown): Sse.Event {
@@ -22,6 +23,11 @@ function eventID() {
   return EventV2.ID.create()
 }
 
+function sameDirectory(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false
+  return path.resolve(left) === path.resolve(right)
+}
+
 function eventResponse(events: EventV2.Interface) {
   return Effect.gen(function* () {
     const instance = yield* InstanceState.context
@@ -32,11 +38,13 @@ function eventResponse(events: EventV2.Interface) {
     const unsubscribe = yield* events.listen((event) => Effect.sync(() => Queue.offerUnsafe(queue, event)))
     yield* Effect.addFinalizer(() => unsubscribe)
     const stream = Stream.fromQueue(queue).pipe(
-      Stream.filter(
-        (event) =>
-          event.location?.directory === instance.directory &&
-          (event.location.workspaceID === undefined || event.location.workspaceID === workspaceID),
-      ),
+      Stream.filter((event) => {
+        const location = event.location
+        return (
+          sameDirectory(location?.directory, instance.directory) &&
+          (location?.workspaceID === undefined || location.workspaceID === workspaceID)
+        )
+      }),
       Stream.map((event) => ({ id: event.id, type: event.type, properties: event.data })),
     )
     const disposed = Stream.callback<{ id: string; type: string; properties: unknown }>((queue) => {
@@ -44,7 +52,8 @@ function eventResponse(events: EventV2.Interface) {
         directory?: string
         payload: { id?: string; type?: string; properties?: unknown }
       }) => {
-        if (event.directory !== instance.directory || event.payload.type !== "server.instance.disposed") return
+        if (!sameDirectory(event.directory, instance.directory) || event.payload.type !== "server.instance.disposed")
+          return
         Queue.offerUnsafe(queue, {
           id: event.payload.id ?? eventID(),
           type: "server.instance.disposed",

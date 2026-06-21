@@ -91,4 +91,19 @@ describe("event HttpApi", () => {
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
+
+  it.instance(
+    "delivers instance events for equivalent directory headers",
+    () =>
+      Effect.gen(function* () {
+        const { directory } = yield* TestInstance
+        const { reader } = yield* openEventStream(`${directory}/.`)
+        expect(yield* readEvent(reader)).toMatchObject({ type: "server.connected", properties: {} })
+
+        const created = yield* requestInDirectory("/session", directory, { method: "POST" })
+        expect(created.status).toBe(200)
+        expect(yield* readEvent(reader)).toMatchObject({ type: "session.created" })
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
 })
