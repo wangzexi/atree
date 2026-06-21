@@ -5,6 +5,7 @@ import fs from "fs/promises"
 import path from "path"
 import { Session } from "@/session/session"
 import { SessionPrompt } from "../../src/session/prompt"
+import { SessionCompaction } from "../../src/session/compaction"
 import { SessionSummary } from "../../src/session/summary"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
@@ -203,6 +204,37 @@ it.live("mirrors executed commands into the directory session log", () =>
             sessionID: session.id,
             arguments: "now",
             messageID: "msg_command_jsonl",
+          }),
+        ]),
+      )
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("mirrors compaction completion into the directory session log", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "compaction jsonl" })
+
+      yield* events.publish(SessionCompaction.Event.Compacted, { sessionID: session.id })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(session.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "session.compacted",
+            sessionID: session.id,
           }),
         ]),
       )
