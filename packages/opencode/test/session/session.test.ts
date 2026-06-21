@@ -945,6 +945,32 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("prefers a newer session jsonl metadata event over stale meta after a crash window", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* Effect.acquireRelease(session.create({ title: "stale-meta-source" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(info, {
+          type: "session.updated",
+          sessionID: info.id,
+          patch: { title: "JSONL survived title", metadata: { icon: "🧭" } },
+        }),
+      )
+
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, info.id))
+      expect(stored?.title).toBe("JSONL survived title")
+      expect(stored?.metadata).toEqual({ icon: "🧭" })
+
+      const loaded = yield* session.get(info.id, { directory: instance.directory })
+      expect(loaded.title).toBe("JSONL survived title")
+      expect(loaded.metadata).toEqual({ icon: "🧭" })
+    }),
+  )
+
   it.instance("writes copied file-backed session metadata to the explicit target directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

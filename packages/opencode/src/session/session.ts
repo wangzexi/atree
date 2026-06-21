@@ -1077,41 +1077,46 @@ export const layer: Layer.Layer<
       yield* patch(sessionID, { time: { updated: Date.now() } }, { directory: options?.directory }).pipe(Effect.orDie)
     })
 
+    const recordSessionPatch = Effect.fn("Session.recordSessionPatch")(function* (
+      sessionID: SessionID,
+      patch: Record<string, unknown>,
+      options?: DirectoryOption,
+    ) {
+      yield* appendSessionEvent(
+        sessionID,
+        {
+          type: "session.updated",
+          sessionID,
+          patch,
+        },
+        options,
+      )
+    })
+
     const setTitle = Effect.fn("Session.setTitle")(function* (
       input: { sessionID: SessionID; title: string } & DirectoryOption,
     ) {
+      yield* recordSessionPatch(input.sessionID, { title: input.title }, { directory: input.directory })
       yield* patch(input.sessionID, { title: input.title }, { directory: input.directory }).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { title: input.title },
-        },
-        { directory: input.directory },
-      )
     })
 
     const setArchived = Effect.fn("Session.setArchived")(function* (
       input: { sessionID: SessionID; time?: number | null } & DirectoryOption,
     ) {
+      yield* recordSessionPatch(
+        input.sessionID,
+        { time: { archived: input.time ?? null } },
+        { directory: input.directory },
+      )
       yield* patch(input.sessionID, { time: { archived: input.time } }, { directory: input.directory }).pipe(
         Effect.orDie,
-      )
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { time: { archived: input.time ?? null } },
-        },
-        { directory: input.directory },
       )
     })
 
     const setMetadata = Effect.fn("Session.setMetadata")(function* (
       input: typeof SetMetadataInput.Type & DirectoryOption,
     ) {
+      yield* recordSessionPatch(input.sessionID, { metadata: input.metadata }, { directory: input.directory })
       yield* patch(
         input.sessionID,
         { metadata: input.metadata, time: { updated: Date.now() } },
@@ -1119,15 +1124,6 @@ export const layer: Layer.Layer<
           directory: input.directory,
         },
       ).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { metadata: input.metadata },
-        },
-        { directory: input.directory },
-      )
     })
 
     const setPermission = Effect.fn("Session.setPermission")(function* (input: {
@@ -1135,6 +1131,11 @@ export const layer: Layer.Layer<
       permission: PermissionV1.Ruleset
       directory?: string
     }) {
+      yield* recordSessionPatch(
+        input.sessionID,
+        { permission: [...input.permission] },
+        { directory: input.directory },
+      )
       yield* patch(
         input.sessionID,
         { permission: [...input.permission], time: { updated: Date.now() } },
@@ -1142,15 +1143,6 @@ export const layer: Layer.Layer<
           directory: input.directory,
         },
       ).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { permission: [...input.permission] },
-        },
-        { directory: input.directory },
-      )
     })
 
     const setRevert = Effect.fn("Session.setRevert")(function* (input: {
@@ -1159,6 +1151,11 @@ export const layer: Layer.Layer<
       summary: Info["summary"]
       directory?: string
     }) {
+      yield* recordSessionPatch(
+        input.sessionID,
+        { summary: input.summary, revert: input.revert },
+        { directory: input.directory },
+      )
       yield* patch(
         input.sessionID,
         {
@@ -1168,29 +1165,12 @@ export const layer: Layer.Layer<
         },
         { directory: input.directory },
       ).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { summary: input.summary, revert: input.revert },
-        },
-        { directory: input.directory },
-      )
     })
 
     const clearRevert = Effect.fn("Session.clearRevert")(function* (sessionID: SessionID, options?: DirectoryOption) {
+      yield* recordSessionPatch(sessionID, { revert: null }, { directory: options?.directory })
       yield* patch(sessionID, { time: { updated: Date.now() }, revert: null }, { directory: options?.directory }).pipe(
         Effect.orDie,
-      )
-      yield* appendSessionEvent(
-        sessionID,
-        {
-          type: "session.updated",
-          sessionID,
-          patch: { revert: null },
-        },
-        { directory: options?.directory },
       )
     })
 
@@ -1199,20 +1179,12 @@ export const layer: Layer.Layer<
       summary: Info["summary"]
       directory?: string
     }) {
+      yield* recordSessionPatch(input.sessionID, { summary: input.summary }, { directory: input.directory })
       yield* patch(
         input.sessionID,
         { time: { updated: Date.now() }, summary: input.summary },
         { directory: input.directory },
       ).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { summary: input.summary },
-        },
-        { directory: input.directory },
-      )
     })
 
     const setShare = Effect.fn("Session.setShare")(function* (input: {
@@ -1220,20 +1192,12 @@ export const layer: Layer.Layer<
       share: Info["share"]
       directory?: string
     }) {
+      yield* recordSessionPatch(input.sessionID, { share: input.share ?? null }, { directory: input.directory })
       yield* patch(
         input.sessionID,
         { share: input.share ?? null, time: { updated: Date.now() } },
         { directory: input.directory },
       ).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { share: input.share ?? null },
-        },
-        { directory: input.directory },
-      )
     })
 
     const setWorkspace = Effect.fn("Session.setWorkspace")(function* (input: {
@@ -1241,20 +1205,16 @@ export const layer: Layer.Layer<
       workspaceID: Info["workspaceID"]
       directory?: string
     }) {
+      yield* recordSessionPatch(
+        input.sessionID,
+        { workspaceID: input.workspaceID ?? null },
+        { directory: input.directory },
+      )
       yield* patch(
         input.sessionID,
         { workspaceID: input.workspaceID, time: { updated: Date.now() } },
         { directory: input.directory },
       ).pipe(Effect.orDie)
-      yield* appendSessionEvent(
-        input.sessionID,
-        {
-          type: "session.updated",
-          sessionID: input.sessionID,
-          patch: { workspaceID: input.workspaceID ?? null },
-        },
-        { directory: input.directory },
-      )
     })
 
     const diff = Effect.fn("Session.diff")(function* (sessionID: SessionID) {
