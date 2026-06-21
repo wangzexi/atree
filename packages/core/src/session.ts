@@ -234,7 +234,7 @@ export const layer = Layer.effect(
     }
 
     function matchesListInput(info: SessionSchema.Info, input: ListInput, order: "asc" | "desc") {
-      if ("directory" in input && info.location.directory !== input.directory) return false
+      if ("directory" in input && !sameDirectory(info.location.directory, input.directory)) return false
       if (input.workspaceID && info.location.workspaceID !== input.workspaceID) return false
       if ("project" in input && info.projectID !== input.project) return false
       if (input.search && !info.title.includes(input.search)) return false
