@@ -225,6 +225,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.messages/context/message` 读取 file-backed session 时，已经能恢复用户/助手文本、reasoning、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、用户文件资产、agent/model/context/synthetic 直接事件、shell 事件、compaction 事件，以及 pending/running/completed 的 `tool-invocation` / v1 `tool` 调用状态。
 - core `SessionV2.switchModel` 会先把 `session.next.model.switched` 追加到当前会话目录的 `session.jsonl`，再发布 EventV2 事件；读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，让目录里的事件流能恢复当前 agent/model，而不是只恢复一条展示消息。
 - opencode 侧读取 `meta.yaml` 时也会重放 `session.next.agent.switched` / `session.next.model.switched`，并把 `modelID` 形态归一为当前 `Session.Info.model.id` 形态；core 和 web 侧对目录会话当前 agent/model 的恢复语义保持一致。
+- opencode prompt 创建用户消息时产生的 agent/model 切换事件会先追加到当前会话目录的 `session.jsonl`，再发布 EventV2；即使全局投影丢失，也能从目录恢复当前会话使用的 agent/model。
 - `moveSession` 在源目录存在 file-backed session store 时，会把 `.agents/atree/sessions/<session-id>/` 整个移动到目标目录，并把 `session.next.moved` 追加到移动后的 `session.jsonl`；如果源会话不是目录事实源，仍保留旧 SQLite/EventV2 行为。
 - core 和 opencode 读取会话元数据时都会重放 `session.next.moved`，但不会信任事件中的旧绝对目录路径；当前承载目录仍是事实源，只从 moved 事件恢复 workspace/subpath/path 和更新时间。
 - core `SessionV2.interrupt` 会把 `session.next.interrupt.requested` 镜像到当前会话目录的 `session.jsonl`，同时保留原有 EventV2 seq 传给 execution 的控制语义。
