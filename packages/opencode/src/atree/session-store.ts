@@ -385,9 +385,10 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     hasEvents = true
 
     const type = baseEventType(entry.type)
+    const data = eventData(entry)
 
-    if (type === "message.updated" && entry.message && typeof entry.message === "object") {
-      const message = entry.message as SessionV1.Info
+    if (type === "message.updated" && data.message && typeof data.message === "object") {
+      const message = data.message as SessionV1.Info
       const existing = messages.get(message.id)
       const parts = existing?.parts ?? orphanParts.get(message.id) ?? []
       messages.set(message.id, { info: message, parts })
@@ -396,8 +397,8 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       continue
     }
 
-    if (type === "message.part.updated" && entry.part && typeof entry.part === "object") {
-      const part = await resolveAssetURL(info, entry.part as SessionV1.Part)
+    if (type === "message.part.updated" && data.part && typeof data.part === "object") {
+      const part = await resolveAssetURL(info, data.part as SessionV1.Part)
       removedPartIDs.delete(`${part.messageID}:${part.id}`)
       const message = messages.get(part.messageID)
       if (message) {
@@ -411,10 +412,10 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     }
 
     if (type === "message.part.delta") {
-      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
-      const partID = typeof entry.partID === "string" ? entry.partID : undefined
-      const field = typeof entry.field === "string" ? entry.field : undefined
-      const delta = typeof entry.delta === "string" ? entry.delta : undefined
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const partID = typeof data.partID === "string" ? data.partID : undefined
+      const field = typeof data.field === "string" ? data.field : undefined
+      const delta = typeof data.delta === "string" ? data.delta : undefined
       if (!messageID || !partID || !field || delta === undefined) continue
       const part =
         messages.get(messageID)?.parts.find((item) => item.id === partID) ??
@@ -424,7 +425,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     }
 
     if (type === "message.removed") {
-      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       if (!messageID) continue
       removedMessageIDs.add(messageID)
       messages.delete(messageID)
@@ -433,8 +434,8 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     }
 
     if (type === "message.part.removed") {
-      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
-      const partID = typeof entry.partID === "string" ? entry.partID : undefined
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const partID = typeof data.partID === "string" ? data.partID : undefined
       if (!messageID || !partID) continue
       removedPartIDs.add(`${messageID}:${partID}`)
       const message = messages.get(messageID)

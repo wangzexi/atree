@@ -1087,16 +1087,17 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       continue
     }
     const type = baseEventType(entry.type)
-    if (type === "message.updated" && entry.message && typeof entry.message === "object") {
-      const message = entry.message as V1Message
+    const data = eventData(entry)
+    if (type === "message.updated" && data.message && typeof data.message === "object") {
+      const message = data.message as V1Message
       if (typeof message.id !== "string" || (message.role !== "user" && message.role !== "assistant")) continue
       const existing = messages.get(message.id)
       messages.set(message.id, { info: message, parts: existing?.parts ?? orphanParts.get(message.id) ?? [] })
       orphanParts.delete(message.id)
       removed.delete(message.id)
     }
-    if (type === "message.part.updated" && entry.part && typeof entry.part === "object") {
-      const part = entry.part as V1Part
+    if (type === "message.part.updated" && data.part && typeof data.part === "object") {
+      const part = data.part as V1Part
       if (typeof part.id !== "string" || typeof part.messageID !== "string") continue
       const message = messages.get(part.messageID)
       if (message) {
@@ -1111,10 +1112,10 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       removedParts.delete(`${part.messageID}:${part.id}`)
     }
     if (type === "message.part.delta") {
-      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
-      const partID = typeof entry.partID === "string" ? entry.partID : undefined
-      const field = typeof entry.field === "string" ? entry.field : undefined
-      const delta = typeof entry.delta === "string" ? entry.delta : undefined
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const partID = typeof data.partID === "string" ? data.partID : undefined
+      const field = typeof data.field === "string" ? data.field : undefined
+      const delta = typeof data.delta === "string" ? data.delta : undefined
       if (!messageID || !partID || !field || delta === undefined) continue
       if (removedParts.has(`${messageID}:${partID}`)) continue
       const part =
@@ -1122,14 +1123,14 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         orphanParts.get(messageID)?.find((item) => item.id === partID)
       if (part) appendPartDelta(part, field, delta)
     }
-    if (type === "message.removed" && typeof entry.messageID === "string") {
-      removed.add(entry.messageID)
-      messages.delete(entry.messageID)
-      orphanParts.delete(entry.messageID)
+    if (type === "message.removed" && typeof data.messageID === "string") {
+      removed.add(data.messageID)
+      messages.delete(data.messageID)
+      orphanParts.delete(data.messageID)
     }
     if (type === "message.part.removed") {
-      const messageID = typeof entry.messageID === "string" ? entry.messageID : undefined
-      const partID = typeof entry.partID === "string" ? entry.partID : undefined
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const partID = typeof data.partID === "string" ? data.partID : undefined
       if (!messageID || !partID) continue
       removedParts.add(`${messageID}:${partID}`)
       const message = messages.get(messageID)

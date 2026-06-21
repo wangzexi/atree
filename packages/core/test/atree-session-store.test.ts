@@ -625,6 +625,71 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("reads nested session.jsonl message event data through v2 APIs", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-nested-messages-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-nested-messages-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_nested_messages",
+          title: "Core nested messages",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_nested_messages", [
+          {
+            type: "message.updated",
+            data: {
+              message: {
+                id: "msg_core_nested_user",
+                role: "user",
+                time: { created: 30 },
+              },
+            },
+          },
+          {
+            type: "message.part.updated",
+            data: {
+              part: {
+                id: "prt_core_nested_user",
+                messageID: "msg_core_nested_user",
+                type: "text",
+                text: "nested",
+              },
+            },
+          },
+          {
+            type: "message.part.delta",
+            data: {
+              messageID: "msg_core_nested_user",
+              partID: "prt_core_nested_user",
+              field: "text",
+              delta: " event data",
+            },
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_nested_messages")
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+      const context = yield* sessions.context(sessionID)
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({ id: "msg_core_nested_user", type: "user", text: "nested event data" })
+      expect(context.map((message) => message.id)).toEqual([messages[0]!.id])
+    }),
+  )
+
   storeIt.effect("loads core SessionStore context from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))

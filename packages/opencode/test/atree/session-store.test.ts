@@ -603,6 +603,73 @@ describe("atree session store", () => {
     expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_versioned", type: "text", text: "hello versioned" })
   })
 
+  test("replays nested session.jsonl message events", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_replay_nested",
+      slug: "ses-replay-nested",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Replay nested",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "message.updated",
+      data: {
+        message: { id: "msg_nested", sessionID: "ses_replay_nested", role: "user", time: { created: 1 } },
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      data: {
+        part: {
+          id: "prt_nested",
+          sessionID: "ses_replay_nested",
+          messageID: "msg_nested",
+          type: "text",
+          text: "nested",
+        },
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.delta",
+      data: {
+        sessionID: "ses_replay_nested",
+        messageID: "msg_nested",
+        partID: "prt_nested",
+        field: "text",
+        delta: " data",
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      data: {
+        part: {
+          id: "prt_removed_nested",
+          sessionID: "ses_replay_nested",
+          messageID: "msg_nested",
+          type: "text",
+          text: "removed",
+        },
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.removed",
+      data: { messageID: "msg_nested", partID: "prt_removed_nested" },
+    })
+
+    const messages = await readSessionJsonlMessages(session)
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.info).toMatchObject({ id: "msg_nested", role: "user" })
+    expect(messages[0]?.parts).toHaveLength(1)
+    expect(messages[0]?.parts[0]).toMatchObject({ id: "prt_nested", type: "text", text: "nested data" })
+  })
+
   test("lets later updates clear message and part removal tombstones", async () => {
     const directory = await tempdir()
     const session = {
