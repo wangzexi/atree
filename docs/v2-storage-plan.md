@@ -244,7 +244,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、仍有效的 SQLite 缓存目录、持久化 atree root 扫描。复制或移动 `.agents/atree/` 后，如果旧 SQLite 目录已经失效，相关读写会继续定位到当前目录事实源。
 - core `ToolOutputStore` 在能通过 `SessionStore` 定位到 file-backed session 时，会把超长工具输出写入该会话的 `assets/tool-output/`；不能定位会话目录时仍回退到全局 `tool-output`，保持旧链路兼容。
 - opencode V1 工具截断链路也会携带当前 `sessionID`：普通工具、插件工具、shell 输出和 session tools 的超长输出会优先写入 `.agents/atree/sessions/<session-id>/assets/tool-output/`；缺少会话或 instance 上下文时仍回退全局 `tool-output`。
-- 非 VCS 项目的 plan 文件不再写入全局 `plans/`，而是写入当前会话的 `assets/plans/`；git 项目仍保留原有 `.opencode/plans/` 行为。plan agent 默认权限已经允许编辑会话内 `assets/plans/*.md`。
+- plan 文件不再写入全局 `plans/` 或 git 项目的 `.opencode/plans/`，而是统一写入当前会话的 `assets/plans/`。plan agent 默认权限已经允许编辑会话内 `assets/plans/*.md`。
 - schedule 执行后的 `lastRanAt`、`lastRunStatus` 和 `nextRun` 会回写到目录 `schedule.json`，并写入 `session.jsonl` 的运行事件；重启后可以恢复运行状态和下次执行时间。
 - 删除单个 schedule 时会携带当前会话目录上下文；复制 `.agents/atree/` 后，在目标目录删除自动化消息只会清目标目录的 `schedule.json`，不会清源目录。
 - 当 SQLite 中没有 schedule row 但调用方给出目录时，删除单个 schedule 会直接扫描该目录 file-backed sessions，并从对应会话的 `schedule.json` 中移除该自动化消息。
