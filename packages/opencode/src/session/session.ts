@@ -26,6 +26,7 @@ import {
   writeSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
+import { readWorkspaceState } from "@/atree/state"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -830,20 +831,30 @@ export const layer: Layer.Layer<
         .all()
         .pipe(Effect.orDie)
       const directoryInput = input?.directory ? input : undefined
+      const rootDirectory = directoryInput
+        ? undefined
+        : yield* Effect.promise(() => readWorkspaceState()).pipe(
+            Effect.map((state) => state.rootDirectory ?? ctx?.directory),
+            Effect.catchCause(() => Effect.succeed<string | undefined>(ctx?.directory)),
+          )
       const fileSessions = directoryInput
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
-        : undefined
+        : rootDirectory
+          ? yield* Effect.promise(() => readSessionStoresDeep(rootDirectory)).pipe(
+              Effect.catchCause(() => Effect.succeed([])),
+            )
+          : undefined
       const fileIDs = fileSessions ? new Set(fileSessions.map((item) => item.id)) : undefined
       const byID = new Map<string, Info>()
       for (const row of rows) {
-        if (fileIDs && !fileIDs.has(row.id)) continue
+        if (directoryInput && fileIDs && !fileIDs.has(row.id)) continue
         byID.set(row.id, fromRow(row))
       }
       if (fileSessions) {
         for (const fileSession of fileSessions) {
           const item = localizeFileSession(fileSession, ctx)
           byID.delete(item.id)
-          if (!matchesGlobalListInput(item, directoryInput!)) continue
+          if (!matchesGlobalListInput(item, input ?? {})) continue
           byID.set(item.id, item)
         }
       }

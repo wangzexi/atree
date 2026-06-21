@@ -6,6 +6,7 @@ import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { writeSessionStore } from "@/atree/session-store"
+import { writeWorkspaceRoot } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
 import fs from "fs/promises"
 import path from "path"
@@ -122,6 +123,37 @@ describe("session.listGlobal", () => {
           session.listGlobal({ directory: test.directory, archived: true, limit: 200 }),
         )
         expect(archived.map((session) => String(session.id))).toContain("ses_global_file_archived")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "includes file-backed sessions from the persisted atree root when no directory is provided",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_global_root_file_only",
+            slug: "global-root-file-only",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "Global root file only",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 10, updated: Date.now() },
+          } as any),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200 }))
+        const fileOnly = sessions.find((session) => String(session.id) === "ses_global_root_file_only")
+        expect(fileOnly?.directory).toBe(test.directory)
+        expect(fileOnly?.project?.id).toBe(ctx.project.id)
       }),
     { git: true },
   )
