@@ -240,6 +240,74 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.effect("does not write database todos for a missing explicit directory session", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const source = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-missing-source-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-missing-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const suffix = randomUUID().replaceAll("-", "")
+      const projectID = `proj_missing_explicit_todo_${suffix}`
+      const sessionID = `ses_missing_explicit_todo_${suffix}` as SessionID
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: projectID,
+          worktree: source,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: projectID,
+          slug: "missing-explicit-todo",
+          directory: source,
+          title: "Missing explicit todo",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* todo.update({
+        sessionID,
+        directory: target,
+        todos: [{ content: "should not be written", status: "pending", priority: "high" }],
+      })
+
+      const rows = yield* db
+        .select()
+        .from(TodoTable)
+        .where(eq(TodoTable.session_id, sessionID))
+        .all()
+        .pipe(Effect.orDie)
+      expect(rows).toEqual([])
+      expect(yield* Effect.promise(() => readSessionTodoState(target, sessionID))).toEqual([])
+    }),
+  )
+
   it.effect("restores todo state from session jsonl when todo projection files are removed", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service

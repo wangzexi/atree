@@ -167,6 +167,7 @@ export const layer = Layer.effect(
       directory?: string
     }) {
       const fileSession = yield* fileSessionForTodo(input.sessionID, input.directory)
+      if (input.directory && !fileSession) return
       if (fileSession) {
         yield* appendTodoSessionEvent(fileSession, input.todos).pipe(
           Effect.catchCause((cause) =>
