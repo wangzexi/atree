@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { randomUUID } from "crypto"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
@@ -679,9 +680,14 @@ describe("Session", () => {
 
       const staleDirectory = path.join(root, "old")
       const actualDirectory = path.join(root, "new")
-      const sessionID = "ses_stale_message_directory" as SessionID
-      const staleMessageID = "msg_stale_message_cache" as MessageID
-      const actualMessageID = "msg_actual_message_file" as MessageID
+      const suffix = randomUUID().replaceAll("-", "")
+      const sessionID = `ses_stale_message_directory_${suffix}` as SessionID
+      const staleProjectID = `proj_stale_message_${suffix}`
+      const actualProjectID = `proj_actual_message_${suffix}`
+      const staleMessageID = `msg_stale_message_cache_${suffix}` as MessageID
+      const stalePartID = `prt_stale_message_cache_${suffix}` as PartID
+      const actualMessageID = `msg_actual_message_file_${suffix}` as MessageID
+      const actualPartID = `prt_actual_message_file_${suffix}` as PartID
       const now = Date.now()
       yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
       yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
@@ -689,7 +695,7 @@ describe("Session", () => {
       yield* db
         .insert(ProjectTable)
         .values({
-          id: "proj_stale_message",
+          id: staleProjectID,
           worktree: staleDirectory,
           vcs: null,
           name: null,
@@ -703,7 +709,7 @@ describe("Session", () => {
         .insert(SessionTable)
         .values({
           id: sessionID,
-          project_id: "proj_stale_message",
+          project_id: staleProjectID,
           slug: "stale-message-directory",
           directory: staleDirectory,
           title: "Stale message directory",
@@ -736,7 +742,7 @@ describe("Session", () => {
       yield* db
         .insert(PartTable)
         .values({
-          id: "prt_stale_message_cache" as PartID,
+          id: stalePartID,
           message_id: staleMessageID,
           session_id: sessionID,
           time_created: now + 1,
@@ -749,7 +755,7 @@ describe("Session", () => {
         id: sessionID,
         slug: "actual-message-directory",
         version: "test",
-        projectID: "proj_actual_message",
+        projectID: actualProjectID,
         directory: actualDirectory,
         path: "new",
         title: "Actual message directory",
@@ -772,7 +778,7 @@ describe("Session", () => {
         appendSessionJsonl(actualSession, {
           type: "message.part.updated",
           part: {
-            id: "prt_actual_message_file",
+            id: actualPartID,
             messageID: actualMessageID,
             type: "text",
             text: "actual file-backed message",
