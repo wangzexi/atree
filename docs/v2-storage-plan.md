@@ -265,6 +265,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - schedule list 在定位到目录 projection 后会以目录状态为准：显式空 `schedule.json` 或较新的 `schedule.deleted` 事件会清理旧 `ScheduleTable` row；同 ID schedule 的 message、runAt、expression 也会从目录状态重建 DB/timer 投影，避免旧全局投影把目录里的定时任务复活或覆盖。
 - schedule 的运行 timer 会携带创建/恢复时的目录上下文；一次性自动化消息触发后，会在同一个目录的 `schedule.json` 中清空，不再依赖全局 SQLite session cache 推断目录。
 - schedule 触发时会把恢复到的目录上下文继续传给 prompt/loop；复制 `.agents/atree/` 后，自动化消息产生的新用户消息和后续回复会写入目标目录，而不是写回源目录或陈旧 SQLite row 指向的目录。
+- 服务启动恢复 schedule 时会递归扫描当前 atree root 下的嵌套目录，并用每个 file-backed session 自己的目录恢复 timer；嵌套节点的自动化消息不再依赖旧 SQLite `SessionTable` 行才能启动。
 - schedule 的创建、运行记录和删除会先追加到当前会话目录的 `session.jsonl`，再刷新 `schedule.json` 投影；归档会话导致的自动化清理也会留下 `schedule.deleted` 记录。即使是重启/恢复时发现 archived 会话里残留了旧 `schedule.json`，清理投影前也会补写删除事件。因此自动化消息不只是外部投影状态，也是会话原始记录的一部分。
 - schedule 到点触发的 `schedule.triggered` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`；它不改变 `schedule.json` 当前状态投影，但保留“自动化消息曾经被触发”的原始事实。
 - 当会话目录的 `schedule.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件时，schedule store 可以重放 JSONL 恢复当前自动化状态，包括最近运行状态和下次执行时间；这些投影读取同时接受扁平事件和 EventV2 风格的 `data` 嵌套事件。

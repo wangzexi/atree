@@ -263,6 +263,64 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "restores file-backed schedules from nested atree directories under a root",
+    Effect.gen(function* () {
+      const root = yield* tempdir
+      const nodeDirectory = path.join(root, "projects", "node")
+      const sessionID = "ses_nested_restore_schedule" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "nested-restore-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: nodeDirectory,
+          path: "projects/node",
+          title: "Nested restore schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(nodeDirectory, sessionID, [
+          {
+            id: "sch_nested_directory",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "restore nested schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.restoreDirectory(root))
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, "sch_nested_directory" as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+      expect(row?.message).toBe("restore nested schedule")
+
+      const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory: nodeDirectory }))
+      expect(String(listed[0]?.id)).toBe("sch_nested_directory")
+    }),
+  )
+
+  it.effect(
     "lists schedules for an explicit directory without a database session row",
     Effect.gen(function* () {
       const directory = yield* tempdir

@@ -20,7 +20,13 @@ import {
   readSessionScheduleState,
   writeSessionScheduleState,
 } from "@/atree/schedule-store"
-import { appendSessionJsonl, readSessionStore, readSessionStores, touchSessionStore } from "@/atree/session-store"
+import {
+  appendSessionJsonl,
+  readSessionStore,
+  readSessionStores,
+  readSessionStoresDeep,
+  touchSessionStore,
+} from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import { readWorkspaceState } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
@@ -848,11 +854,11 @@ export const layer = Layer.effect(
 
     const restoreDirectory: Interface["restoreDirectory"] = Effect.fn("Schedule.restoreDirectory")(
       function* (directory) {
-        const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
+        const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(directory))
         yield* Effect.forEach(
           fileSessions,
           (session) =>
-            restoreStoredSchedules(session.id, directory).pipe(
+            restoreStoredSchedules(session.id, session.directory).pipe(
               Effect.catchCause((cause) => Effect.logWarning("failed to restore file-backed schedules", { cause })),
             ),
           { concurrency: "unbounded", discard: true },
