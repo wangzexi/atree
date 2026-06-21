@@ -35,6 +35,7 @@ export class InvalidArgumentsError extends Schema.TaggedErrorClass<InvalidArgume
 
 export type Context<M extends Metadata = Metadata> = {
   sessionID: SessionID
+  directory?: string
   messageID: MessageID
   agent: string
   abort: AbortSignal

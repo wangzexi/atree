@@ -14,6 +14,7 @@ const directory = "/tmp/atree-tool-todo"
 function ctx(): Tool.Context {
   return {
     sessionID,
+    directory,
     messageID: "msg_tool_todo" as MessageID,
     agent: "build",
     abort: new AbortController().signal,
@@ -26,6 +27,7 @@ function ctx(): Tool.Context {
 describe("todowrite tool", () => {
   test("passes the current session directory to todo update", async () => {
     const calls = {
+      get: undefined as { id: SessionID; options?: { directory?: string } } | undefined,
       update: undefined as Parameters<Todo.Interface["update"]>[0] | undefined,
     }
 
@@ -43,8 +45,10 @@ describe("todowrite tool", () => {
       Layer.succeed(
         Session.Service,
         Session.Service.of({
-          get: () =>
-            Effect.succeed({
+          get: (id: SessionID, options?: { directory?: string }) =>
+            Effect.sync(() => {
+              calls.get = { id, options }
+              return {
               id: sessionID,
               directory,
               title: "Todo tool session",
@@ -53,7 +57,8 @@ describe("todowrite tool", () => {
               projectID: "proj_tool_todo",
               cost: 0,
               time: { created: Date.now(), updated: Date.now() },
-            } as any),
+              } as any
+            }),
         } as unknown as Session.Interface),
       ),
       Layer.succeed(
@@ -86,6 +91,7 @@ describe("todowrite tool", () => {
       }).pipe(Effect.provide(layer)),
     )
 
+    expect(calls.get).toEqual({ id: sessionID, options: { directory } })
     expect(calls.update).toEqual({
       sessionID,
       directory,

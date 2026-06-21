@@ -84,7 +84,7 @@ export const ScheduleTool = Tool.define<typeof Parameters, Metadata, Schedule.Se
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
-          const info = yield* session.get(ctx.sessionID)
+          const info = yield* session.get(ctx.sessionID, { directory: ctx.directory })
           const directory = info.directory
           switch (params.action) {
             case "create": {

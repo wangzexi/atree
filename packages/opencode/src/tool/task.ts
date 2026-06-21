@@ -115,7 +115,7 @@ export const TaskTool = Tool.define(
         return yield* Effect.fail(new Error(`Unknown agent type: ${params.subagent_type} is not a valid agent type`))
       }
 
-      const parent = yield* sessions.get(ctx.sessionID)
+      const parent = yield* sessions.get(ctx.sessionID, { directory: ctx.directory })
       const session = params.task_id
         ? yield* sessions
             .get(SessionID.make(params.task_id), { directory: parent.directory })

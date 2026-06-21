@@ -25,7 +25,7 @@ export const PlanExitTool = Tool.define(
       execute: (_params: {}, ctx: Tool.Context) =>
         Effect.gen(function* () {
           const instance = yield* InstanceState.context
-          const info = yield* session.get(ctx.sessionID)
+          const info = yield* session.get(ctx.sessionID, { directory: ctx.directory })
           const plan = path.relative(instance.worktree, Session.plan(info, instance))
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,

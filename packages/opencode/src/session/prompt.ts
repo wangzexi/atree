@@ -317,6 +317,7 @@ export const layer = Layer.effect(
           agent: task.agent,
           messageID: assistantMessage.id,
           sessionID,
+          directory: session.directory,
           abort: taskAbort.signal,
           callID: part.callID,
           extra: { bypassAgentCheck: true, promptOps },
@@ -855,6 +856,7 @@ export const layer = Layer.effect(
                 return read
                   .execute(args, {
                     sessionID: input.sessionID,
+                    directory: input.session.directory,
                     abort: controller.signal,
                     agent: input.agent!,
                     messageID: info.id,

@@ -14,6 +14,7 @@ const directory = "/tmp/atree-tool-schedule"
 function ctx(): Tool.Context {
   return {
     sessionID,
+    directory,
     messageID: "msg_tool_schedule" as MessageID,
     agent: "build",
     abort: new AbortController().signal,
@@ -26,6 +27,7 @@ function ctx(): Tool.Context {
 describe("schedule tool", () => {
   test("passes the current session directory to schedule operations", async () => {
     const calls = {
+      get: undefined as { id: SessionID; options?: { directory?: string } } | undefined,
       create: undefined as Parameters<Schedule.Interface["create"]>[0] | undefined,
       delete: undefined as { id: Schedule.ID; options?: { directory?: string } } | undefined,
       list: undefined as { sessionID: SessionID; options?: { directory?: string } } | undefined,
@@ -67,8 +69,10 @@ describe("schedule tool", () => {
       Layer.succeed(
         Session.Service,
         Session.Service.of({
-          get: () =>
-            Effect.succeed({
+          get: (id: SessionID, options?: { directory?: string }) =>
+            Effect.sync(() => {
+              calls.get = { id, options }
+              return {
               id: sessionID,
               directory,
               title: "Schedule tool session",
@@ -77,7 +81,8 @@ describe("schedule tool", () => {
               projectID: "proj_tool_schedule",
               cost: 0,
               time: { created: Date.now(), updated: Date.now() },
-            } as any),
+              } as any
+            }),
         } as unknown as Session.Interface),
       ),
       Layer.succeed(
@@ -115,6 +120,7 @@ describe("schedule tool", () => {
       }).pipe(Effect.provide(layer)),
     )
 
+    expect(calls.get).toEqual({ id: sessionID, options: { directory } })
     expect(calls.create).toMatchObject({ sessionID, directory, message: "run from tool" })
     expect(calls.list).toEqual({ sessionID, options: { directory } })
     expect(calls.delete).toEqual({ id: "sch_tool_schedule" as Schedule.ID, options: { directory } })

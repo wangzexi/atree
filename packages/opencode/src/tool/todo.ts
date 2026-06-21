@@ -34,7 +34,7 @@ export const TodoWriteTool = Tool.define<typeof Parameters, Metadata, Todo.Servi
       parameters: Parameters,
       execute: (params: Schema.Schema.Type<typeof Parameters>, ctx: Tool.Context<Metadata>) =>
         Effect.gen(function* () {
-          const info = yield* session.get(ctx.sessionID)
+          const info = yield* session.get(ctx.sessionID, { directory: ctx.directory })
           yield* ctx.ask({
             permission: "todowrite",
             patterns: ["*"],
