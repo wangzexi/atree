@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import { randomUUID } from "crypto"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
@@ -394,7 +395,9 @@ describe("atree todo state", () => {
 
       const staleDirectory = path.join(root, "old")
       const actualDirectory = path.join(root, "new")
-      const sessionID = "ses_stale_todo_directory" as SessionID
+      const suffix = randomUUID().replaceAll("-", "")
+      const projectID = `proj_stale_todo_${suffix}`
+      const sessionID = `ses_stale_todo_directory_${suffix}` as SessionID
       const now = Date.now()
       yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
       yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
@@ -402,7 +405,7 @@ describe("atree todo state", () => {
       yield* db
         .insert(ProjectTable)
         .values({
-          id: "proj_stale_todo",
+          id: projectID,
           worktree: staleDirectory,
           vcs: null,
           name: null,
@@ -416,7 +419,7 @@ describe("atree todo state", () => {
         .insert(SessionTable)
         .values({
           id: sessionID,
-          project_id: "proj_stale_todo",
+          project_id: projectID,
           slug: "stale-todo-directory",
           directory: staleDirectory,
           title: "Stale todo directory",
@@ -475,7 +478,9 @@ describe("atree todo state", () => {
           { content: "source todo", status: "pending", priority: "low" },
         ]),
       )
-      yield* Effect.promise(() => fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
 
       yield* todo.update({
         sessionID: session.id,
