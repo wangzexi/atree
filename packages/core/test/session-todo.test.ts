@@ -306,4 +306,44 @@ describe("SessionTodo", () => {
       })
     }),
   )
+
+  it.effect("prefers newer todo jsonl events over a stale todo projection", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-jsonl-newer-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_jsonl_newer")
+      const session = {
+        id: fileSessionID,
+        projectID: Project.ID.global,
+        title: "file todo jsonl newer",
+        location: { directory: AbsolutePath.make(directory) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }
+      const stale = [{ content: "stale projection", status: "pending", priority: "low" }]
+      const current = [{ content: "current jsonl", status: "completed", priority: "high" }]
+      yield* Effect.promise(() => writeSessionStore(session))
+      yield* Effect.promise(() =>
+        Bun.write(
+          path.join(directory, ".agents", "atree", "sessions", fileSessionID, "todo.json"),
+          JSON.stringify({ version: 1, updatedAt: 10, todos: stale }),
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "todo.updated",
+          sessionID: fileSessionID,
+          todos: current,
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: true,
+        todos: current,
+      })
+    }),
+  )
 })
