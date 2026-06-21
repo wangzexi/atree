@@ -19,7 +19,6 @@ import { MessageID, PartID, SessionID } from "@/session/schema"
 import { InstanceState } from "@/effect/instance-state"
 import { NamedError } from "@opencode-ai/core/util/error"
 import { Cause, Effect, Option, Schema, Scope } from "effect"
-import * as Stream from "effect/Stream"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder, HttpApiError, HttpApiSchema } from "effect/unstable/httpapi"
 import { InstanceHttpApi } from "../api"
@@ -108,7 +107,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const requireSession = Effect.fn("SessionHttpApi.requireSession")(function* (sessionID: SessionID) {
-      return yield* SessionError.mapStorageNotFound(session.get(sessionID))
+      const context = yield* InstanceState.context.pipe(
+        Effect.catchCause(() => Effect.succeed({ directory: undefined } as { directory?: string })),
+      )
+      return yield* SessionError.mapStorageNotFound(session.get(sessionID, { directory: context.directory }))
     })
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {
@@ -399,9 +401,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
           directory: info.directory,
         })
         .pipe(Effect.mapError(() => new HttpApiError.BadRequest({})))
-      return HttpServerResponse.stream(Stream.make(JSON.stringify(message)).pipe(Stream.encodeText), {
-        contentType: "application/json",
-      })
+      return HttpServerResponse.jsonUnsafe(message)
     })
 
     const promptAsync = Effect.fn("SessionHttpApi.promptAsync")(function* (ctx: {
