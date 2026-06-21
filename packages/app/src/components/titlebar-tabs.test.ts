@@ -68,4 +68,36 @@ describe("visibleDirectoryTabs", () => {
       }),
     ).toEqual([repo])
   })
+
+  test("does not leak stale directory group tabs while switching directories", () => {
+    const repo = sessionTab({ directory: "/repo", id: "ses_repo" })
+    const child = sessionTab({ directory: "/repo/child", id: "ses_child" })
+
+    expect(
+      visibleDirectoryTabs({
+        tabs: [repo, child],
+        current: repo,
+        currentDirectory: "/repo/child",
+        currentServer: serverKey("local"),
+        directoryGroup: { server: "local", directory: "/repo" },
+        tabDirectory,
+      }),
+    ).toEqual([])
+  })
+
+  test("isolates directory groups by server", () => {
+    const local = sessionTab({ directory: "/repo", id: "ses_local", server: "local" })
+    const remote = sessionTab({ directory: "/repo", id: "ses_remote", server: "remote" })
+
+    expect(
+      visibleDirectoryTabs({
+        tabs: [local, remote],
+        current: local,
+        currentDirectory: "/repo",
+        currentServer: serverKey("remote"),
+        directoryGroup: { server: "remote", directory: "/repo/" },
+        tabDirectory,
+      }),
+    ).toEqual([remote])
+  })
 })
