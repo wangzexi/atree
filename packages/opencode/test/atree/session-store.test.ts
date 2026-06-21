@@ -186,10 +186,29 @@ describe("atree session store", () => {
       type: "session.updated",
       data: { patch: { title: "Nested JSONL title", metadata: { icon: "🧪" } } },
     })
+    await appendSessionJsonl(session, {
+      type: "session.updated",
+      data: {
+        info: {
+          title: "Nested info title",
+          agent: "build",
+          model: { providerID: "test", modelID: "model-info", variant: "accurate" },
+          cost: 3.5,
+          tokens: { input: 11, output: 12, reasoning: 13, cache: { read: 14, write: 15 } },
+          path: "nested",
+          time: { created: 0, updated: 200 },
+        },
+      },
+    })
 
     const restored = await readSessionStore(directory, "ses_jsonl_meta" as any)
-    expect(restored?.title).toBe("Nested JSONL title")
+    expect(restored?.title).toBe("Nested info title")
     expect(restored?.metadata).toEqual({ icon: "🧪" })
+    expect(restored?.agent).toBe("build")
+    expect(restored?.model).toMatchObject({ providerID: "test", id: "model-info", variant: "accurate" } as any)
+    expect(restored?.cost).toBe(3.5)
+    expect(restored?.tokens).toEqual({ input: 11, output: 12, reasoning: 13, cache: { read: 14, write: 15 } })
+    expect(restored?.path).toBe("nested")
     expect(restored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
     expect(restored?.workspaceID).toBe("workspace-jsonl" as any)
     expect(restored?.share).toEqual({ url: "https://example.com/share" })
@@ -197,7 +216,8 @@ describe("atree session store", () => {
     expect(restored?.revert).toEqual({ messageID: "msg_jsonl_revert", partID: "prt_jsonl_revert" } as any)
     expect(restored?.time.compacting).toBe(12)
     expect(restored?.time.archived).toBeUndefined()
-    expect(restored?.time.updated).toBeGreaterThan(2)
+    expect(restored?.time.created).toBe(0)
+    expect(restored?.time.updated).toBeGreaterThanOrEqual(200)
   })
 
   test("replays session.diff events into session summary", async () => {

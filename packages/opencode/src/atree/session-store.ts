@@ -192,6 +192,26 @@ function diffSummary(value: unknown): SessionInfo["summary"] | undefined {
   }
 }
 
+function tokensValue(value: unknown): SessionInfo["tokens"] | undefined {
+  if (!isRecord(value)) return
+  const cache = isRecord(value.cache) ? value.cache : undefined
+  if (
+    typeof value.input !== "number" ||
+    typeof value.output !== "number" ||
+    typeof value.reasoning !== "number" ||
+    typeof cache?.read !== "number" ||
+    typeof cache.write !== "number"
+  ) {
+    return
+  }
+  return {
+    input: value.input,
+    output: value.output,
+    reasoning: value.reasoning,
+    cache: { read: cache.read, write: cache.write },
+  } as SessionInfo["tokens"]
+}
+
 function decodeDataURL(url: string) {
   const match = url.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/)
   if (!match) return
@@ -522,6 +542,12 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       if (typeof archived === "number") time.archived = archived
       else if (archived === null) delete time.archived
     }
+    if (isRecord(patch.time) && typeof patch.time.created === "number") {
+      time.created = patch.time.created
+    }
+    if (isRecord(patch.time) && typeof patch.time.updated === "number") {
+      time.updated = Math.max(time.updated, patch.time.updated)
+    }
     if (typeof entry.at === "number") {
       time.updated = Math.max(time.updated, entry.at)
     }
@@ -530,9 +556,19 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
       if (typeof compacting === "number") time.compacting = compacting
       else if (compacting === null) delete time.compacting
     }
+    const tokens = tokensValue(patch.tokens)
     next = {
       ...next,
       ...(typeof patch.title === "string" ? { title: patch.title } : {}),
+      ...(typeof patch.projectID === "string" ? { projectID: patch.projectID as SessionInfo["projectID"] } : {}),
+      ...("parentID" in patch
+        ? { parentID: typeof patch.parentID === "string" ? (patch.parentID as SessionInfo["parentID"]) : undefined }
+        : {}),
+      ...("path" in patch ? { path: typeof patch.path === "string" ? patch.path : undefined } : {}),
+      ...("agent" in patch ? { agent: typeof patch.agent === "string" ? patch.agent : undefined } : {}),
+      ...("model" in patch ? { model: modelRef(patch.model) } : {}),
+      ...(typeof patch.cost === "number" ? { cost: patch.cost } : {}),
+      ...(tokens ? { tokens } : {}),
       ...(isRecord(patch.metadata) ? { metadata: patch.metadata as SessionInfo["metadata"] } : {}),
       ...(Array.isArray(patch.permission) ? { permission: patch.permission as SessionInfo["permission"] } : {}),
       ...("workspaceID" in patch
