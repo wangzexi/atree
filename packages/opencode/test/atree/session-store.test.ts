@@ -340,6 +340,48 @@ describe("atree session store", () => {
     expect(sessions.map((item) => item.id)).toEqual(["ses_jsonl_created" as any])
   })
 
+  test("rebuilds session metadata from nested session.created event data", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_jsonl_created_nested",
+      slug: "jsonl-created-nested",
+      version: "test",
+      projectID: "proj_test",
+      directory: "/stale/source",
+      path: ".",
+      title: "Nested created from JSONL",
+      metadata: { icon: "🧭" },
+      cost: 7,
+      tokens: { input: 8, output: 9, reasoning: 10, cache: { read: 11, write: 12 } },
+      time: { created: 20, updated: 21, archived: 22 },
+    } as any
+
+    await appendSessionJsonl({ ...session, directory }, {
+      type: "session.created",
+      sessionID: "ses_jsonl_created_nested",
+      data: { info: session },
+    })
+    await appendSessionJsonl({ ...session, directory }, {
+      type: "session.updated",
+      sessionID: "ses_jsonl_created_nested",
+      data: { patch: { title: "Nested updated from JSONL", time: { archived: null } } },
+    })
+
+    const restored = await readSessionStore(directory, "ses_jsonl_created_nested" as any)
+    expect(restored).toMatchObject({
+      id: "ses_jsonl_created_nested",
+      slug: "jsonl-created-nested",
+      projectID: "proj_test",
+      directory,
+      title: "Nested updated from JSONL",
+      metadata: { icon: "🧭" },
+      cost: 7,
+      tokens: { input: 8, output: 9, reasoning: 10, cache: { read: 11, write: 12 } },
+    })
+    expect(restored?.time.created).toBe(20)
+    expect(restored?.time.archived).toBeUndefined()
+  })
+
   test("sorts directory sessions using session jsonl metadata update time", async () => {
     const directory = await tempdir()
     const base = {

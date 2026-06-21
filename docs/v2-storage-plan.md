@@ -265,6 +265,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - schedule 到点触发的 `schedule.triggered` 事件会在 EventV2Bridge 层镜像到当前目录会话的 `session.jsonl`；它不改变 `schedule.json` 当前状态投影，但保留“自动化消息曾经被触发”的原始事实。
 - 当会话目录的 `schedule.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件时，schedule store 可以重放 JSONL 恢复当前自动化状态，包括最近运行状态和下次执行时间；这些投影读取同时接受扁平事件和 EventV2 风格的 `data` 嵌套事件。
 - todo 投影也可以从扁平或 EventV2 `data` 嵌套的 `todo.updated` 事件恢复，确保工具状态的目录内事实源和事件总线镜像格式保持兼容。
+- 当 `meta.yaml` 缺失时，core 和 opencode 都可以从 `session.jsonl` 的 `session.created` 重建会话元数据；该恢复路径同时接受扁平 `info` 和 EventV2 风格的 `data.info`，随后继续重放 `session.updated` 得到最新状态。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 

@@ -603,16 +603,18 @@ function sessionInfoFromCreatedEvent(
   fallbackDirectory: string,
   fallbackSessionID: SessionID,
 ): SessionInfo | undefined {
-  if (baseEventType(entry.type) !== "session.created" || !isRecord(entry.info)) return
-  const info = entry.info
+  const data = eventData(entry)
+  if (baseEventType(entry.type) !== "session.created" || !isRecord(data.info)) return
+  const info = data.info
   const id = typeof info.id === "string" ? info.id : fallbackSessionID
   if (id !== fallbackSessionID) return
   const time = isRecord(info.time) ? info.time : {}
   const tokens = isRecord(info.tokens) ? info.tokens : undefined
   const cache = tokens && isRecord(tokens.cache) ? tokens.cache : undefined
-  const created = typeof time.created === "number" ? time.created : typeof entry.at === "number" ? entry.at : 0
+  const eventAt = timestampValue(data.at, timestampValue(entry.at, 0))
+  const created = typeof time.created === "number" ? time.created : eventAt
   const updated =
-    typeof time.updated === "number" ? time.updated : typeof entry.at === "number" ? entry.at : created
+    typeof time.updated === "number" ? time.updated : eventAt || created
   const compacting = typeof time.compacting === "number" ? time.compacting : undefined
   const archived = typeof time.archived === "number" ? time.archived : undefined
   const metadata =

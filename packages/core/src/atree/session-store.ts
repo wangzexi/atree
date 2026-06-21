@@ -223,14 +223,16 @@ function sessionInfoFromCreatedEvent(
   fallbackDirectory: string,
   fallbackSessionID: SessionSchema.ID,
 ) {
-  if (baseEventType(entry.type) !== "session.created" || !isRecord(entry.info)) return
-  const info = entry.info
+  const data = eventData(entry)
+  if (baseEventType(entry.type) !== "session.created" || !isRecord(data.info)) return
+  const info = data.info
   const id = typeof info.id === "string" ? info.id : fallbackSessionID
   if (id !== fallbackSessionID) return
   const time = isRecord(info.time) ? info.time : {}
   const location = isRecord(info.location) ? info.location : {}
-  const created = timestampValue(time.created, typeof entry.at === "number" ? entry.at : 0)
-  const updated = timestampValue(time.updated, typeof entry.at === "number" ? entry.at : created)
+  const eventAt = timestampValue(data.at, timestampValue(entry.at, 0))
+  const created = timestampValue(time.created, eventAt)
+  const updated = timestampValue(time.updated, eventAt || created)
   const archived = "archived" in time ? timestampValue(time.archived, Number.NaN) : Number.NaN
   return SessionSchema.Info.make({
     id: fallbackSessionID,

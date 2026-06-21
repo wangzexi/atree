@@ -411,6 +411,55 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("rebuilds file metadata from nested session.created event data", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-created-nested-root-")))
+      const node = path.join(root, "created-nested")
+      const sessionID = SessionV2.ID.make("ses_core_created_jsonl_nested")
+      yield* Effect.promise(() => mkdir(path.join(node, ".agents", "atree", "sessions", sessionID), { recursive: true }))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            version: 1,
+            at: 100,
+            type: "session.created",
+            sessionID,
+            data: {
+              info: {
+                id: sessionID,
+                slug: "core-created-jsonl-nested",
+                version: "test",
+                projectID: "global",
+                location: { directory: "/stale/source", workspaceID: "wrk_core_created_nested" },
+                subpath: ".",
+                title: "Nested created from core JSONL",
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: 10, updated: 20, archived: 30 },
+              },
+            },
+          },
+          {
+            version: 1,
+            at: 110,
+            type: "session.updated",
+            sessionID,
+            data: { patch: { title: "Nested updated from core JSONL", time: { archived: null } } },
+          },
+        ]),
+      )
+
+      const restored = yield* Effect.promise(() => readSessionStore(node, sessionID))
+      expect(restored?.id).toBe(sessionID)
+      expect(restored?.location.directory).toBe(node as any)
+      expect(restored?.location.workspaceID).toBe("wrk_core_created_nested" as any)
+      expect(restored?.title).toBe("Nested updated from core JSONL")
+      expect(restored?.time.archived).toBeUndefined()
+      expect(DateTime.toEpochMillis(restored!.time.created)).toBe(10)
+      expect(DateTime.toEpochMillis(restored!.time.updated)).toBe(110)
+    }),
+  )
+
   it.effect("replays moved events without trusting stale absolute directories", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-moved-root-")))
