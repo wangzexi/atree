@@ -174,6 +174,20 @@ function modelRef(value: unknown): SessionInfo["model"] | undefined {
   }
 }
 
+function diffSummary(value: unknown): SessionInfo["summary"] | undefined {
+  if (!Array.isArray(value)) return
+  const diffs = value.filter((item): item is Record<string, unknown> => isRecord(item))
+  if (diffs.length !== value.length) return
+  const additions = diffs.reduce((sum, item) => sum + (typeof item.additions === "number" ? item.additions : 0), 0)
+  const deletions = diffs.reduce((sum, item) => sum + (typeof item.deletions === "number" ? item.deletions : 0), 0)
+  return {
+    additions,
+    deletions,
+    files: diffs.length,
+    diffs: value as NonNullable<SessionInfo["summary"]>["diffs"],
+  }
+}
+
 function decodeDataURL(url: string) {
   const match = url.match(/^data:([^;,]+)?(;base64)?,([\s\S]*)$/)
   if (!match) return
@@ -477,6 +491,19 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
         time: {
           ...next.time,
           updated: Math.max(next.time.updated, updated),
+        },
+      }
+      continue
+    }
+    if (type === "session.diff") {
+      const summary = diffSummary(entry.diff)
+      if (!summary) continue
+      next = {
+        ...next,
+        summary,
+        time: {
+          ...next.time,
+          updated: Math.max(next.time.updated, typeof entry.at === "number" ? entry.at : 0),
         },
       }
       continue

@@ -196,6 +196,43 @@ describe("atree session store", () => {
     expect(restored?.time.updated).toBeGreaterThan(2)
   })
 
+  test("replays session.diff events into session summary", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_jsonl_diff",
+      slug: "jsonl-diff",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      path: ".",
+      title: "Diff session",
+      summary: { additions: 0, deletions: 0, files: 0, diffs: [] },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+    } as any
+    const diff = [
+      { file: "a.txt", additions: 2, deletions: 0, status: "added" as const, patch: "+a\n+b" },
+      { file: "b.txt", additions: 1, deletions: 3, status: "modified" as const, patch: "@@ -1 +1 @@" },
+    ]
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "session.diff",
+      sessionID: session.id,
+      diff,
+    })
+
+    const restored = await readSessionStore(directory, "ses_jsonl_diff" as any)
+    expect(restored?.summary).toEqual({
+      additions: 3,
+      deletions: 3,
+      files: 2,
+      diffs: diff,
+    })
+    expect(restored?.time.updated).toBeGreaterThan(2)
+  })
+
   test("rebuilds session metadata from session.created when meta.yaml is missing", async () => {
     const directory = await tempdir()
     const session = {
