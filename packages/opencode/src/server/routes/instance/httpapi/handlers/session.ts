@@ -165,7 +165,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID }
       query: typeof DiffQuery.Type
     }) {
-      const info = yield* session.get(ctx.params.sessionID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      const info = yield* requireSession(ctx.params.sessionID).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       if (!info) return []
       return yield* summary.diff({
         sessionID: ctx.params.sessionID,

@@ -698,6 +698,27 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "does not serve diff for stale database-only sessions in the current directory",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const headers = { "x-opencode-directory": test.directory }
+        const cachedOnly = yield* createSession({ title: "stale cache only diff" })
+
+        yield* Effect.promise(() =>
+          rm(path.join(test.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+            recursive: true,
+            force: true,
+          }),
+        )
+
+        const diff = yield* requestJson<unknown[]>(pathFor(SessionPaths.diff, { sessionID: cachedOnly.id }), { headers })
+        expect(diff).toEqual([])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
     "does not expose stale database-only sessions through experimental directory lists",
     () =>
       Effect.gen(function* () {
