@@ -1,24 +1,9 @@
 import fs from "fs/promises"
 import path from "path"
 import type { PermissionV2 } from "../permission"
-import { readSessionStores, readWorkspaceRoot } from "./session-store"
+import { readSessionStoresDeep, readWorkspaceRoot } from "./session-store"
 
 type RecordValue = Record<string, unknown>
-
-const FindMaxDepth = 8
-const FindMaxNodes = 2_000
-const IgnoredDirectories = new Set([
-  ".agents",
-  ".git",
-  ".hg",
-  ".svn",
-  "node_modules",
-  ".next",
-  ".turbo",
-  ".cache",
-  "dist",
-  "build",
-])
 
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -36,8 +21,13 @@ function sessionJsonlPath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
 }
 
-async function readDirectoryPermissions(directory: string, permissions: Map<string, PermissionV2.Request>) {
-  const sessions = await readSessionStores(directory)
+export async function readPermissionState(rootDirectory?: string) {
+  const rootInput = rootDirectory ?? (await readWorkspaceRoot())
+  if (!rootInput) return [] as PermissionV2.Request[]
+
+  const sessions = await readSessionStoresDeep(rootInput)
+  const permissions = new Map<string, PermissionV2.Request>()
+
   for (const session of sessions) {
     const raw = await fs.readFile(sessionJsonlPath(session.location.directory, session.id), "utf8").catch((error: unknown) => {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
@@ -66,40 +56,6 @@ async function readDirectoryPermissions(directory: string, permissions: Map<stri
       }
     }
   }
-}
 
-export async function readPermissionState(rootDirectory?: string) {
-  const rootInput = rootDirectory ?? (await readWorkspaceRoot())
-  if (!rootInput) return [] as PermissionV2.Request[]
-
-  const root = await fs.realpath(rootInput)
-  const budget = { count: 0 }
-  const permissions = new Map<string, PermissionV2.Request>()
-
-  async function walk(directory: string, depth: number): Promise<void> {
-    if (budget.count++ >= FindMaxNodes) return
-    await readDirectoryPermissions(directory, permissions)
-    if (depth >= FindMaxDepth) return
-
-    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error.code === "ENOENT" || error.code === "EACCES")
-      ) {
-        return []
-      }
-      throw error
-    })
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (IgnoredDirectories.has(entry.name)) continue
-      await walk(path.join(directory, entry.name), depth + 1)
-    }
-  }
-
-  await walk(root, 0)
   return [...permissions.values()]
 }
