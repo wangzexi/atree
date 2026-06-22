@@ -479,6 +479,22 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                   tab.type === "draft" && tab.server === currentServer && pathKey(tab.directory) === pathKey(directory),
               )
             })
+            createEffect(() => {
+              const route = layout.route()
+              if (route.type !== "session") return
+              const directory = route.dir
+              const currentServer = route.server ?? server.key
+              if (currentServer !== server.key) return
+
+              const [directoryStore] = serverSync.child(directory, { bootstrap: false })
+              const sessions = sortedRootSessions(
+                { session: directoryStore.session, path: { directory } },
+                Date.now(),
+              )
+              if (sessions.length === 0) return
+
+              tabsStoreActions.replaceDirectorySessions(currentServer, directory, sessions)
+            })
 
             const openNewTab = () => navigate(newSessionHref())
 
