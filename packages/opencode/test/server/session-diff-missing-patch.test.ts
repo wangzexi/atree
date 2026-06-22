@@ -123,4 +123,39 @@ describe("session diff with missing patch (#26574)", () => {
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
+
+  it.instance(
+    "GET /session/<id>/diff prefers directory-backed diffs over stale legacy storage",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const session = yield* withSession({ title: "directory-diff-wins" })
+        const fileSession = yield* Effect.promise(() => readSessionStore(test.directory, session.id))
+        expect(fileSession).toBeDefined()
+
+        yield* Storage.Service.use((storage) =>
+          storage.write(["session_diff", session.id], [
+            { file: "legacy.txt", additions: 10, deletions: 0, status: "modified", patch: "@@ legacy" },
+          ]),
+        )
+        yield* Effect.promise(() =>
+          appendSessionJsonl(fileSession!, {
+            type: "session.diff",
+            sessionID: session.id,
+            diff: [{ file: "directory.txt", additions: 1, deletions: 2, status: "modified", patch: "@@ directory" }],
+          }),
+        )
+
+        const response = yield* requestInDirectory(
+          pathFor(SessionPaths.diff, { sessionID: session.id }),
+          test.directory,
+        )
+
+        expect(response.status).toBe(200)
+        expect(yield* response.json).toEqual([
+          { file: "directory.txt", additions: 1, deletions: 2, status: "modified", patch: "@@ directory" },
+        ])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
 })
