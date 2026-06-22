@@ -623,6 +623,36 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("does not revive a persisted-root session that only remains in SQLite", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-stale-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-stale-root-")))
+      const node = path.join(root, "node")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(node, { recursive: true }))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_store_stale_only")
+      yield* sessions.create({
+        id: sessionID,
+        location: Location.Ref.make({ directory: AbsolutePath.make(node) }),
+      })
+      yield* Effect.promise(() =>
+        rm(path.join(node, ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
+      )
+
+      const error = yield* Effect.flip(sessions.get(sessionID))
+
+      expect(error).toBeInstanceOf(SessionV2.NotFoundError)
+    }),
+  )
+
   it.effect("prefers the persisted root copy over a still-valid SQLite directory row", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
