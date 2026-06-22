@@ -63,7 +63,7 @@ test.describe("atree invariants", () => {
     })
 
     await openApp(page, "/")
-    await expect(page.getByText("选择一个根目录开始", { exact: true })).toBeVisible()
+    await expect(page.getByRole("main").getByText("选择一个根目录开始", { exact: true })).toBeVisible()
     await expect(page.locator('[data-atree-session-tab]')).toHaveCount(0)
     expect(errors).toEqual([])
   })
