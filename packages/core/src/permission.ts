@@ -12,6 +12,7 @@ import { Identifier } from "./util/identifier"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSchema } from "./permission/schema"
 import { PermissionSaved } from "./permission/saved"
+import { readPermissionState } from "./atree/permission-store"
 
 export { Effect, Rule, Ruleset } from "./permission/schema"
 type Effect = PermissionSchema.Effect
@@ -143,6 +144,17 @@ export const layer = Layer.effect(
     const saved = yield* PermissionSaved.Service
     const pending = new Map<ID, Pending>()
 
+    const restorePending = EffectRuntime.fn("PermissionV2.restorePending")(function* () {
+      const restored = yield* EffectRuntime.promise(() => readPermissionState()).pipe(
+        EffectRuntime.catchCause(() => EffectRuntime.succeed([] as Request[])),
+      )
+      for (const request of restored) {
+        if (pending.has(request.id)) continue
+        const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
+        pending.set(request.id, { request, deferred })
+      }
+    })
+
     const publish = EffectRuntime.fn("PermissionV2.publish")(function* <D extends EventV2.Definition>(
       sessionID: SessionV2.ID,
       definition: D,
@@ -270,6 +282,7 @@ export const layer = Layer.effect(
     const reply = EffectRuntime.fn("PermissionV2.reply")((input: ReplyInput) =>
       EffectRuntime.uninterruptible(
         EffectRuntime.gen(function* () {
+          yield* restorePending()
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
           yield* publish(existing.request.sessionID, Event.Replied, {
@@ -336,14 +349,17 @@ export const layer = Layer.effect(
     )
 
     const list = EffectRuntime.fn("PermissionV2.list")(function* () {
+      yield* restorePending()
       return Array.from(pending.values(), (item) => item.request)
     })
 
     const get = EffectRuntime.fn("PermissionV2.get")(function* (id: ID) {
+      yield* restorePending()
       return pending.get(id)?.request
     })
 
     const forSession = EffectRuntime.fn("PermissionV2.forSession")(function* (sessionID: SessionV2.ID) {
+      yield* restorePending()
       return Array.from(pending.values(), (item) => item.request).filter((request) => request.sessionID === sessionID)
     })
 

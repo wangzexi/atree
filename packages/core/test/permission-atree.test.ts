@@ -1,0 +1,179 @@
+import { describe, expect } from "bun:test"
+import { AgentV2 } from "@opencode-ai/core/agent"
+import { Database } from "@opencode-ai/core/database/database"
+import { EventV2 } from "@opencode-ai/core/event"
+import { Global } from "@opencode-ai/core/global"
+import { Location } from "@opencode-ai/core/location"
+import { PermissionV2 } from "@opencode-ai/core/permission"
+import { PermissionSaved } from "@opencode-ai/core/permission/saved"
+import { Project } from "@opencode-ai/core/project"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionStore } from "@opencode-ai/core/session/store"
+import { Effect, Layer } from "effect"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
+import os from "os"
+import path from "path"
+import { location } from "./fixture/location"
+import { testEffect } from "./lib/effect"
+
+const database = Database.layerFromPath(":memory:")
+const current = Layer.succeed(
+  Location.Service,
+  Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+)
+const events = EventV2.layer.pipe(Layer.provide(database))
+const store = SessionStore.layer.pipe(Layer.provide(database))
+const sessions = SessionV2.layer.pipe(
+  Layer.provide(events),
+  Layer.provide(database),
+  Layer.provide(store),
+  Layer.provide(Project.defaultLayer),
+  Layer.provide(SessionExecution.noopLayer),
+)
+const saved = PermissionSaved.layer.pipe(Layer.provide(database))
+const permissions = PermissionV2.locationLayer.pipe(
+  Layer.provideMerge(database),
+  Layer.provideMerge(store),
+  Layer.provideMerge(events),
+  Layer.provideMerge(current),
+  Layer.provideMerge(sessions),
+  Layer.provideMerge(SessionExecution.noopLayer),
+  Layer.provideMerge(saved),
+)
+const it = testEffect(permissions)
+
+async function writeAtreeSession(input: {
+  data: string
+  root: string
+  directory: string
+  sessionID: string
+  title: string
+}) {
+  await mkdir(path.join(input.data, "atree"), { recursive: true })
+  await writeFile(
+    path.join(input.data, "atree", "state.json"),
+    JSON.stringify({ version: 1, rootDirectory: input.root, updatedAt: 1 }),
+  )
+
+  const sessionRoot = path.join(input.directory, ".agents", "atree", "sessions", input.sessionID)
+  await mkdir(sessionRoot, { recursive: true })
+  await writeFile(
+    path.join(sessionRoot, "meta.yaml"),
+    [
+      "version: 1",
+      `id: ${JSON.stringify(input.sessionID)}`,
+      `slug: ${JSON.stringify(input.sessionID)}`,
+      `sessionVersion: "atree-test"`,
+      `projectID: "global"`,
+      `workspaceID: null`,
+      `path: "."`,
+      `parentID: null`,
+      `title: ${JSON.stringify(input.title)}`,
+      `agent: null`,
+      `model: null`,
+      `createdAt: 10`,
+      `updatedAt: 20`,
+      `archivedAt: null`,
+      `cost: 0`,
+      `tokens: {"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}`,
+      `metadata: {}`,
+      "",
+    ].join("\n"),
+  )
+}
+
+async function writeSessionJsonl(directory: string, sessionID: string, entries: Record<string, unknown>[]) {
+  await writeFile(
+    path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"),
+    entries.map((entry) => JSON.stringify(entry)).join("\n") + "\n",
+  )
+}
+
+describe("PermissionV2 atree state", () => {
+  it.effect("restores pending permissions from directory session.jsonl and appends replies", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_permission_restore")
+      const pendingID = PermissionV2.ID.create("per_core_permission_pending")
+      const answeredID = PermissionV2.ID.create("per_core_permission_answered")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core permission restore",
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(node, sessionID, [
+          {
+            type: "permission.v2.asked",
+            id: pendingID,
+            sessionID,
+            action: "bash",
+            resources: ["echo pending"],
+            save: ["echo pending"],
+            metadata: {},
+          },
+          {
+            type: "permission.v2.asked",
+            id: answeredID,
+            sessionID,
+            action: "bash",
+            resources: ["echo answered"],
+            save: ["echo answered"],
+            metadata: {},
+          },
+          {
+            type: "permission.v2.replied",
+            sessionID,
+            requestID: answeredID,
+            reply: "once",
+          },
+        ]),
+      )
+
+      const service = yield* PermissionV2.Service
+      const restored = yield* service.list()
+      expect(restored.map((item) => item.id)).toEqual([pendingID])
+      expect(restored[0]?.sessionID).toBe(sessionID)
+      expect(yield* service.forSession(sessionID)).toHaveLength(1)
+      expect(yield* service.get(pendingID)).toMatchObject({ id: pendingID, action: "bash" })
+
+      yield* service.reply({ requestID: pendingID, reply: "once" })
+      expect(yield* service.list()).toEqual([])
+
+      const raw = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.v2.replied",
+          sessionID,
+          requestID: pendingID,
+          reply: "once",
+        }),
+      )
+    }),
+  )
+})
