@@ -3,7 +3,7 @@ import { afterEach, describe, expect } from "bun:test"
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Global } from "@opencode-ai/core/global"
-import { cp, mkdir, rm } from "node:fs/promises"
+import { cp, mkdir, readFile, rm } from "node:fs/promises"
 import path from "node:path"
 import { Cause, Config, Effect, Exit, Layer } from "effect"
 import { HttpClient, HttpClientRequest, HttpClientResponse, HttpRouter, HttpServer } from "effect/unstable/http"
@@ -1664,6 +1664,101 @@ describe("session HttpApi", () => {
         expect(restored.time.archived).toBeUndefined()
         expect(stored?.time.archived).toBeUndefined()
         expect(listed.map((item) => item.id)).toContain(sessionID)
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
+    "updates file-backed session metadata through the API without a database cache",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "file-backed-api-metadata",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "File backed API metadata",
+            metadata: { icon: "🧭" },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: now, updated: now },
+          } as any),
+        )
+
+        const updated = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID }), {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({
+            title: "Updated from API file source",
+            metadata: { icon: "🌲" },
+            time: { archived: 1234 },
+          }),
+        })
+
+        const restored = yield* requestJson<Session.Info>(pathFor(SessionPaths.update, { sessionID }), {
+          method: "PATCH",
+          headers,
+          body: JSON.stringify({ time: { archived: null } }),
+        })
+        const stored = yield* Effect.promise(() => readSessionStore(test.directory, sessionID))
+        const raw = yield* Effect.promise(() =>
+          readFile(path.join(test.directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+        )
+        const entries = raw
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line) as Record<string, any>)
+
+        expect(updated).toMatchObject({
+          id: sessionID,
+          title: "Updated from API file source",
+          metadata: { icon: "🌲" },
+          time: { archived: 1234 },
+        })
+        expect(restored.time.archived).toBeUndefined()
+        expect(stored).toMatchObject({
+          id: sessionID,
+          title: "Updated from API file source",
+          metadata: { icon: "🌲" },
+        })
+        expect(stored?.time.archived).toBeUndefined()
+        expect(entries).toContainEqual(
+          expect.objectContaining({
+            type: "session.updated",
+            sessionID,
+            patch: { title: "Updated from API file source" },
+          }),
+        )
+        expect(entries).toContainEqual(
+          expect.objectContaining({
+            type: "session.updated",
+            sessionID,
+            patch: { metadata: { icon: "🌲" } },
+          }),
+        )
+        expect(entries).toContainEqual(
+          expect.objectContaining({
+            type: "session.updated",
+            sessionID,
+            patch: { time: { archived: 1234 } },
+          }),
+        )
+        expect(entries).toContainEqual(
+          expect.objectContaining({
+            type: "session.updated",
+            sessionID,
+            patch: { time: { archived: null } },
+          }),
+        )
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )
