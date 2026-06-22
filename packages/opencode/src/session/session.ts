@@ -860,20 +860,25 @@ export const layer: Layer.Layer<
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
           : undefined
-      const fileIDs = fileSessions ? new Set(fileSessions.map((item) => item.id)) : undefined
-      const rootScopedFileIndex = !directoryInput && rootDirectory !== undefined && fileIDs !== undefined
+      const rootScopedFileIndex = !directoryInput && rootDirectory !== undefined && fileSessions !== undefined
+      const itemKey = (item: Pick<Info, "directory" | "id">) =>
+        rootScopedFileIndex ? `${path.resolve(item.directory)}\n${item.id}` : item.id
+      const fileKeys = fileSessions ? new Set(fileSessions.map(itemKey)) : undefined
       const byID = new Map<string, Info>()
       for (const row of rows) {
-        if (directoryInput && fileIDs && !fileIDs.has(row.id)) continue
-        if (rootScopedFileIndex && !fileIDs.has(row.id)) continue
-        byID.set(row.id, fromRow(row))
+        const item = fromRow(row)
+        const key = itemKey(item)
+        if (directoryInput && fileKeys && !fileKeys.has(key)) continue
+        if (rootScopedFileIndex && !fileKeys?.has(key)) continue
+        byID.set(key, item)
       }
       if (fileSessions) {
         for (const fileSession of fileSessions) {
           const item = localizeFileSession(fileSession, ctx)
-          byID.delete(item.id)
+          const key = itemKey(item)
+          byID.delete(key)
           if (!matchesGlobalListInput(item, input ?? {})) continue
-          byID.set(item.id, item)
+          byID.set(key, item)
         }
       }
       const sessions = [...byID.values()]

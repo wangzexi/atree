@@ -171,6 +171,56 @@ describe("session.listGlobal", () => {
   )
 
   it.instance(
+    "keeps copied file-backed sessions distinct across directories in the persisted atree root",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+
+        const source = path.join(test.directory, "source")
+        const target = path.join(test.directory, "target")
+        yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+        yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+
+        const base = {
+          id: "ses_global_root_copied",
+          slug: "global-root-copied",
+          version: "test",
+          projectID: ctx.project.id,
+          path: ".",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 10, updated: Date.now() },
+        }
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            directory: source,
+            title: "Global copied source",
+          } as any),
+        )
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            ...base,
+            directory: target,
+            title: "Global copied target",
+          } as any),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200 }))
+        const copied = sessions.filter((session) => String(session.id) === "ses_global_root_copied")
+
+        expect(copied.map((session) => session.directory).sort()).toEqual([source, target].sort())
+        expect(copied.map((session) => session.title).sort()).toEqual(
+          ["Global copied source", "Global copied target"].sort(),
+        )
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "excludes sessions outside the persisted atree root when no directory is provided",
     () =>
       Effect.gen(function* () {
