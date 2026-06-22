@@ -204,6 +204,31 @@ describe("atree schedule store", () => {
     })
   })
 
+  test("does not find orphan schedules without a session metadata store", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_orphan",
+      sessionID: "ses_orphan",
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "orphan schedule",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+
+    await fs.mkdir(path.join(directory, ".agents", "atree", "sessions", "ses_orphan"), { recursive: true })
+    await fs.writeFile(
+      path.join(directory, ".agents", "atree", "sessions", "ses_orphan", "schedule.json"),
+      JSON.stringify({ version: 1, updatedAt: 1, schedules: [schedule] }),
+    )
+
+    expect(await readSessionScheduleState(directory, "ses_orphan")).toEqual([schedule])
+    expect(await findSessionScheduleState(directory, "sch_orphan")).toBeUndefined()
+  })
+
   test("replays deleted schedules from session jsonl as absent", async () => {
     const directory = await tempdir()
     const schedule = {
