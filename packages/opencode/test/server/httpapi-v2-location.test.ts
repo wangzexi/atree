@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { Context, Schema } from "effect"
+import path from "node:path"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, tmpdir } from "../fixture/fixture"
@@ -23,7 +24,7 @@ const Event = Schema.Struct({
   type: Schema.String,
   location: Schema.Struct({
     directory: Schema.String,
-    project: Schema.Struct({ id: Schema.String, directory: Schema.String }),
+    project: Schema.optional(Schema.Struct({ id: Schema.String, directory: Schema.String })),
   }),
   data: Schema.Unknown,
 })
@@ -74,7 +75,23 @@ describe("v2 location HttpApi", () => {
     expect(created.status).toBe(200)
     expect(await readEventType(reader, "session.created")).toMatchObject({
       type: "session.created",
-      location: { directory: tmp.path, project: { directory: tmp.path } },
+      location: { directory: tmp.path },
+      data: { sessionID: expect.any(String) },
+    })
+    await reader.cancel()
+  })
+
+  test("streams events for equivalent directory headers", async () => {
+    await using tmp = await tmpdir({ git: true })
+    const response = await request("/api/event", path.join(tmp.path, "."))
+    const reader = response.body!.getReader()
+    expect((await readEvent(reader)).type).toBe("server.connected")
+
+    const created = await request("/session", tmp.path, { method: "POST" })
+    expect(created.status).toBe(200)
+    expect(await readEventType(reader, "session.created")).toMatchObject({
+      type: "session.created",
+      location: { directory: tmp.path },
       data: { sessionID: expect.any(String) },
     })
     await reader.cancel()

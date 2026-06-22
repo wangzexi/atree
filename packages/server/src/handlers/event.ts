@@ -5,6 +5,7 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import { Api } from "../api"
+import path from "path"
 
 function eventData(data: unknown): Sse.Event {
   return {
@@ -13,6 +14,11 @@ function eventData(data: unknown): Sse.Event {
     id: undefined,
     data: JSON.stringify(data),
   }
+}
+
+function sameDirectory(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false
+  return path.resolve(left) === path.resolve(right)
 }
 
 export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers) =>
@@ -37,11 +43,13 @@ export const EventHandler = HttpApiBuilder.group(Api, "server.event", (handlers)
               events
                 .all()
                 .pipe(
-                  Stream.filter(
-                    (event) =>
-                      event.location?.directory === location.directory &&
-                      event.location.workspaceID === location.workspaceID,
-                  ),
+                  Stream.filter((event) => {
+                    const eventLocation = event.location
+                    return (
+                      sameDirectory(eventLocation?.directory, location.directory) &&
+                      eventLocation?.workspaceID === location.workspaceID
+                    )
+                  }),
                 ),
             ),
             Stream.map(eventData),
