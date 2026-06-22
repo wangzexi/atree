@@ -10,7 +10,7 @@ import * as fs from "fs/promises"
 import os from "os"
 import path from "path"
 import { eq } from "drizzle-orm"
-import { MessageTable, PartTable } from "@opencode-ai/core/session/sql"
+import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 
 import { NotFoundError } from "@/storage/storage"
 import { testEffect } from "../lib/effect"
@@ -1083,6 +1083,49 @@ describe("MessageV2 consistency", () => {
         expect(error.message).toBe(`Session not found: ${created.id}`)
       }
       expect(parts).toEqual([])
+    }),
+  )
+
+  it.instance("does not read persisted-root messages when the session store was removed", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "opencode-test-message-v2-missing-data-"))),
+        (directory) => Effect.promise(() => fs.rm(directory, { recursive: true, force: true })),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      const created = yield* session.create({ title: "message-v2 persisted root missing" })
+      const messageID = yield* addUser(created.id, "stale persisted root message")
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", created.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const pageError = yield* Effect.flip(MessageV2.page({ sessionID: created.id, limit: 10 }))
+      const getError = yield* Effect.flip(MessageV2.get({ sessionID: created.id, messageID }))
+      const parts = yield* MessageV2.parts(messageID, { sessionID: created.id })
+
+      for (const error of [pageError, getError]) {
+        expect(error).toBeInstanceOf(NotFoundError)
+        expect(error.message).toBe(`Session not found: ${created.id}`)
+      }
+      expect(parts).toEqual([])
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select({ id: SessionTable.id })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, created.id))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.id).toBe(created.id)
     }),
   )
 

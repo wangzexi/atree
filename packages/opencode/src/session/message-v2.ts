@@ -2,6 +2,8 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import fs from "fs/promises"
+import path from "path"
 import {
   APIError,
   AbortedError,
@@ -37,8 +39,9 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
-import { readSessionJsonlProjection } from "@/atree/session-store"
+import { readSessionJsonlProjection, readSessionStore } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
+import { readWorkspaceState } from "@/atree/state"
 import type { Session } from "./session"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -126,6 +129,38 @@ function pageFileMessages(messages: WithParts[], input: { limit: number; before?
     cursor: cursorItem ? cursor.encode({ id: cursorItem.info.id as MessageID, time: cursorItem.info.time.created }) : undefined,
   }
 }
+
+async function realpathOrResolve(input: string) {
+  return fs.realpath(input).catch(() => path.resolve(input))
+}
+
+async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
+  if (!parent || !child) return false
+  const root = await realpathOrResolve(parent)
+  const target = await realpathOrResolve(child)
+  return target === root || target.startsWith(root + path.sep)
+}
+
+const missingPersistedRootSession = Effect.fn("MessageV2.missingPersistedRootSession")(function* (
+  db: Database.Interface["db"],
+  sessionID: SessionID,
+) {
+  const row = yield* db
+    .select({ directory: SessionTable.directory })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, sessionID))
+    .get()
+    .pipe(Effect.orDie)
+  if (!row?.directory) return false
+  const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+    Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+  )
+  if (!(yield* Effect.promise(() => isWithinDirectory(state.rootDirectory ?? undefined, row.directory)))) return false
+  const stored = yield* Effect.promise(() => readSessionStore(row.directory, sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(undefined)),
+  )
+  return stored === undefined
+})
 
 type PageResult = {
   items: WithParts[]
@@ -476,6 +511,9 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   if (input.directory) {
     return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
   }
+  if (yield* missingPersistedRootSession(db, input.sessionID)) {
+    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+  }
 
   const where = before
     ? and(eq(MessageTable.session_id, input.sessionID), older(before))
@@ -550,6 +588,9 @@ export function parts(messageID: MessageID, options?: { sessionID?: SessionID; d
       if (options.directory) {
         return []
       }
+      if (yield* missingPersistedRootSession(db, options.sessionID)) {
+        return []
+      }
     }
 
     const rows = yield* db
@@ -577,6 +618,9 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
     return message
   }
   if (input.directory) {
+    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
+  }
+  if (yield* missingPersistedRootSession(db, input.sessionID)) {
     return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
   }
 
