@@ -27,7 +27,7 @@ type GlobalStore = {
   path: Path
   project: Project[]
   session_todo: {
-    [sessionID: string]: Todo[]
+    [key: string]: Todo[]
   }
   provider: NormalizedProviderListResponse
   provider_auth: ProviderAuthResponse

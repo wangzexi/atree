@@ -278,7 +278,7 @@ export const createDirSyncContext = (
     if (sessionIDs.length === 0) return
     clearSessionPrefetch(serverSDK.scope, directory, sessionIDs)
     for (const sessionID of sessionIDs) {
-      serverSync.todo.set(sessionID, undefined)
+      serverSync.todo.set(sessionID, undefined, directory)
     }
     setStore(
       produce((draft) => {
@@ -525,10 +525,10 @@ export const createDirSyncContext = (
         const [store, setStore] = serverSync.child(directory)
         touch(directory, setStore, sessionID)
         const existing = store.todo[sessionID]
-        const cached = serverSync.data.session_todo[sessionID]
+        const cached = serverSync.todo.get(directory, sessionID)
         if (existing !== undefined) {
           if (cached === undefined) {
-            serverSync.todo.set(sessionID, existing)
+            serverSync.todo.set(sessionID, existing, directory)
           }
           if (!opts?.force) return
         }
@@ -543,7 +543,7 @@ export const createDirSyncContext = (
             if (!tracked(directory, sessionID)) return
             const list = todo.data ?? []
             setStore("todo", sessionID, reconcile(list, { key: "id" }))
-            serverSync.todo.set(sessionID, list)
+            serverSync.todo.set(sessionID, list, directory)
           }),
         )
       },

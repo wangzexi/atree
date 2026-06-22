@@ -44,7 +44,7 @@ type GlobalStore = {
   path: Path
   project: Project[]
   session_todo: {
-    [sessionID: string]: Todo[]
+    [key: string]: Todo[]
   }
   provider: NormalizedProviderListResponse
   provider_auth: ProviderAuthResponse
@@ -188,18 +188,30 @@ export function createServerSyncContextInner(_serverSDK?: ServerSDK) {
     return (setGlobalStore as (...args: unknown[]) => unknown)(...input)
   }) as typeof setGlobalStore
 
-  const setSessionTodo = (sessionID: string, todos: Todo[] | undefined) => {
+  const sessionTodoKey = (directory: string | undefined, sessionID: string) =>
+    directory ? `${directoryKey(directory)}\n${sessionID}` : sessionID
+
+  const getSessionTodo = (directory: string | undefined, sessionID: string) => {
+    if (!sessionID) return undefined
+    const scoped = globalStore.session_todo[sessionTodoKey(directory, sessionID)]
+    if (scoped !== undefined) return scoped
+    return globalStore.session_todo[sessionID]
+  }
+
+  const setSessionTodo = (sessionID: string, todos: Todo[] | undefined, directory?: string) => {
     if (!sessionID) return
+    const key = sessionTodoKey(directory, sessionID)
     if (!todos) {
       setGlobalStore(
         "session_todo",
         produce((draft) => {
-          delete draft[sessionID]
+          delete draft[key]
+          if (directory) delete draft[sessionID]
         }),
       )
       return
     }
-    setGlobalStore("session_todo", sessionID, reconcile(todos, { key: "id" }))
+    setGlobalStore("session_todo", key, reconcile(todos, { key: "id" }))
   }
 
   const paused = () => untrack(() => globalStore.reload) !== undefined
@@ -267,7 +279,7 @@ export function createServerSyncContextInner(_serverSDK?: ServerSDK) {
       })
       if (next.length !== store.session.length) {
         setStore("session", reconcile(next, { key: "id" }))
-        cleanupDroppedSessionCaches(store, setStore, next, setSessionTodo)
+        cleanupDroppedSessionCaches(store, setStore, next, setSessionTodo, directory)
       }
       children.unpin(key)
       return
@@ -304,7 +316,7 @@ export function createServerSyncContextInner(_serverSDK?: ServerSDK) {
                   }),
                 )
                 setStore("session", reconcile(sessions, { key: "id" }))
-                cleanupDroppedSessionCaches(store, setStore, sessions, setSessionTodo)
+                cleanupDroppedSessionCaches(store, setStore, sessions, setSessionTodo, directory)
               })
               sessionMeta.set(key, { limit })
             })
@@ -480,6 +492,7 @@ export function createServerSyncContextInner(_serverSDK?: ServerSDK) {
     updateConfig: updateConfigMutation.mutateAsync,
     project: projectApi,
     todo: {
+      get: getSessionTodo,
       set: setSessionTodo,
     },
     mcp: {

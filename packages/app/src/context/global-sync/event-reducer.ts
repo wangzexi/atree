@@ -55,10 +55,11 @@ export function applyGlobalEvent(input: {
 function cleanupSessionCaches(
   setStore: SetStoreFunction<State>,
   sessionID: string,
-  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void,
+  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined, directory?: string) => void,
+  directory?: string,
 ) {
   if (!sessionID) return
-  setSessionTodo?.(sessionID, undefined)
+  setSessionTodo?.(sessionID, undefined, directory)
   setStore(
     produce((draft) => {
       dropSessionCaches(draft, [sessionID])
@@ -70,7 +71,8 @@ export function cleanupDroppedSessionCaches(
   store: Store<State>,
   setStore: SetStoreFunction<State>,
   next: Session[],
-  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void,
+  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined, directory?: string) => void,
+  directory?: string,
 ) {
   const keep = new Set(next.map((item) => item.id))
   const stale = [
@@ -86,7 +88,7 @@ export function cleanupDroppedSessionCaches(
   ].filter((sessionID, index, list) => !keep.has(sessionID) && list.indexOf(sessionID) === index)
   if (stale.length === 0) return
   for (const sessionID of stale) {
-    setSessionTodo?.(sessionID, undefined)
+    setSessionTodo?.(sessionID, undefined, directory)
   }
   setStore(
     produce((draft) => {
@@ -103,7 +105,7 @@ export function applyDirectoryEvent(input: {
   directory: string
   loadLsp: () => void
   vcsCache?: VcsCache
-  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined) => void
+  setSessionTodo?: (sessionID: string, todos: Todo[] | undefined, directory?: string) => void
   retainedLimit?: number
 }) {
   const event = input.event
@@ -125,7 +127,7 @@ export function applyDirectoryEvent(input: {
       next.splice(result.index, 0, info)
       const trimmed = trimSessions(next, { limit, permission: input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
-      cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
+      cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo, input.directory)
       if (!info.parentID) input.setStore("sessionTotal", (value) => value + 1)
       break
     }
@@ -143,7 +145,7 @@ export function applyDirectoryEvent(input: {
             }),
           )
         }
-        cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
+        cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo, input.directory)
         if (info.parentID) break
         input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
         break
@@ -156,7 +158,7 @@ export function applyDirectoryEvent(input: {
       next.splice(result.index, 0, info)
       const trimmed = trimSessions(next, { limit, permission: input.store.permission })
       input.setStore("session", reconcile(trimmed, { key: "id" }))
-      cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo)
+      cleanupDroppedSessionCaches(input.store, input.setStore, trimmed, input.setSessionTodo, input.directory)
       break
     }
     case "session.deleted": {
@@ -171,7 +173,7 @@ export function applyDirectoryEvent(input: {
           }),
         )
       }
-      cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo)
+      cleanupSessionCaches(input.setStore, info.id, input.setSessionTodo, input.directory)
       if (info.parentID) break
       input.setStore("sessionTotal", (value) => Math.max(0, value - 1))
       break
@@ -184,7 +186,7 @@ export function applyDirectoryEvent(input: {
     case "todo.updated": {
       const props = event.properties as { sessionID: string; todos: Todo[] }
       input.setStore("todo", props.sessionID, reconcile(props.todos, { key: "id" }))
-      input.setSessionTodo?.(props.sessionID, props.todos)
+      input.setSessionTodo?.(props.sessionID, props.todos, input.directory)
       break
     }
     case "session.status": {

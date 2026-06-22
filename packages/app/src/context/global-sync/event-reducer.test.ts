@@ -371,7 +371,7 @@ describe("applyDirectoryEvent", () => {
     const dropped = rootSession({ id: "ses_b" })
     const kept = rootSession({ id: "ses_a" })
     const message = userMessage("msg_1", dropped.id)
-    const todos: string[] = []
+    const todos: Array<{ sessionID: string; directory?: string }> = []
     const [store, setStore] = createStore(
       baseState({
         limit: 1,
@@ -393,9 +393,9 @@ describe("applyDirectoryEvent", () => {
       push() {},
       directory: "/tmp",
       loadLsp() {},
-      setSessionTodo(sessionID, value) {
+      setSessionTodo(sessionID, value, directory) {
         if (value !== undefined) return
-        todos.push(sessionID)
+        todos.push({ sessionID, directory })
       },
     })
 
@@ -407,7 +407,7 @@ describe("applyDirectoryEvent", () => {
     expect(store.permission[dropped.id]).toBeUndefined()
     expect(store.question[dropped.id]).toBeUndefined()
     expect(store.session_status[dropped.id]).toBeUndefined()
-    expect(todos).toEqual([dropped.id])
+    expect(todos).toEqual([{ sessionID: dropped.id, directory: "/tmp" }])
   })
 
   test("cleanupDroppedSessionCaches clears part-only orphan state", () => {
@@ -421,6 +421,32 @@ describe("applyDirectoryEvent", () => {
     cleanupDroppedSessionCaches(store, setStore, store.session)
 
     expect(store.part.msg_1).toBeUndefined()
+  })
+
+  test("updates global todo cache with the event directory", () => {
+    const [store, setStore] = createStore(baseState())
+    const calls: Array<{ sessionID: string; directory?: string; count?: number }> = []
+
+    applyDirectoryEvent({
+      event: {
+        type: "todo.updated",
+        properties: {
+          sessionID: "ses_1",
+          todos: [{ id: "todo_1", content: "check", status: "pending", priority: "medium" }],
+        },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/target",
+      loadLsp() {},
+      setSessionTodo(sessionID, value, directory) {
+        calls.push({ sessionID, directory, count: value?.length })
+      },
+    })
+
+    expect(store.todo.ses_1).toHaveLength(1)
+    expect(calls).toEqual([{ sessionID: "ses_1", directory: "/target", count: 1 }])
   })
 
   test("upserts and removes messages while clearing orphaned parts", () => {

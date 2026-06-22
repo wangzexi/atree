@@ -802,7 +802,7 @@ export default function Layout(props: ParentProps) {
             if (stale.length > 0) {
               clearSessionPrefetch(serverSDK.scope, directory, stale)
               for (const id of stale) {
-                serverSync.todo.set(id, undefined)
+                serverSync.todo.set(id, undefined, directory)
               }
             }
 

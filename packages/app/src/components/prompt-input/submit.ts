@@ -236,7 +236,7 @@ export function createPromptSubmit(input: PromptSubmitInput) {
     const sessionID = params.id
     if (!sessionID) return Promise.resolve()
 
-    serverSync.todo.set(sessionID, [])
+    serverSync.todo.set(sessionID, [], sdk.directory)
     const [, setStore] = serverSync.child(sdk.directory)
     setStore("todo", sessionID, [])
 

@@ -50,7 +50,7 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
   const todos = createMemo((): Todo[] => {
     const id = params.id
     if (!id) return []
-    return serverSync.data.session_todo[id] ?? []
+    return serverSync.todo.get(sdk.directory, id) ?? []
   })
 
   const done = createMemo(
@@ -111,7 +111,7 @@ export function createSessionComposerState(options?: { closeMs?: number | (() =>
   const clear = () => {
     const id = params.id
     if (!id) return
-    serverSync.todo.set(id, [])
+    serverSync.todo.set(id, [], sdk.directory)
     sync.set("todo", id, [])
   }
 
