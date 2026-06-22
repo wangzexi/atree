@@ -494,6 +494,75 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("continues mutating directory-backed session metadata after SQLite projection is removed", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "file source mutations", metadata: { icon: "🧭" } })
+      yield* db
+        .delete(SessionTable)
+        .where(and(eq(SessionTable.id, session.id), eq(SessionTable.directory, instance.directory)))
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* sessions.setTitle({
+        sessionID: session.id,
+        directory: instance.directory,
+        title: "mutated from file source",
+      })
+      yield* sessions.setMetadata({
+        sessionID: session.id,
+        directory: instance.directory,
+        metadata: { icon: "🌲" },
+      })
+      yield* sessions.setArchived({ sessionID: session.id, directory: instance.directory, time: 1234 })
+      yield* sessions.setArchived({ sessionID: session.id, directory: instance.directory, time: null })
+
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, session.id))
+      expect(stored?.title).toBe("mutated from file source")
+      expect(stored?.metadata).toEqual({ icon: "🌲" })
+      expect(stored?.time.archived).toBeUndefined()
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "session.updated",
+          sessionID: session.id,
+          patch: { title: "mutated from file source" },
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "session.updated",
+          sessionID: session.id,
+          patch: { metadata: { icon: "🌲" } },
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "session.updated",
+          sessionID: session.id,
+          patch: { time: { archived: 1234 } },
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "session.updated",
+          sessionID: session.id,
+          patch: { time: { archived: null } },
+        }),
+      )
+    }),
+  )
+
   it.instance("removing a scheduled session clears its directory store and schedule runtime cache", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
