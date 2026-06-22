@@ -342,6 +342,76 @@ describe("SessionTodo", () => {
     }),
   )
 
+  it.effect("does not revive persisted-root todos when the session store was removed", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-stale-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-stale-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "node")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+      yield* Effect.promise(() => mkdir(node, { recursive: true }))
+
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_stale_only")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo-stale-only",
+          directory: node,
+          title: "file todo stale only",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: fileSessionID,
+          content: "stale root database todo",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          projectID: Project.ID.global,
+          title: "file todo stale only",
+          location: { directory: AbsolutePath.make(node) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+      yield* Effect.promise(() =>
+        rm(path.join(node, ".agents", "atree", "sessions", fileSessionID), { recursive: true, force: true }),
+      )
+
+      expect(yield* todos.get(fileSessionID)).toEqual([])
+    }),
+  )
+
   it.effect("records file-backed todo events before refreshing the directory projection", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
