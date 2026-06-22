@@ -3,6 +3,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { Slug } from "@opencode-ai/core/util/slug"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { serviceUse } from "@opencode-ai/core/effect/service-use"
+import fs from "fs/promises"
 import path from "path"
 import { BackgroundJob } from "@/background/job"
 import { Decimal } from "decimal.js"
@@ -179,10 +180,14 @@ function sameDirectory(left: string, right: string) {
   return path.resolve(left) === path.resolve(right)
 }
 
-function isWithinDirectory(parent: string | undefined, child: string | undefined) {
+async function realpathOrResolve(input: string) {
+  return fs.realpath(input).catch(() => path.resolve(input))
+}
+
+async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
   if (!parent || !child) return false
-  const root = path.resolve(parent)
-  const target = path.resolve(child)
+  const root = await realpathOrResolve(parent)
+  const target = await realpathOrResolve(child)
   return target === root || target.startsWith(root + path.sep)
 }
 
@@ -735,7 +740,7 @@ export const layer: Layer.Layer<
         const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
           Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
         )
-        if (isWithinDirectory(state.rootDirectory ?? undefined, cached.directory)) {
+        if (yield* Effect.promise(() => isWithinDirectory(state.rootDirectory ?? undefined, cached.directory))) {
           return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
         }
         return cached

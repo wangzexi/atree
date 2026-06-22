@@ -1367,6 +1367,74 @@ describe("Session", () => {
     }),
   )
 
+  it.effect("does not load a stale persisted-root session through a symlinked database directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-session-realpath-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-session-realpath-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const alias = `${root}-alias`
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.acquireRelease(
+        Effect.promise(() => fs.symlink(root, alias, "dir")),
+        () => Effect.promise(() => fs.rm(alias, { force: true })).pipe(Effect.ignore),
+      )
+
+      const suffix = randomUUID().replaceAll("-", "")
+      const projectID = `proj_session_realpath_${suffix}`
+      const sessionID = `ses_session_realpath_${suffix}` as SessionID
+      const node = path.join(alias, "node")
+      const now = Date.now()
+      yield* Effect.promise(() => fs.mkdir(path.join(root, "node"), { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: projectID,
+          worktree: node,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: projectID,
+          slug: "session-realpath-stale",
+          directory: node,
+          title: "Session realpath stale",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const error = yield* Effect.flip(session.get(sessionID))
+      expect(error).toBeInstanceOf(NotFoundError)
+      expect(error.message).toBe(`Session not found: ${sessionID}`)
+    }),
+  )
+
   it.instance("materializes data-url file parts into the session assets directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
