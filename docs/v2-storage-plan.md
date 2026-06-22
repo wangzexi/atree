@@ -298,6 +298,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - question/permission 的 pending 列表可以从当前目录会话的 `session.jsonl` 重放恢复；已经 `replied` / `rejected` 的请求不会重新出现在列表里。恢复出来的 pending 可以继续被用户回复，回复决定会追加回同一份 `session.jsonl`；服务关闭时不会被自动写成拒绝。
 - 当 `meta.yaml` 缺失时，core 和 opencode 都可以从 `session.jsonl` 的 `session.created` 重建会话元数据；该恢复路径同时接受扁平 `info` 和 EventV2 风格的 `data.info`，随后继续重放 `session.updated` 得到最新状态。
 - 会话 diff summary 可以从 `session.jsonl` 的 `session.diff` 事件恢复；即使 SQLite session row 和 `meta.yaml` 都不存在，带目录上下文的 `Session.diff` 仍能返回目录日志里的变更摘要。
+- `session.next.*` 中可重放的 durable 边界事件会经由 EventV2Bridge 镜像进当前目录会话的 `session.jsonl`；text/reasoning/tool input/compaction 的 delta 仍保持 live-only，不写入目录事实源。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 - 删除 workspace 时会通过 session service 查找当前 workspace 的会话；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。
@@ -311,7 +312,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 仍未完成的部分：
 
 - 全局 SQLite 仍然存在，并且仍承担运行时投影和部分 OpenCode 兼容链路。
-- `EventV2` 的 durable event log 还没有完整迁移到每个目录的 `session.jsonl`；当前 core reader 已能恢复 prompted 用户消息和 assistant step/text/reasoning/tool，question/permission 事件已开始写入 JSONL，并且 pending 列表可以从 JSONL 重放恢复；但恢复后的 pending 如何重新绑定原本等待中的执行 fiber 仍待单独设计。
+- `EventV2` 的 durable event log 还没有完整迁移到每个目录的 `session.jsonl`；当前 core reader 已能恢复 prompted 用户消息和 assistant step/text/reasoning/tool，`session.next.*` durable 边界事件、question/permission 事件已开始写入 JSONL，并且 pending 列表可以从 JSONL 重放恢复；但恢复后的 pending 如何重新绑定原本等待中的执行 fiber 仍待单独设计。
 - projector、部分 CLI/旧同步导出仍以 SQLite 为中心；CLI `import` / `export` / `stats` 已开始读写目录事实源，`MessageV2.page/get/parts` 和 session/todo/schedule 的常用读取链路已经会先尝试 file-backed session resolver。
 - worktree 等派生产物仍会落到全局 data dir；snapshot runtime 已迁入目录内，但其它没有明确 session/location 上下文的产物仍需要后续单独设计迁移路径。
 - `schedule.json`、`todo.json` 仍是 OpenCode spike 的过渡文件，长期应折叠进 Pi/core session 事件或更清晰的 atree 扩展协议。

@@ -10,6 +10,7 @@ import { Schedule } from "../../src/session/schedule"
 import { SessionSummary } from "../../src/session/summary"
 import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
+import { SessionEvent } from "@opencode-ai/core/session/event"
 import { readSessionStore } from "@/atree/session-store"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Command } from "@/command"
@@ -20,6 +21,7 @@ import { LSP } from "@/lsp/lsp"
 import { MCP } from "../../src/mcp"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { RuntimeFlags } from "@/effect/runtime-flags"
+import { DateTime } from "effect"
 
 const mcp = Layer.succeed(
   MCP.Service,
@@ -309,6 +311,56 @@ it.live("mirrors session diffs into the directory session log", () =>
           }),
         ]),
       )
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("mirrors durable session.next events into the directory session log", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const session = yield* sessions.create({ title: "durable event jsonl" })
+      const assistantMessageID = "msg_atree_durable_assistant" as never
+      const timestamp = DateTime.makeUnsafe(Date.now())
+
+      yield* events.publish(SessionEvent.Text.Ended, {
+        sessionID: session.id,
+        assistantMessageID,
+        textID: "txt_atree_durable",
+        text: "durable text",
+        timestamp,
+      })
+      yield* events.publish(SessionEvent.Text.Delta, {
+        sessionID: session.id,
+        assistantMessageID,
+        textID: "txt_atree_durable",
+        delta: "live only",
+        timestamp,
+      })
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(session.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+
+      expect(entries).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "session.next.text.ended",
+            sessionID: session.id,
+            assistantMessageID,
+            textID: "txt_atree_durable",
+            text: "durable text",
+          }),
+        ]),
+      )
+      expect(entries.some((entry) => entry.type === "session.next.text.delta")).toBe(false)
     }),
     { config: providerConfig },
   ),

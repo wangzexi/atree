@@ -18,6 +18,18 @@ export class Service extends Context.Service<Service, EventV2.Interface>()("@ope
 
 const optionalInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 const optionalWorkspace = WorkspaceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+const AtreeSessionNextSkip = new Set([
+  "session.next.agent.switched",
+  "session.next.model.switched",
+  "session.next.text.delta",
+  "session.next.reasoning.delta",
+  "session.next.tool.input.delta",
+  "session.next.compaction.delta",
+])
+
+function shouldMirrorSessionNext(type: string) {
+  return type.startsWith("session.next.") && !AtreeSessionNextSkip.has(type)
+}
 
 export const layer = Layer.effect(
   Service,
@@ -44,6 +56,15 @@ export const layer = Layer.effect(
       Effect.gen(function* () {
         const ctx = yield* optionalInstance
         const workspaceID = (yield* optionalWorkspace) ?? event.location?.workspaceID
+        if (shouldMirrorSessionNext(event.type)) {
+          const data = event.data as Record<string, unknown>
+          if (typeof data.sessionID === "string") {
+            yield* appendAtreeSessionEventBestEffort(event.location?.directory, data.sessionID as SessionID, {
+              type: event.type,
+              ...data,
+            })
+          }
+        }
         if (event.type === "session.error") {
           const data = event.data as Record<string, unknown>
           if (typeof data.sessionID === "string") {
