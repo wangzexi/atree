@@ -347,6 +347,38 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("recovers session diff summary from session.jsonl without SQLite or meta.yaml", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "diff from jsonl" })
+      const diff = [{ file: "notes.md", additions: 3, deletions: 1, status: "modified" as const, patch: "@@ -1 +1" }]
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "session.diff",
+          sessionID: session.id,
+          diff,
+        }),
+      )
+      yield* db
+        .delete(SessionTable)
+        .where(and(eq(SessionTable.id, session.id), eq(SessionTable.directory, instance.directory)))
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "meta.yaml"), {
+          force: true,
+        }),
+      )
+
+      const restoredDiff = yield* sessions.diff(session.id, { directory: instance.directory })
+      expect(restoredDiff).toEqual(diff)
+    }),
+  )
+
   it.instance("recovers session state, messages, schedules, and todos after SQLite projections are removed", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
