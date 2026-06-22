@@ -194,6 +194,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.list({ directory })` 合并目录会话时也使用规范化目录比较，避免等价路径让当前目录里的 file-backed session 被过滤掉。
 - opencode `Session.listGlobal()` 在没有显式目录时也会扫描持久化 atree root 下的 file-backed sessions；即使全局 SQLite 中没有投影行，只要会话目录在当前 root 下，全局/experimental 会话列表也能恢复它。
 - opencode `Session.listGlobal()` 在已经存在持久化 atree root 且没有显式目录时，会把该 root 下的 file-backed sessions 作为成员事实源；SQLite 中只有缓存行、但 root 下没有会话目录的旧会话不会再出现在无作用域全局列表里。
+- opencode `Session.listGlobal()` 在没有持久化 atree root 时，也会按当前 instance 目录收敛，而不是恢复 OpenCode 原始的跨项目全局列表；这保证未选中/刚进入某棵树时不会从全局 SQLite 冒出其它目录的会话。
 - 显式按目录读取单个会话时，如果该目录下不存在对应 `.agents/atree/sessions/<session-id>/`，则直接返回 NotFound，不再用 SQLite 里的旧 row 冒充目录事实源。
 - file-backed session 回填 SQLite 缓存时会保护已有仍有效的目录行；如果同一个 session id 已经在另一个仍有 `meta.yaml` 的目录中存在，显式读取复制目录不会把全局缓存行漂移到复制目录。
 - opencode session 模块在判断消息/part 投影缓存是否属于当前目录、以及按 path 查询旧 legacy directory session 时，也使用规范化后的目录比较，避免等价路径导致目录事实源被误判为旧缓存。
@@ -279,7 +280,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - todo 的显式目录写入也已经按目录边界收紧：当调用方传入 `directory`，但该目录没有对应 file-backed session 时，`update` 不会写入全局 `TodoTable`，也不会在错误目录创建 todo 投影。
 - todo/schedule 的无显式目录解析不再直接信任 SQLite 中缓存的 `SessionTable.directory`；会优先从当前 instance 或持久化 root 查找真实 file-backed session，最后才接受仍有效的旧缓存目录。
 - todo 的显式目录读取如果找不到该目录下的 file-backed session，会返回空列表，不再读取全局 SQLite `TodoTable` 中的旧投影。
-- opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、持久化 atree root 扫描、最后才回退仍有效的 SQLite 缓存目录。复制 `.agents/atree/` 到当前 root 后，即使旧 SQLite 目录仍然存在，相关读写也会优先定位到当前 root 内的目录事实源。
+- opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、持久化 atree root 扫描、最后才回退仍有效的 SQLite 缓存目录。复制 `.agents/atree/` 到当前 root 后，即使旧 SQLite 目录仍然存在，相关读写也会优先定位到当前 root 内的目录事实源；当当前 instance 和持久化 root 中存在同 ID 会话时，当前 instance 目录优先。
 - core `ToolOutputStore` 在能通过 `SessionStore` 定位到 file-backed session 时，会把超长工具输出写入该会话的 `assets/tool-output/`；不能定位会话目录时仍回退到全局 `tool-output`，保持旧链路兼容。
 - opencode V1 工具截断链路也会携带当前 `sessionID`：普通工具、插件工具、shell 输出和 session tools 的超长输出会优先写入 `.agents/atree/sessions/<session-id>/assets/tool-output/`；缺少会话或 instance 上下文时仍回退全局 `tool-output`。
 - opencode V1 截断链路写入 `assets/tool-output/` 前会先解析真实 file-backed session；从根目录执行子目录会话时，超长工具输出也会落到子目录自己的会话资产目录，而不会在根目录下凭空创建同名 session payload。
