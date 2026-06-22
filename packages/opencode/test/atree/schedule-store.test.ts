@@ -273,6 +273,54 @@ describe("atree schedule store", () => {
     expect(await findSessionScheduleState(directory, "sch_jsonl_deleted")).toBeUndefined()
   })
 
+  test("replays completed one-time schedules from session jsonl as absent", async () => {
+    const directory = await tempdir()
+    const schedule = {
+      id: "sch_jsonl_completed_once",
+      sessionID: "ses_jsonl_completed_once",
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "completed one-time schedule",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    await writeSessionStore({
+      id: "ses_jsonl_completed_once" as never,
+      slug: "jsonl-completed-once",
+      version: "test",
+      projectID: "proj_jsonl_completed_once" as never,
+      directory,
+      title: "JSONL completed once",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    const session = (await readSessionStore(directory, "ses_jsonl_completed_once" as never))!
+    await appendSessionJsonl(session, { type: "schedule.created", at: 10, schedule })
+    await appendSessionJsonl(session, {
+      type: "schedule.ran",
+      at: 20,
+      scheduleID: "sch_jsonl_completed_once",
+      sessionID: "ses_jsonl_completed_once",
+      status: "ran",
+      ranAt: 20,
+      nextRun: null,
+    })
+    await appendSessionJsonl(session, {
+      type: "schedule.deleted",
+      at: 30,
+      scheduleID: "sch_jsonl_completed_once",
+      sessionID: "ses_jsonl_completed_once",
+      reason: "completed",
+    })
+
+    expect(await readSessionScheduleState(directory, "ses_jsonl_completed_once")).toEqual([])
+    expect(await findSessionScheduleState(directory, "sch_jsonl_completed_once")).toBeUndefined()
+  })
+
   test("replays versioned schedule events from session jsonl", async () => {
     const directory = await tempdir()
     const schedule = {
