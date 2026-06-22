@@ -2674,4 +2674,76 @@ describe("atree file-backed SessionV2 discovery", () => {
       })
     }),
   )
+
+  it.effect("restores durable shell and compaction events from session jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-shell-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-shell-root-")))
+      const node = path.join(root, "ops")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_shell_compaction",
+          title: "Core shell compaction",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_shell_compaction", [
+          {
+            type: "session.next.shell.started",
+            sessionID: "ses_core_shell_compaction",
+            messageID: "msg_core_shell",
+            timestamp: 30,
+            callID: "call_core_shell",
+            command: "pwd",
+          },
+          {
+            type: "session.next.shell.ended",
+            sessionID: "ses_core_shell_compaction",
+            timestamp: 31,
+            callID: "call_core_shell",
+            output: "/tmp/core",
+          },
+          {
+            type: "session.next.compaction.ended",
+            sessionID: "ses_core_shell_compaction",
+            messageID: "msg_core_compaction",
+            timestamp: 40,
+            reason: "auto",
+            text: "core compact summary",
+            recent: "recent tail",
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_shell_compaction"),
+        order: "asc",
+      })
+
+      expect(messages.map((message) => message.type)).toEqual(["shell", "compaction"])
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_shell",
+        type: "shell",
+        callID: "call_core_shell",
+        command: "pwd",
+        output: "/tmp/core",
+      })
+      expect(messages[1]).toMatchObject({
+        id: "msg_core_compaction",
+        type: "compaction",
+        reason: "auto",
+        summary: "core compact summary",
+        recent: "recent tail",
+      })
+    }),
+  )
 })
