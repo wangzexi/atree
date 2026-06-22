@@ -886,16 +886,16 @@ describe("atree session store", () => {
       time: { created: 20, completed: 30 },
     })
     expect(messages[1]?.parts).toMatchObject([
-      { type: "reasoning", text: "short reasoning" },
-      { type: "step-finish", reason: "stop", snapshot: "after" },
       { type: "step-start", snapshot: "before" },
       { type: "text", text: "assistant answer" },
+      { type: "reasoning", text: "short reasoning" },
       {
         type: "tool",
         callID: "call_bash",
         tool: "bash",
         state: { status: "completed", input: { command: "pwd" }, output: "/tmp/project" },
       },
+      { type: "step-finish", reason: "stop", snapshot: "after" },
     ])
     expect(messages[1]?.parts.find((part) => part.type === "text")).toMatchObject({ text: "assistant answer" })
   })

@@ -590,7 +590,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         parentID: lastUserMessageID,
       })
       upsertAssistantPart(assistant, {
-        id: partID("prt_step_start", data.assistantMessageID),
+        id: partID("prt_00_step_start", data.assistantMessageID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "step-start",
@@ -616,7 +616,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         tokens,
       } as SessionV1.Assistant
       upsertAssistantPart(assistant, {
-        id: partID("prt_step_finish", data.assistantMessageID),
+        id: partID("prt_90_step_finish", data.assistantMessageID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "step-finish",
@@ -650,7 +650,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         parentID: lastUserMessageID,
       })
       upsertAssistantPart(assistant, {
-        id: partID("prt_text", data.textID),
+        id: partID("prt_10_text", data.textID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "text",
@@ -667,7 +667,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         parentID: lastUserMessageID,
       })
       upsertAssistantPart(assistant, {
-        id: partID("prt_text", data.textID),
+        id: partID("prt_10_text", data.textID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "text",
@@ -688,7 +688,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         parentID: lastUserMessageID,
       })
       upsertAssistantPart(assistant, {
-        id: partID("prt_reasoning", data.reasoningID),
+        id: partID("prt_20_reasoning", data.reasoningID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "reasoning",
@@ -710,7 +710,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         parentID: lastUserMessageID,
       })
       upsertAssistantPart(assistant, {
-        id: partID("prt_reasoning", data.reasoningID),
+        id: partID("prt_20_reasoning", data.reasoningID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "reasoning",
@@ -733,7 +733,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
         parentID: lastUserMessageID,
       })
       upsertAssistantPart(assistant, {
-        id: partID("prt_tool", data.callID),
+        id: partID("prt_30_tool", data.callID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "tool",
@@ -769,7 +769,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       const current = findToolPart(assistant, data.callID)
       const input = isRecord(data.input) ? data.input : {}
       upsertAssistantPart(assistant, {
-        id: current?.id ?? partID("prt_tool", data.callID),
+        id: current?.id ?? partID("prt_30_tool", data.callID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "tool",
@@ -800,7 +800,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       const input = current?.state.status === "running" || current?.state.status === "completed" ? current.state.input : {}
       const output = contentText(data.content)
       upsertAssistantPart(assistant, {
-        id: current?.id ?? partID("prt_tool", data.callID),
+        id: current?.id ?? partID("prt_30_tool", data.callID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "tool",
@@ -844,7 +844,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       })
       const current = findToolPart(assistant, data.callID)
       upsertAssistantPart(assistant, {
-        id: current?.id ?? partID("prt_tool", data.callID),
+        id: current?.id ?? partID("prt_30_tool", data.callID),
         sessionID: info.id,
         messageID: data.assistantMessageID as SessionV1.MessageID,
         type: "tool",
