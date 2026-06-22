@@ -944,6 +944,70 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "records a run for a file-backed schedule without a database schedule row",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_file_record_run_schedule" as SessionID
+      const scheduleID = "sch_file_record_run"
+      const now = Date.now()
+      const ranAt = now + 1_000
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "file-record-run-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "File record run schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "recurring",
+            expression: "* * * * *",
+            runAt: null,
+            message: "record file-backed run",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) =>
+        schedule.recordRun(scheduleID as Schedule.ID, sessionID, "ran", ranAt, { directory }),
+      )
+
+      const state = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
+      expect(state).toHaveLength(1)
+      expect(state[0]).toMatchObject({
+        id: scheduleID,
+        lastRanAt: ranAt,
+        lastRunStatus: "ran",
+      })
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, scheduleID as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
   it.instance(
     "creates a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {

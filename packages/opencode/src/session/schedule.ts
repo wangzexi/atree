@@ -305,6 +305,8 @@ export const layer = Layer.effect(
 
     const recordRun: Interface["recordRun"] = Effect.fn("Schedule.recordRun")(
       function* (scheduleID, sessionID, runStatus, ranAt, options) {
+        const restored = yield* ensureScheduleRowFromDirectory(scheduleID, sessionID, options?.directory)
+        if (!restored) return
         yield* db
           .transaction((tx) =>
             tx
@@ -593,6 +595,46 @@ export const layer = Layer.effect(
           Effect.logWarning("failed to append schedule event to atree session log", { sessionID, cause }),
         ),
       )
+
+    const ensureScheduleRowFromDirectory = Effect.fn("Schedule.ensureScheduleRowFromDirectory")(function* (
+      scheduleID: ID,
+      sessionID: SessionID,
+      directoryHint?: string,
+    ) {
+      const existing = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
+      if (existing) return true
+
+      const directory = yield* sessionDirectory(sessionID, directoryHint)
+      if (!directory) return false
+      const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
+      const schedule = projection.schedules.find((item) => item.id === scheduleID)
+      if (!schedule || !canRestoreStoredSchedule(schedule)) return false
+
+      yield* db
+        .transaction((tx) =>
+          tx
+            .insert(ScheduleTable)
+            .values({
+              id: scheduleID,
+              session_id: sessionID,
+              kind: schedule.kind,
+              expression: schedule.expression,
+              run_at: schedule.runAt,
+              message: schedule.message,
+              created_at: schedule.createdAt,
+            })
+            .run(),
+        )
+        .pipe(Effect.orDie)
+
+      startTimer(scheduleID, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge, directory)
+      return true
+    })
 
     const clearArchivedScheduleState = Effect.fn("Schedule.clearArchivedScheduleState")(function* (
       sessionID: SessionID,
