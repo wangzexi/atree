@@ -553,6 +553,64 @@ describe("atree session store", () => {
     })
   })
 
+  test("resolves copied session assets from the containing directory", async () => {
+    const source = await tempdir()
+    const target = await tempdir()
+    const session = {
+      id: "ses_copied_asset",
+      slug: "ses-copied-asset",
+      version: "test",
+      projectID: "proj_test",
+      directory: source,
+      title: "Copied Asset",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "message.updated",
+      message: { id: "msg_copied_asset", sessionID: session.id, role: "user", time: { created: 1 } },
+    })
+    await appendSessionJsonl(session, {
+      type: "message.part.updated",
+      part: {
+        id: "prt_copied_asset",
+        sessionID: session.id,
+        messageID: "msg_copied_asset",
+        type: "file",
+        mime: "image/png",
+        filename: "image.png",
+        url: "data:image/png;base64,c291cmNl",
+      },
+    })
+
+    await fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true })
+    const copied = await readSessionStore(target, session.id)
+    expect(copied?.directory).toBe(target)
+
+    const raw = await fs.readFile(
+      path.join(target, ".agents", "atree", "sessions", session.id, "session.jsonl"),
+      "utf8",
+    )
+    const partLine = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .find((line) => line.part?.id === "prt_copied_asset")
+    expect(partLine?.part?.url).toStartWith("assets/prt_copied_asset-")
+
+    await fs.writeFile(path.join(target, ".agents", "atree", "sessions", session.id, partLine.part.url), "target")
+
+    const messages = await readSessionJsonlMessages(copied!)
+    expect(messages[0]?.parts[0]).toMatchObject({
+      id: "prt_copied_asset",
+      type: "file",
+      url: "data:image/png;base64,dGFyZ2V0",
+    })
+  })
+
   test("replays session.jsonl into messages with parts", async () => {
     const directory = await tempdir()
     const session = {
