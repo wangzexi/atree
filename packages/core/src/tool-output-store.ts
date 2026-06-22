@@ -19,6 +19,7 @@ export const MANAGED_DIRECTORY = "tool-output"
 
 export interface BoundInput {
   readonly sessionID: SessionSchema.ID
+  readonly directory?: string
   readonly toolCallID: string
   readonly output: ToolOutput
 }
@@ -123,7 +124,26 @@ export const layer = Layer.effect(
       return { maxLines: configured.max_lines ?? MAX_LINES, maxBytes: configured.max_bytes ?? MAX_BYTES }
     })
 
-    const sessionDirectory = Effect.fn("ToolOutputStore.sessionDirectory")(function* (sessionID: SessionSchema.ID) {
+    const sessionDirectory = Effect.fn("ToolOutputStore.sessionDirectory")(function* (
+      sessionID: SessionSchema.ID,
+      directory?: string,
+    ) {
+      if (directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (!fileSession) return
+        yield* Effect.promise(() => ensureSessionPayloadFilesByID(fileSession.location.directory, sessionID))
+        return path.join(
+          fileSession.location.directory,
+          ".agents",
+          "atree",
+          "sessions",
+          sessionID,
+          "assets",
+          MANAGED_DIRECTORY,
+        )
+      }
       const session = Option.isSome(sessions)
         ? yield* sessions.value.get(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
         : undefined
@@ -147,8 +167,12 @@ export const layer = Layer.effect(
       return path.join(fileSession.location.directory, ".agents", "atree", "sessions", sessionID, "assets", MANAGED_DIRECTORY)
     })
 
-    const write = Effect.fn("ToolOutputStore.write")(function* (content: string, sessionID: SessionSchema.ID) {
-      const directory = (yield* sessionDirectory(sessionID)) ?? globalDirectory
+    const write = Effect.fn("ToolOutputStore.write")(function* (
+      content: string,
+      sessionID: SessionSchema.ID,
+      directoryHint?: string,
+    ) {
+      const directory = (yield* sessionDirectory(sessionID, directoryHint)) ?? globalDirectory
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
@@ -177,7 +201,7 @@ export const layer = Layer.effect(
           outputPaths: [],
         }
 
-      const outputPath = yield* write(contextual, input.sessionID)
+      const outputPath = yield* write(contextual, input.sessionID, input.directory)
       const marker = `... output truncated; full content saved to ${outputPath} ...`
 
       return {

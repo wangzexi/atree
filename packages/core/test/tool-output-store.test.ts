@@ -309,6 +309,80 @@ describe("ToolOutputStore", () => {
     ),
   )
 
+  it.live("stores oversized output in the explicit directory when session ids overlap", () =>
+    Effect.acquireUseRelease(
+      Effect.all({
+        data: Effect.promise(() => tmpdir()),
+        root: Effect.promise(() => tmpdir()),
+      }),
+      ({ data, root }) =>
+        Effect.gen(function* () {
+          const source = path.join(root.path, "source")
+          const target = path.join(root.path, "target")
+          const previousData = Global.Path.data
+          ;(Global.Path as { data: string }).data = data.path
+          yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+          yield* Effect.promise(() => mkdir(path.join(data.path, "atree"), { recursive: true }))
+          yield* Effect.promise(() =>
+            writeFile(
+              path.join(data.path, "atree", "state.json"),
+              JSON.stringify({ version: 1, rootDirectory: root.path, updatedAt: 1 }),
+            ),
+          )
+          yield* Effect.promise(() => mkdir(source, { recursive: true }))
+          yield* Effect.promise(() => mkdir(target, { recursive: true }))
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              projectID: Project.ID.global,
+              title: "Source tool output",
+              location: { directory: AbsolutePath.make(source) },
+              time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(200) },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+          )
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              projectID: Project.ID.global,
+              title: "Target tool output",
+              location: { directory: AbsolutePath.make(target) },
+              time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(100) },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+          )
+
+          const storeLayer = ToolOutputStore.layer.pipe(
+            Layer.provide(FSUtil.defaultLayer),
+            Layer.provide(Global.layerWith({ data: data.path })),
+          )
+          const result = yield* Effect.gen(function* () {
+            const store = yield* ToolOutputStore.Service
+            return yield* store.bound({
+              sessionID,
+              directory: target,
+              toolCallID: "call-overlap-session-assets",
+              output: { structured: {}, content: [{ type: "text", text: "o".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
+            })
+          }).pipe(Effect.provide(storeLayer))
+
+          expect(result.outputPaths).toHaveLength(1)
+          expect(result.outputPaths[0]).toContain(
+            path.join(target, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"),
+          )
+          expect(result.outputPaths[0]).not.toContain(source)
+        }),
+      ({ data, root }) =>
+        Effect.all([
+          Effect.promise(() => data[Symbol.asyncDispose]()),
+          Effect.promise(() => root[Symbol.asyncDispose]()),
+        ]).pipe(Effect.ignore),
+    ),
+  )
+
   it.live("preserves native media and structured metadata without applying a settlement media limit", () =>
     withStore(({ store }) =>
       Effect.gen(function* () {

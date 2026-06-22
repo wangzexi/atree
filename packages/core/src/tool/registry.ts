@@ -14,6 +14,7 @@ import { Tools } from "./tools"
 
 export type ExecuteInput = {
   readonly sessionID: SessionSchema.ID
+  readonly directory?: string
   readonly agent: AgentV2.ID
   readonly assistantMessageID: SessionMessage.ID
   readonly call: ToolCall
@@ -60,6 +61,7 @@ const registryLayer = Layer.effect(
         return { result: { type: "error" as const, value: `Stale tool call: ${input.call.name}` } }
       const pending = yield* settle(registration.tool, input.call, {
         sessionID: input.sessionID,
+        ...(input.directory === undefined ? {} : { directory: input.directory }),
         agent: input.agent,
         assistantMessageID: input.assistantMessageID,
         toolCallID: input.call.id,
@@ -71,7 +73,12 @@ const registryLayer = Layer.effect(
       )
       if ("result" in pending) return pending
       const output = pending.output
-      const bounded = yield* resources.bound({ sessionID: input.sessionID, toolCallID: input.call.id, output })
+      const bounded = yield* resources.bound({
+        sessionID: input.sessionID,
+        ...(input.directory === undefined ? {} : { directory: input.directory }),
+        toolCallID: input.call.id,
+        output,
+      })
       const result = ToolOutput.toResultValue(bounded.output)
       if (result.type === "error")
         return bounded.outputPaths.length > 0 ? { result, outputPaths: bounded.outputPaths } : { result }

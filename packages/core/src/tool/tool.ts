@@ -8,6 +8,7 @@ import type { SessionSchema } from "../session/schema"
 
 export interface Context {
   readonly sessionID: SessionSchema.ID
+  readonly directory?: string
   readonly agent: AgentV2.ID
   readonly assistantMessageID: SessionMessage.ID
   readonly toolCallID: string

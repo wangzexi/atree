@@ -268,6 +268,7 @@ export const layer = Layer.effect(
               restore(
                 toolMaterialization.settle({
                   sessionID: session.id,
+                  directory: session.location.directory,
                   agent: agent.id,
                   assistantMessageID,
                   call: event,

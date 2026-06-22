@@ -240,6 +240,33 @@ describe("ToolRegistry", () => {
     }),
   )
 
+  it.effect("passes session directory to tool handlers and output bounding", () =>
+    Effect.gen(function* () {
+      bounds.length = 0
+      const service = yield* ToolRegistry.Service
+      const contexts: Tool.Context[] = []
+      yield* service.register({
+        directory_context: Tool.make({
+          description: "Context",
+          input: Schema.Struct({}),
+          output: Schema.Struct({ ok: Schema.Boolean }),
+          execute: (_, context) => Effect.sync(() => contexts.push(context)).pipe(Effect.as({ ok: true })),
+        }),
+      })
+      yield* settleTool(service, {
+        sessionID,
+        directory: "/workspace/node",
+        ...identity,
+        call: { type: "tool-call", id: "call-directory-context", name: "directory_context", input: {} },
+      })
+
+      expect(contexts).toEqual([
+        { sessionID, directory: "/workspace/node", ...identity, toolCallID: "call-directory-context" },
+      ])
+      expect(bounds.map((input) => input.directory)).toEqual(["/workspace/node"])
+    }),
+  )
+
   it.effect("encodes output and applies generic settlement bounding", () =>
     Effect.gen(function* () {
       bounds.length = 0
