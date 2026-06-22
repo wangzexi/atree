@@ -63,6 +63,20 @@
 - core `QuestionV2` 和 `PermissionV2` 已能从目录 `session.jsonl` 恢复 pending question/permission，并把 reply 继续写回对应会话日志；但 permission/question 的更完整 UI 状态和历史展示还没有统一成 typed session view model。
 - 真正模型输出链路仍主要由 OpenCode 原有 projector/runtime 推动，目录 JSONL 目前是事实源化过程中的镜像与恢复层。
 
+### 运行层边界审查
+
+当前代码里仍然有一些全局 SQLite 或全局 storage 写入，但它们的性质不同，不能一概视为目录事实源缺口：
+
+- `SessionInputTable` 是 prompt admit/promote 的运行队列和并发护栏。目录事实源要求是：prompt 一旦被 durable 接收，必须能从当前目录的 `session.jsonl` 恢复；队列本身可以暂时保留在 SQLite，后续再迁移为可重建运行态。
+- `SessionContextEpochTable` 是系统上下文 baseline、replacement 和 revision 的运行锁/快照。当前已经能为 file-backed session 自动重建必要的 SQLite 投影，并把 context update 写回 `session.jsonl`；后续要做的是把 typed view model 和重建逻辑收敛，而不是直接删除表。
+- `SessionShareTable` 保存远端分享服务返回的 `id/secret/url`。其中 `url` 会写回会话元数据，`id/secret` 属于外部服务凭据/缓存，不应该写进可迁移目录；它不是目录业务事实源。
+- `storage.write(["session_diff", sessionID], ...)` 目前仍作为旧 HTTP/UI 兼容投影存在。目录事实源已经通过 `session.diff` 事件和 session summary replay 恢复会话级 diff；后续迁移目标是让读取链路不再依赖这个全局 storage。
+
+判断原则：
+
+- 会话历史、标题、归档、emoji、自动化消息、todo、权限/问题决策、工具调用结果和长期资产必须能随目录迁移。
+- 运行锁、执行队列、SSE 投影、远端分享 secret、搜索索引和最近打开记录可以暂时留在全局运行层，但必须能从目录事实源重建或失效后安全丢弃。
+
 下一步优先级：
 
 1. 继续补护栏测试，固定当前可用行为，尤其是直接打开 session URL、切换目录、归档、一次性 schedule 触发后清空 header。
