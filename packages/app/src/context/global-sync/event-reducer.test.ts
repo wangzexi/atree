@@ -4,9 +4,10 @@ import { createStore } from "solid-js/store"
 import type { State } from "./types"
 import { applyDirectoryEvent, applyGlobalEvent, cleanupDroppedSessionCaches } from "./event-reducer"
 
-const rootSession = (input: { id: string; parentID?: string; archived?: number }) =>
+const rootSession = (input: { id: string; parentID?: string; archived?: number; directory?: string }) =>
   ({
     id: input.id,
+    directory: input.directory,
     parentID: input.parentID,
     time: {
       created: 1,
@@ -185,6 +186,102 @@ describe("applyDirectoryEvent", () => {
     })
 
     expect(store.sessionTotal).toBe(2)
+  })
+
+  test("ignores session create and update events from another directory", () => {
+    const [store, setStore] = createStore(
+      baseState({
+        session: [rootSession({ id: "ses_source", directory: "/source" })],
+        sessionTotal: 1,
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: {
+        type: "session.created",
+        properties: { info: rootSession({ id: "ses_target", directory: "/target" }) },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/source",
+      loadLsp() {},
+    })
+
+    applyDirectoryEvent({
+      event: {
+        type: "session.updated",
+        properties: { info: rootSession({ id: "ses_target_update", directory: "/target" }) },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/source",
+      loadLsp() {},
+    })
+
+    expect(store.session.map((item) => item.id)).toEqual(["ses_source"])
+    expect(store.sessionTotal).toBe(1)
+  })
+
+  test("ignores foreign archive and delete events for copied session ids", () => {
+    const copied = rootSession({ id: "ses_copied", directory: "/source" })
+    const message = userMessage("msg_1", copied.id)
+    const todos: string[] = []
+    const [store, setStore] = createStore(
+      baseState({
+        session: [copied],
+        sessionTotal: 1,
+        message: { [copied.id]: [message] },
+        part: { [message.id]: [textPart("prt_1", copied.id, message.id)] },
+        session_diff: { [copied.id]: [] },
+        todo: { [copied.id]: [] },
+        permission: { [copied.id]: [] },
+        question: { [copied.id]: [] },
+        session_status: { [copied.id]: { type: "busy" } },
+      }),
+    )
+
+    applyDirectoryEvent({
+      event: {
+        type: "session.updated",
+        properties: { info: rootSession({ id: copied.id, directory: "/target", archived: 10 }) },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/source",
+      loadLsp() {},
+      setSessionTodo(sessionID, value) {
+        if (value === undefined) todos.push(sessionID)
+      },
+    })
+
+    applyDirectoryEvent({
+      event: {
+        type: "session.deleted",
+        properties: { info: rootSession({ id: copied.id, directory: "/target" }) },
+      },
+      store,
+      setStore,
+      push() {},
+      directory: "/source",
+      loadLsp() {},
+      setSessionTodo(sessionID, value) {
+        if (value === undefined) todos.push(sessionID)
+      },
+    })
+
+    expect(store.session.map((item) => item.id)).toEqual([copied.id])
+    expect(store.sessionTotal).toBe(1)
+    expect(store.message[copied.id]).toEqual([message])
+    expect(store.part[message.id]?.map((part) => part.id)).toEqual(["prt_1"])
+    expect(store.session_diff[copied.id]).toEqual([])
+    expect(store.todo[copied.id]).toEqual([])
+    expect(store.permission[copied.id]).toEqual([])
+    expect(store.question[copied.id]).toEqual([])
+    expect(store.session_status[copied.id]).toEqual({ type: "busy" })
+    expect(todos).toEqual([])
   })
 
   test("cleans session caches when archived", () => {

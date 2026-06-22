@@ -15,8 +15,13 @@ import type { State, VcsCache } from "./types"
 import { trimSessions } from "./session-trim"
 import { dropSessionCaches } from "./session-cache"
 import { diffs as list, message as clean } from "@/utils/diffs"
+import { pathKey } from "@/utils/path-key"
 
 const SKIP_PARTS = new Set(["patch", "step-start", "step-finish"])
+
+function sessionMatchesDirectory(info: Session, directory: string) {
+  return typeof info.directory !== "string" || pathKey(info.directory) === pathKey(directory)
+}
 
 export function applyGlobalEvent(input: {
   event: { type: string; properties?: unknown }
@@ -110,6 +115,7 @@ export function applyDirectoryEvent(input: {
     }
     case "session.created": {
       const info = (event.properties as { info: Session }).info
+      if (!sessionMatchesDirectory(info, input.directory)) break
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (result.found) {
         input.setStore("session", result.index, reconcile(info))
@@ -125,6 +131,7 @@ export function applyDirectoryEvent(input: {
     }
     case "session.updated": {
       const info = (event.properties as { info: Session }).info
+      if (!sessionMatchesDirectory(info, input.directory)) break
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (info.time.archived) {
         if (input.store.session[result.index]!.time.archived === info.time.archived) break
@@ -154,6 +161,7 @@ export function applyDirectoryEvent(input: {
     }
     case "session.deleted": {
       const info = (event.properties as { info: Session }).info
+      if (!sessionMatchesDirectory(info, input.directory)) break
       const result = Binary.search(input.store.session, info.id, (s) => s.id)
       if (result.found) {
         input.setStore(
