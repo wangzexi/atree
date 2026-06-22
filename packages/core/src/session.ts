@@ -455,7 +455,10 @@ export const layer = Layer.effect(
         const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
-        if (fileMessages.length > 0) return pageFileMessages(fileMessages, input)
+        const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (fileBacked) return pageFileMessages(fileMessages, input)
         const direction = input.cursor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
         const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
@@ -498,6 +501,10 @@ export const layer = Layer.effect(
           )
           const message = fileMessages.find((item) => item.id === input.messageID)
           if (message) return message
+          const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+          if (fileBacked) return undefined
         }
         const stored = yield* store.message(input.messageID)
         return stored?.sessionID === input.sessionID ? stored.message : undefined
@@ -507,7 +514,10 @@ export const layer = Layer.effect(
         const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
-        if (fileMessages.length > 0) return fileMessages
+        const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (fileBacked) return fileMessages
         return yield* store.context(sessionID)
       }),
       events: (input) =>

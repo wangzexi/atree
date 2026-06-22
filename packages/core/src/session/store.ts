@@ -91,11 +91,9 @@ export const layer = Layer.effect(
         const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
-        if (messages.length > 0) {
-          return messages
-            .map((message, index) => ({ seq: index + 1, message }))
-            .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
-        }
+        return messages
+          .map((message, index) => ({ seq: index + 1, message }))
+          .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
       }
       return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
     })
@@ -110,7 +108,7 @@ export const layer = Layer.effect(
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
             Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
           )
-          if (messages.length > 0) return messages
+          return messages
         }
         const stored = yield* SessionHistory.load(db, sessionID)
         return stored
