@@ -30,6 +30,10 @@ type SessionScheduleState = {
   schedules: StoredSchedule[]
 }
 
+function publicScheduleProjection(input: { hasState: boolean; schedules: StoredSchedule[] }) {
+  return { hasState: input.hasState, schedules: input.schedules }
+}
+
 function legacyStatePath(directory: string) {
   return path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json")
 }
@@ -205,23 +209,22 @@ export async function readSessionScheduleProjection(directory: string, sessionID
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
   if (sessionState.hasState) {
     const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return jsonlState
-    return sessionState
+    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return publicScheduleProjection(jsonlState)
+    return publicScheduleProjection(sessionState)
   }
 
   const state = await readState(legacyStatePath(directory))
   const jsonlState = await readSessionJsonlProjection(directory, sessionID)
   const schedules = state.sessions[sessionID]
   if (Array.isArray(schedules)) {
-    if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return jsonlState
-    return {
+    if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return publicScheduleProjection(jsonlState)
+    return publicScheduleProjection({
       hasState: true,
-      updatedAt: state.updatedAt,
       schedules: schedules.filter(isStoredSchedule),
-    }
+    })
   }
 
-  return jsonlState
+  return publicScheduleProjection(jsonlState)
 }
 
 export async function readSessionScheduleState(directory: string, sessionID: string) {
