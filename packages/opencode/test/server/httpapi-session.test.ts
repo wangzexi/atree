@@ -1484,6 +1484,96 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "archives copied scheduled sessions through the API without clearing the source directory schedule",
+    () =>
+      Effect.gen(function* () {
+        const source = yield* TestInstance
+        const target = yield* tmpdirScoped({ git: true })
+        const sourceHeaders = { "x-opencode-directory": source.directory, "content-type": "application/json" }
+        const targetHeaders = { "x-opencode-directory": target, "content-type": "application/json" }
+
+        const created = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers: sourceHeaders,
+          body: JSON.stringify({ title: "copied api scheduled archive" }),
+        })
+        const schedule = yield* requestJson<Schedule.Info>(
+          pathFor(SessionPaths.createSchedule, { sessionID: created.id }),
+          {
+            method: "POST",
+            headers: sourceHeaders,
+            body: JSON.stringify({ type: "cron", cron: "* * * * *", message: "source api schedule should survive" }),
+          },
+        )
+        const sourceBeforeArchive = yield* Effect.promise(() => readSessionScheduleState(source.directory, created.id))
+        yield* Effect.promise(() =>
+          cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+        )
+
+        const archiveResponse = yield* request(pathFor(SessionPaths.update, { sessionID: created.id }), {
+          method: "PATCH",
+          headers: targetHeaders,
+          body: JSON.stringify({ time: { archived: 1 } }),
+        })
+        const archived = yield* json<Session.Info>(archiveResponse)
+
+        expect(archived.directory).toBe(target)
+        expect(archived.time.archived).toBe(1)
+        expect(yield* Effect.promise(() => readSessionScheduleState(target, created.id))).toEqual([])
+        expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, created.id))).toEqual(
+          sourceBeforeArchive,
+        )
+        const restored = yield* requestJson<Schedule.Info[]>(pathFor(SessionPaths.schedules, { sessionID: created.id }), {
+          headers: sourceHeaders,
+        })
+        expect(restored.map((item) => item.id)).toContain(schedule.id)
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
+    "removes copied scheduled sessions through the API without clearing the source directory schedule",
+    () =>
+      Effect.gen(function* () {
+        const source = yield* TestInstance
+        const target = yield* tmpdirScoped({ git: true })
+        const sourceHeaders = { "x-opencode-directory": source.directory, "content-type": "application/json" }
+        const targetHeaders = { "x-opencode-directory": target, "content-type": "application/json" }
+
+        const created = yield* requestJson<Session.Info>(SessionPaths.create, {
+          method: "POST",
+          headers: sourceHeaders,
+          body: JSON.stringify({ title: "copied api scheduled remove" }),
+        })
+        yield* requestJson<Schedule.Info>(
+          pathFor(SessionPaths.createSchedule, { sessionID: created.id }),
+          {
+            method: "POST",
+            headers: sourceHeaders,
+            body: JSON.stringify({ type: "cron", cron: "* * * * *", message: "source api schedule survives remove" }),
+          },
+        )
+        const sourceBeforeRemove = yield* Effect.promise(() => readSessionScheduleState(source.directory, created.id))
+        yield* Effect.promise(() =>
+          cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+        )
+
+        const removeResponse = yield* request(pathFor(SessionPaths.remove, { sessionID: created.id }), {
+          method: "DELETE",
+          headers: targetHeaders,
+        })
+        expect(yield* json<boolean>(removeResponse)).toBe(true)
+
+        expect(yield* Effect.promise(() => readSessionStore(target, created.id))).toBeUndefined()
+        expect(yield* Effect.promise(() => readSessionStore(source.directory, created.id))).not.toBeUndefined()
+        expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, created.id))).toEqual(
+          sourceBeforeRemove,
+        )
+      }),
+    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+  )
+
+  it.instance(
     "creates file-backed schedule state through the API when the database cache is missing",
     () =>
       Effect.gen(function* () {
