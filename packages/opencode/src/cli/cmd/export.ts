@@ -7,6 +7,7 @@ import { UI } from "../ui"
 import * as prompts from "@clack/prompts"
 import { EOL } from "os"
 import { Effect } from "effect"
+import { InstanceRef } from "@/effect/instance-ref"
 
 function redact(kind: string, id: string, value: string) {
   return value.trim() ? `[redacted:${kind}:${id}]` : value
@@ -160,7 +161,9 @@ function part(part: SessionV1.Part): SessionV1.Part {
 
 const partFn = part
 
-function sanitize(data: { info: Session.Info; messages: SessionV1.WithParts[] }) {
+export type ExportData = { info: Session.Info; messages: SessionV1.WithParts[] }
+
+function sanitize(data: ExportData) {
   return {
     info: {
       ...data.info,
@@ -237,8 +240,19 @@ export const ExportCommand = effectCmd({
   }),
 })
 
+export const exportSessionData = Effect.fn("Cli.export.sessionData")(function* (input: {
+  sessionID: SessionID
+  directory?: string
+}) {
+  const svc = yield* Session.Service
+  const sessionInfo = yield* svc.get(input.sessionID, { directory: input.directory })
+  const messages = yield* svc.messages({ sessionID: sessionInfo.id, directory: sessionInfo.directory })
+  return { info: sessionInfo, messages } satisfies ExportData
+})
+
 const run = Effect.fn("Cli.export.body")(function* (args: { sessionID?: string; sanitize?: boolean }) {
   const svc = yield* Session.Service
+  const ctx = yield* InstanceRef
   let sessionID = args.sessionID ? SessionID.make(args.sessionID) : undefined
   process.stderr.write(`Exporting session: ${sessionID ?? "latest"}\n`)
 
@@ -281,10 +295,7 @@ const run = Effect.fn("Cli.export.body")(function* (args: { sessionID?: string; 
   // Match legacy try/catch — catches both typed failures and defects
   // (Session.Service.get throws NotFoundError as a defect, not a typed E).
   return yield* Effect.gen(function* () {
-    const sessionInfo = yield* svc.get(sessionID!)
-    const messages = yield* svc.messages({ sessionID: sessionInfo.id })
-
-    const exportData = { info: sessionInfo, messages }
+    const exportData = yield* exportSessionData({ sessionID: sessionID!, directory: ctx?.directory })
 
     process.stdout.write(JSON.stringify(args.sanitize ? sanitize(exportData) : exportData, null, 2))
     process.stdout.write(EOL)
