@@ -11,7 +11,7 @@ import { ProviderV2 } from "../provider"
 import { AbsolutePath, RelativePath } from "../schema"
 import type { SessionInput } from "../session/input"
 import { SessionMessage } from "../session/message"
-import { AgentAttachment, FileAttachment } from "../session/prompt"
+import { AgentAttachment, FileAttachment, Prompt } from "../session/prompt"
 import { SessionSchema } from "../session/schema"
 import { WorkspaceV2 } from "../workspace"
 
@@ -1174,7 +1174,11 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const orphan = orphanParts.get(messageID)
       if (orphan) orphanParts.set(messageID, orphan.filter((part) => part.id !== partID))
     }
-    if (type === "session.next.prompted") {
+    if (
+      type === "session.next.prompted" ||
+      type === "session.next.prompt.admitted" ||
+      type === "session.next.prompt.promoted"
+    ) {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
       const prompt = data.prompt && typeof data.prompt === "object" ? (data.prompt as Record<string, unknown>) : undefined
@@ -1693,7 +1697,24 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
 
 export async function appendPromptJsonl(info: SessionSchema.Info, admitted: SessionInput.Admitted) {
   const created = DateTime.toEpochMillis(admitted.timeCreated)
+  const files: FileAttachment[] = []
+  for (const [index, file] of (admitted.prompt.files ?? []).entries()) {
+    const materialized = await materializePromptFile(info, file, index)
+    files.push(new FileAttachment({ ...file, uri: materialized.uri, mime: materialized.mime }))
+  }
   const entries: Record<string, unknown>[] = [
+    {
+      type: "session.next.prompt.admitted",
+      sessionID: admitted.sessionID,
+      messageID: admitted.id,
+      timestamp: created,
+      prompt: new Prompt({
+        text: admitted.prompt.text,
+        files: files.length > 0 ? files : undefined,
+        agents: admitted.prompt.agents,
+      }),
+      delivery: admitted.delivery,
+    },
     {
       type: "message.updated",
       message: {
@@ -1716,8 +1737,7 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
       },
     },
   )
-  for (const [index, file] of (admitted.prompt.files ?? []).entries()) {
-    const materialized = await materializePromptFile(info, file, index)
+  for (const [index, file] of files.entries()) {
     entries.push({
       type: "message.part.updated",
       part: {
@@ -1725,9 +1745,9 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
         sessionID: admitted.sessionID,
         messageID: admitted.id,
         type: "file",
-        mime: materialized.mime,
+        mime: file.mime,
         filename: file.name,
-        url: materialized.uri,
+        url: file.uri,
         description: file.description,
       },
     })

@@ -8,6 +8,7 @@ import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
+import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
@@ -1442,6 +1443,77 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(admitted.id).toBe(SessionMessage.ID.make("msg_core_prompt"))
       expect(messages).toHaveLength(1)
       expect(messages[0]).toMatchObject({ id: "msg_core_prompt", type: "user", text: "record this prompt" })
+    }),
+  )
+
+  it.effect("streams file-backed prompt events instead of stale SQLite events", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-events-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-events-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_events")
+      const sqliteMessageID = SessionMessage.ID.make("msg_core_prompt_events_sqlite")
+      const fileMessageID = SessionMessage.ID.make("msg_core_prompt_events_file")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core prompt events",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const { db } = yield* Database.Service
+      const events = yield* EventV2.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "prompt-events",
+          directory: AbsolutePath.make(node),
+          title: "Core prompt events",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* events.publish(SessionEvent.PromptLifecycle.Admitted, {
+        messageID: sqliteMessageID,
+        sessionID,
+        timestamp: DateTime.makeUnsafe(30),
+        prompt: new Prompt({ text: "stale sqlite prompt" }),
+        delivery: "steer",
+      })
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            type: "session.next.prompt.admitted",
+            messageID: fileMessageID,
+            sessionID,
+            timestamp: 40,
+            prompt: { text: "file-backed prompt" },
+            delivery: "steer",
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const streamed = Array.from(yield* sessions.events({ sessionID }).pipe(Stream.runCollect))
+
+      expect(streamed.map((item) => (item.event.data as any).messageID)).toEqual([fileMessageID])
+      expect(streamed[0]?.event.data).toMatchObject({ prompt: { text: "file-backed prompt" } })
     }),
   )
 

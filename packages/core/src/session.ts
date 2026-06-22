@@ -561,15 +561,7 @@ export const layer = Layer.effect(
                     readSessionStore(session.location.directory, session.id),
                   ).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
                   if (fileBacked) {
-                    const row = yield* db
-                      .select({ directory: SessionTable.directory })
-                      .from(SessionTable)
-                      .where(eq(SessionTable.id, input.sessionID))
-                      .get()
-                      .pipe(Effect.orDie)
-                    if (!row || !sameDirectory(row.directory, session.location.directory)) {
-                      return Stream.fromIterable(yield* fileBackedEvents(session, input.after))
-                    }
+                    return Stream.fromIterable(yield* fileBackedEvents(session, input.after))
                   }
                   return events.aggregateEvents({ aggregateID: input.sessionID, after: input.after })
                 }),

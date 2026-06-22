@@ -104,6 +104,19 @@ export const layer = Layer.effect(
       return undefined
     })
 
+    const persistedRootOwnsSession = Effect.fn("SessionStore.persistedRootOwnsSession")(function* (
+      sessionID: SessionSchema.ID,
+    ) {
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (!root) return false
+      const fileSession = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+        Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
+      )
+      return fileSession !== undefined
+    })
+
     const runnerEntries = Effect.fn("SessionStore.runnerEntries")(function* (
       sessionID: SessionSchema.ID,
       baselineSeq: number,
@@ -113,6 +126,8 @@ export const layer = Layer.effect(
         const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
+        if (messages.length === 0 && !(yield* persistedRootOwnsSession(sessionID)))
+          return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
         return messages
           .map((message, index) => ({ seq: index + 1, message }))
           .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
@@ -130,6 +145,8 @@ export const layer = Layer.effect(
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
             Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
           )
+          if (messages.length === 0 && !(yield* persistedRootOwnsSession(sessionID)))
+            return yield* SessionHistory.load(db, sessionID)
           return messages
         }
         const stored = yield* SessionHistory.load(db, sessionID)
