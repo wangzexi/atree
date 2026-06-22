@@ -2212,6 +2212,75 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("replays durable events from the hinted directory when session ids overlap", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_file_events_overlap")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source events",
+          createdAt: 10,
+          updatedAt: 200,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, sessionID, [
+          {
+            type: "session.next.context.updated",
+            sessionID,
+            messageID: "msg_core_source_context",
+            text: "Source context",
+            timestamp: 40,
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target events",
+          createdAt: 10,
+          updatedAt: 100,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "session.next.context.updated",
+            sessionID,
+            messageID: "msg_core_target_context",
+            text: "Target context",
+            timestamp: 50,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const events = Array.from(
+        yield* sessions
+          .events({ sessionID, directory: AbsolutePath.make(target) })
+          .pipe(Stream.runCollect),
+      )
+
+      expect(events.map((event) => event.event.type)).toEqual(["session.next.context.updated"])
+      const event = events[0]?.event
+      expect(event?.type).toBe("session.next.context.updated")
+      if (event?.type !== "session.next.context.updated") return
+      expect(event.data.messageID).toBe(SessionMessage.ID.make("msg_core_target_context"))
+    }),
+  )
+
   it.effect("restores event-backed prompts from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

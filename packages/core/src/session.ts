@@ -157,6 +157,7 @@ export interface Interface {
   ) => Effect.Effect<SessionMessage.Message[], NotFoundError | MessageDecodeError>
   readonly events: (input: {
     sessionID: SessionSchema.ID
+    directory?: AbsolutePath
     after?: EventV2.Cursor
   }) => Stream.Stream<EventV2.CursorEvent<SessionEvent.DurableEvent>, NotFoundError>
   readonly switchAgent: (input: {
@@ -553,7 +554,7 @@ export const layer = Layer.effect(
       events: (input) =>
         Stream.unwrap(
           result
-            .get(input.sessionID)
+            .get(input.sessionID, { directory: input.directory })
             .pipe(
               Effect.flatMap((session) =>
                 Effect.gen(function* () {
