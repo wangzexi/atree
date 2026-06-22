@@ -899,4 +899,93 @@ describe("atree session store", () => {
     ])
     expect(messages[1]?.parts.find((part) => part.type === "text")).toMatchObject({ text: "assistant answer" })
   })
+
+  test("replays durable shell and compaction events into messages from session jsonl", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_v2_shell_compaction",
+      slug: "ses-v2-shell-compaction",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "Shell compaction replay",
+      agent: "build",
+      model: { id: "model_test", providerID: "provider_test" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "session.next.prompted",
+      sessionID: "ses_v2_shell_compaction",
+      messageID: "msg_shell_user",
+      timestamp: 10,
+      delivery: "queue",
+      prompt: { text: "run pwd" },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.shell.started",
+      sessionID: "ses_v2_shell_compaction",
+      messageID: "msg_shell_assistant",
+      timestamp: 11,
+      callID: "call_shell",
+      command: "pwd",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.shell.ended",
+      sessionID: "ses_v2_shell_compaction",
+      timestamp: 12,
+      callID: "call_shell",
+      output: "/tmp/workspace",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.compaction.started",
+      sessionID: "ses_v2_shell_compaction",
+      messageID: "msg_compaction_user",
+      timestamp: 20,
+      reason: "auto",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.compaction.ended",
+      sessionID: "ses_v2_shell_compaction",
+      messageID: "msg_compaction_user",
+      timestamp: 21,
+      reason: "auto",
+      text: "compact summary",
+      recent: "recent tail",
+    })
+
+    const messages = await readSessionJsonlMessages(session)
+    expect(messages.map((message) => String(message.info.id))).toEqual([
+      "msg_shell_user",
+      "msg_shell_assistant",
+      "msg_compaction_user",
+      "msg_atree_compaction_summary_msg_compaction_user",
+    ])
+    expect(messages[1]?.info).toMatchObject({
+      id: "msg_shell_assistant",
+      role: "assistant",
+      parentID: "msg_shell_user",
+      time: { created: 11, completed: 12 },
+    })
+    expect(messages[1]?.parts).toMatchObject([
+      {
+        type: "tool",
+        callID: "call_shell",
+        tool: "bash",
+        state: { status: "completed", input: { command: "pwd" }, output: "/tmp/workspace" },
+      },
+    ])
+    expect(messages[2]?.parts).toMatchObject([{ type: "compaction", auto: true }])
+    expect(messages[3]?.info).toMatchObject({
+      id: "msg_atree_compaction_summary_msg_compaction_user",
+      role: "assistant",
+      parentID: "msg_compaction_user",
+      summary: true,
+      finish: "stop",
+    })
+    expect(messages[3]?.parts).toMatchObject([{ type: "text", text: "compact summary", synthetic: true }])
+  })
 })

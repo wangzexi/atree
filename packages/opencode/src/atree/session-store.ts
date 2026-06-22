@@ -371,6 +371,10 @@ function partID(prefix: string, value: string) {
   return `${prefix}_${value.replace(/[^A-Za-z0-9._-]+/g, "_")}` as SessionV1.PartID
 }
 
+function messageID(prefix: string, value: string) {
+  return `${prefix}_${value.replace(/[^A-Za-z0-9._-]+/g, "_")}` as SessionV1.MessageID
+}
+
 function contentText(value: unknown) {
   if (typeof value === "string") return value
   if (!Array.isArray(value)) return JSON.stringify(value ?? "")
@@ -866,6 +870,164 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
           },
         },
       } satisfies SessionV1.ToolPart)
+      continue
+    }
+
+    if (
+      type === "session.next.shell.started" &&
+      typeof data.messageID === "string" &&
+      typeof data.callID === "string" &&
+      typeof data.command === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.messageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_30_tool", data.callID),
+        sessionID: info.id,
+        messageID: data.messageID as SessionV1.MessageID,
+        type: "tool",
+        callID: data.callID,
+        tool: "bash",
+        state: {
+          status: "running",
+          input: { command: data.command },
+          title: "bash",
+          time: { start: eventAt },
+        },
+      } satisfies SessionV1.ToolPart)
+      removedMessageIDs.delete(data.messageID)
+      continue
+    }
+
+    if (type === "session.next.shell.ended" && typeof data.callID === "string") {
+      const callID = data.callID
+      const assistant = [...messages.values()]
+        .filter((item) => item.info.role === "assistant")
+        .find((item) => findToolPart(item, callID))
+      if (!assistant) continue
+      const current = findToolPart(assistant, callID)
+      const input = current?.state.status === "running" || current?.state.status === "completed" ? current.state.input : {}
+      upsertAssistantPart(assistant, {
+        id: current?.id ?? partID("prt_30_tool", callID),
+        sessionID: info.id,
+        messageID: assistant.info.id,
+        type: "tool",
+        callID,
+        tool: current?.tool ?? "bash",
+        state: {
+          status: "completed",
+          input,
+          output: typeof data.output === "string" ? data.output : "",
+          title: current?.tool ?? "bash",
+          metadata: {},
+          time: {
+            start:
+              current?.state.status === "running" || current?.state.status === "completed"
+                ? current.state.time.start
+                : eventAt,
+            end: eventAt,
+          },
+        },
+      } satisfies SessionV1.ToolPart)
+      assistant.info = {
+        ...(assistant.info as SessionV1.Assistant),
+        time: { ...(assistant.info as SessionV1.Assistant).time, completed: eventAt },
+      }
+      continue
+    }
+
+    if (
+      type === "session.next.compaction.started" &&
+      typeof data.messageID === "string" &&
+      (data.reason === "auto" || data.reason === "manual")
+    ) {
+      const model = info.model
+      const user: SessionV1.WithParts = {
+        info: {
+          id: data.messageID as SessionV1.MessageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created: eventAt },
+          agent: info.agent ?? "build",
+          model: {
+            providerID: (model?.providerID ?? "unknown") as SessionV1.User["model"]["providerID"],
+            modelID: (model?.id ?? "unknown") as SessionV1.User["model"]["modelID"],
+            ...(model?.variant ? { variant: model.variant } : {}),
+          },
+        },
+        parts: [
+          {
+            id: partID("prt_compaction", data.messageID),
+            sessionID: info.id,
+            messageID: data.messageID as SessionV1.MessageID,
+            type: "compaction",
+            auto: data.reason === "auto",
+          } satisfies SessionV1.CompactionPart,
+        ],
+      }
+      messages.set(data.messageID, user)
+      removedMessageIDs.delete(data.messageID)
+      lastUserMessageID = data.messageID
+      continue
+    }
+
+    if (
+      type === "session.next.compaction.ended" &&
+      typeof data.messageID === "string" &&
+      typeof data.text === "string"
+    ) {
+      const user = messages.get(data.messageID)
+      if (!user) {
+        const model = info.model
+        messages.set(data.messageID, {
+          info: {
+            id: data.messageID as SessionV1.MessageID,
+            sessionID: info.id,
+            role: "user",
+            time: { created: eventAt },
+            agent: info.agent ?? "build",
+            model: {
+              providerID: (model?.providerID ?? "unknown") as SessionV1.User["model"]["providerID"],
+              modelID: (model?.id ?? "unknown") as SessionV1.User["model"]["modelID"],
+              ...(model?.variant ? { variant: model.variant } : {}),
+            },
+          },
+          parts: [
+            {
+              id: partID("prt_compaction", data.messageID),
+              sessionID: info.id,
+              messageID: data.messageID as SessionV1.MessageID,
+              type: "compaction",
+              auto: data.reason === "auto",
+            } satisfies SessionV1.CompactionPart,
+          ],
+        } satisfies SessionV1.WithParts)
+      }
+      const summaryID = messageID("msg_atree_compaction_summary", data.messageID)
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: summaryID,
+        timestamp: eventAt,
+        agent: "compaction",
+        parentID: data.messageID,
+      })
+      assistant.info = {
+        ...(assistant.info as SessionV1.Assistant),
+        summary: true,
+        time: { ...(assistant.info as SessionV1.Assistant).time, completed: eventAt },
+        finish: "stop",
+      }
+      upsertAssistantPart(assistant, {
+        id: partID("prt_10_text", summaryID),
+        sessionID: info.id,
+        messageID: summaryID,
+        type: "text",
+        text: data.text,
+        synthetic: true,
+        time: { start: eventAt, end: eventAt },
+      } satisfies SessionV1.TextPart)
       continue
     }
 
