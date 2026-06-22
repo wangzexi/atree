@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import path from "node:path"
 import { DateTime, Effect, Layer, Option } from "effect"
 import { Catalog } from "@opencode-ai/core/catalog"
 import { Integration } from "@opencode-ai/core/integration"
@@ -251,6 +252,38 @@ describe("CatalogV2", () => {
       yield* Effect.yieldNow
 
       expect(invoked).toBe(1)
+    }),
+  )
+
+  it.effect("runs catalog transform for equivalent plugin event directories", () =>
+    Effect.gen(function* () {
+      const events = yield* EventV2.Service
+      const plugin = yield* PluginV2.Service
+      let invoked = 0
+
+      yield* plugin.add({
+        id: PluginV2.ID.make("test-transform"),
+        effect: Effect.succeed({
+          "catalog.transform": () => Effect.sync(() => invoked++),
+        }),
+      })
+      yield* Effect.yieldNow
+      expect(invoked).toBe(1)
+
+      const equivalent = `test${path.sep}.`
+      yield* events.publish(
+        PluginV2.Event.Added,
+        { id: PluginV2.ID.make("test-transform") },
+        {
+          location: new Location.Info({
+            directory: AbsolutePath.make(equivalent),
+            project: { id: Project.ID.global, directory: AbsolutePath.make(equivalent) },
+          }),
+        },
+      )
+      yield* Effect.yieldNow
+
+      expect(invoked).toBe(2)
     }),
   )
 

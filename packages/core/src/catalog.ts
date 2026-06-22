@@ -1,5 +1,6 @@
 export * as Catalog from "./catalog"
 
+import path from "node:path"
 import { Array, Context, Effect, Layer, Option, Order, pipe, Schema, Scope, Stream } from "effect"
 import { castDraft, enableMapSet, type Draft } from "immer"
 import { ModelV2 } from "./model"
@@ -88,6 +89,11 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Catalog") {}
 
 enableMapSet()
+
+function sameDirectory(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false
+  return path.resolve(left) === path.resolve(right)
+}
 
 export const layer = Layer.effect(
   Service,
@@ -219,7 +225,8 @@ export const layer = Layer.effect(
       // Plugin registries are location scoped even though the event bus is process scoped.
       Stream.filter(
         (event) =>
-          event.location?.directory === location.directory && event.location.workspaceID === location.workspaceID,
+          sameDirectory(event.location?.directory, location.directory) &&
+          event.location?.workspaceID === location.workspaceID,
       ),
       Stream.runForEach((event) =>
         state.mutate((catalog) => plugin.triggerFor(event.data.id, "catalog.transform", catalog, {}), "plugin.added"),

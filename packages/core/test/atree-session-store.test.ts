@@ -2023,8 +2023,8 @@ describe("atree file-backed SessionV2 discovery", () => {
       )
 
       expect(events.map((event) => [event.cursor, event.event.type])).toEqual([
-        [1, "session.next.agent.switched"],
-        [2, "session.next.context.updated"],
+        [EventV2.Cursor.make(1), "session.next.agent.switched"],
+        [EventV2.Cursor.make(2), "session.next.context.updated"],
       ])
       expect(events[0]?.event.data).toMatchObject({ agent: "build", messageID: "msg_core_file_agent" })
       expect(afterFirst.map((event) => event.event.type)).toEqual(["session.next.context.updated"])
