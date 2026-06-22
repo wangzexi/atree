@@ -156,6 +156,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function timestampValue(value: unknown, fallback: number) {
   if (typeof value === "number") return value
+  if (typeof value === "string") {
+    const parsed = Date.parse(value)
+    if (Number.isFinite(parsed)) return parsed
+  }
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>
     if (typeof record.epochMillis === "number") return record.epochMillis
@@ -363,6 +367,66 @@ function appendPartDelta(part: SessionV1.Part, field: string, delta: string) {
   record[field] = typeof current === "string" ? current + delta : delta
 }
 
+function partID(prefix: string, value: string) {
+  return `${prefix}_${value.replace(/[^A-Za-z0-9._-]+/g, "_")}` as SessionV1.PartID
+}
+
+function contentText(value: unknown) {
+  if (typeof value === "string") return value
+  if (!Array.isArray(value)) return JSON.stringify(value ?? "")
+  return value
+    .map((item) => {
+      if (typeof item === "string") return item
+      if (isRecord(item) && typeof item.text === "string") return item.text
+      return JSON.stringify(item)
+    })
+    .join("\n")
+}
+
+function ensureAssistantMessage(
+  info: SessionInfo,
+  messages: Map<string, SessionV1.WithParts>,
+  input: {
+    id: string
+    timestamp: number
+    agent?: string
+    model?: SessionInfo["model"]
+    parentID?: string
+  },
+) {
+  const existing = messages.get(input.id)
+  if (existing) return existing
+  const model = input.model ?? info.model
+  const message = {
+    info: {
+      id: input.id as SessionV1.MessageID,
+      sessionID: info.id,
+      role: "assistant",
+      time: { created: input.timestamp },
+      parentID: (input.parentID ?? "msg_atree_parent") as SessionV1.MessageID,
+      modelID: (model?.id ?? "unknown") as SessionV1.Assistant["modelID"],
+      providerID: (model?.providerID ?? "unknown") as SessionV1.Assistant["providerID"],
+      ...(model?.variant ? { variant: model.variant } : {}),
+      mode: input.agent ?? info.agent ?? "build",
+      agent: input.agent ?? info.agent ?? "build",
+      path: { cwd: info.directory, root: info.directory },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+    },
+    parts: [],
+  } satisfies SessionV1.WithParts
+  messages.set(input.id, message)
+  return message
+}
+
+function upsertAssistantPart(message: SessionV1.WithParts, part: SessionV1.Part) {
+  upsertPart(message.parts, part)
+}
+
+function findToolPart(message: SessionV1.WithParts, callID: string) {
+  return message.parts.find((part): part is SessionV1.ToolPart => part.type === "tool" && part.callID === callID)
+}
+
 export async function readSessionJsonlProjection(info: SessionInfo) {
   const target = path.join(sessionRoot(info), "session.jsonl")
   const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
@@ -374,6 +438,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
   const removedPartIDs = new Set<string>()
   const messages = new Map<string, SessionV1.WithParts>()
   const orphanParts = new Map<string, SessionV1.Part[]>()
+  let lastUserMessageID: string | undefined
 
   for (const line of raw.split(/\r?\n/)) {
     if (!line.trim()) continue
@@ -387,6 +452,422 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
 
     const type = baseEventType(entry.type)
     const data = eventData(entry)
+    const eventAt = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
+
+    if (
+      (type === "session.next.prompted" ||
+        type === "session.next.prompt.admitted" ||
+        type === "session.next.prompt.promoted") &&
+      typeof data.messageID === "string" &&
+      isRecord(data.prompt)
+    ) {
+      const messageID = data.messageID as SessionV1.MessageID
+      const prompt = data.prompt
+      const created = timestampValue(data.timeCreated, eventAt)
+      const model = info.model
+      const message: SessionV1.WithParts = {
+        info: {
+          id: messageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created },
+          agent: info.agent ?? "build",
+          model: {
+            providerID: (model?.providerID ?? "unknown") as SessionV1.User["model"]["providerID"],
+            modelID: (model?.id ?? "unknown") as SessionV1.User["model"]["modelID"],
+            ...(model?.variant ? { variant: model.variant } : {}),
+          },
+        },
+        parts: [],
+      }
+      if (typeof prompt.text === "string") {
+        message.parts.push({
+          id: partID("prt_text", messageID),
+          sessionID: info.id,
+          messageID,
+          type: "text",
+          text: prompt.text,
+          time: { start: created, end: created },
+        } satisfies SessionV1.TextPart)
+      }
+      if (Array.isArray(prompt.files)) {
+        for (const [index, file] of prompt.files.entries()) {
+          if (!isRecord(file) || typeof file.uri !== "string" || typeof file.mime !== "string") continue
+          message.parts.push({
+            id: partID("prt_file", `${messageID}_${index}`),
+            sessionID: info.id,
+            messageID,
+            type: "file",
+            mime: file.mime,
+            url: file.uri,
+            ...(typeof file.name === "string" ? { filename: file.name } : {}),
+          } satisfies SessionV1.FilePart)
+        }
+      }
+      if (Array.isArray(prompt.agents)) {
+        for (const [index, agent] of prompt.agents.entries()) {
+          if (!isRecord(agent) || typeof agent.name !== "string") continue
+          message.parts.push({
+            id: partID("prt_agent", `${messageID}_${index}`),
+            sessionID: info.id,
+            messageID,
+            type: "agent",
+            name: agent.name,
+          } satisfies SessionV1.AgentPart)
+        }
+      }
+      messages.set(messageID, message)
+      removedMessageIDs.delete(messageID)
+      lastUserMessageID = messageID
+      continue
+    }
+
+    if (type === "session.next.context.updated" && typeof data.messageID === "string" && typeof data.text === "string") {
+      const messageID = data.messageID as SessionV1.MessageID
+      const model = info.model
+      messages.set(messageID, {
+        info: {
+          id: messageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created: eventAt },
+          agent: info.agent ?? "build",
+          model: {
+            providerID: (model?.providerID ?? "unknown") as SessionV1.User["model"]["providerID"],
+            modelID: (model?.id ?? "unknown") as SessionV1.User["model"]["modelID"],
+            ...(model?.variant ? { variant: model.variant } : {}),
+          },
+          system: data.text,
+        },
+        parts: [],
+      } satisfies SessionV1.WithParts)
+      removedMessageIDs.delete(messageID)
+      continue
+    }
+
+    if (type === "session.next.synthetic" && typeof data.messageID === "string" && typeof data.text === "string") {
+      const messageID = data.messageID as SessionV1.MessageID
+      const model = info.model
+      messages.set(messageID, {
+        info: {
+          id: messageID,
+          sessionID: info.id,
+          role: "user",
+          time: { created: eventAt },
+          agent: info.agent ?? "build",
+          model: {
+            providerID: (model?.providerID ?? "unknown") as SessionV1.User["model"]["providerID"],
+            modelID: (model?.id ?? "unknown") as SessionV1.User["model"]["modelID"],
+            ...(model?.variant ? { variant: model.variant } : {}),
+          },
+        },
+        parts: [
+          {
+            id: partID("prt_synthetic", messageID),
+            sessionID: info.id,
+            messageID,
+            type: "text",
+            text: data.text,
+            synthetic: true,
+            time: { start: eventAt, end: eventAt },
+          } satisfies SessionV1.TextPart,
+        ],
+      } satisfies SessionV1.WithParts)
+      removedMessageIDs.delete(messageID)
+      continue
+    }
+
+    if (
+      type === "session.next.step.started" &&
+      typeof data.assistantMessageID === "string" &&
+      typeof data.agent === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        agent: data.agent,
+        model: modelRef(data.model),
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_step_start", data.assistantMessageID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "step-start",
+        ...(typeof data.snapshot === "string" ? { snapshot: data.snapshot } : {}),
+      } satisfies SessionV1.StepStartPart)
+      removedMessageIDs.delete(data.assistantMessageID)
+      continue
+    }
+
+    if (type === "session.next.step.ended" && typeof data.assistantMessageID === "string") {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      const tokens = tokensValue(data.tokens) ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+      const assistantInfo = assistant.info as SessionV1.Assistant
+      assistant.info = {
+        ...assistantInfo,
+        time: { ...assistantInfo.time, completed: eventAt },
+        finish: typeof data.finish === "string" ? data.finish : assistantInfo.finish,
+        cost: typeof data.cost === "number" ? data.cost : assistantInfo.cost,
+        tokens,
+      } as SessionV1.Assistant
+      upsertAssistantPart(assistant, {
+        id: partID("prt_step_finish", data.assistantMessageID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "step-finish",
+        reason: typeof data.finish === "string" ? data.finish : "unknown",
+        ...(typeof data.snapshot === "string" ? { snapshot: data.snapshot } : {}),
+        cost: typeof data.cost === "number" ? data.cost : 0,
+        tokens,
+      } satisfies SessionV1.StepFinishPart)
+      continue
+    }
+
+    if (type === "session.next.step.failed" && typeof data.assistantMessageID === "string") {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      assistant.info = {
+        ...assistant.info,
+        time: { ...assistant.info.time, completed: eventAt },
+        finish: "error",
+        ...(isRecord(data.error) ? { error: data.error as SessionV1.Assistant["error"] } : {}),
+      } as SessionV1.Assistant
+      continue
+    }
+
+    if (type === "session.next.text.started" && typeof data.assistantMessageID === "string" && typeof data.textID === "string") {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_text", data.textID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "text",
+        text: "",
+        time: { start: eventAt },
+      } satisfies SessionV1.TextPart)
+      continue
+    }
+
+    if (type === "session.next.text.ended" && typeof data.assistantMessageID === "string" && typeof data.textID === "string") {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_text", data.textID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "text",
+        text: typeof data.text === "string" ? data.text : "",
+        time: { start: eventAt, end: eventAt },
+      } satisfies SessionV1.TextPart)
+      continue
+    }
+
+    if (
+      type === "session.next.reasoning.started" &&
+      typeof data.assistantMessageID === "string" &&
+      typeof data.reasoningID === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_reasoning", data.reasoningID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "reasoning",
+        text: "",
+        ...(isRecord(data.providerMetadata) ? { metadata: data.providerMetadata } : {}),
+        time: { start: eventAt },
+      } satisfies SessionV1.ReasoningPart)
+      continue
+    }
+
+    if (
+      type === "session.next.reasoning.ended" &&
+      typeof data.assistantMessageID === "string" &&
+      typeof data.reasoningID === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_reasoning", data.reasoningID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "reasoning",
+        text: typeof data.text === "string" ? data.text : "",
+        ...(isRecord(data.providerMetadata) ? { metadata: data.providerMetadata } : {}),
+        time: { start: eventAt, end: eventAt },
+      } satisfies SessionV1.ReasoningPart)
+      continue
+    }
+
+    if (
+      type === "session.next.tool.input.started" &&
+      typeof data.assistantMessageID === "string" &&
+      typeof data.callID === "string" &&
+      typeof data.name === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      upsertAssistantPart(assistant, {
+        id: partID("prt_tool", data.callID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "tool",
+        callID: data.callID,
+        tool: data.name,
+        state: { status: "pending", input: {}, raw: "" },
+      } satisfies SessionV1.ToolPart)
+      continue
+    }
+
+    if (type === "session.next.tool.input.ended" && typeof data.assistantMessageID === "string" && typeof data.callID === "string") {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      const tool = findToolPart(assistant, data.callID)
+      if (tool && tool.state.status === "pending") tool.state.raw = typeof data.text === "string" ? data.text : ""
+      continue
+    }
+
+    if (
+      type === "session.next.tool.called" &&
+      typeof data.assistantMessageID === "string" &&
+      typeof data.callID === "string" &&
+      typeof data.tool === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      const current = findToolPart(assistant, data.callID)
+      const input = isRecord(data.input) ? data.input : {}
+      upsertAssistantPart(assistant, {
+        id: current?.id ?? partID("prt_tool", data.callID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "tool",
+        callID: data.callID,
+        tool: data.tool,
+        metadata: isRecord(data.provider) ? (data.provider as Record<string, unknown>) : undefined,
+        state: {
+          status: "running",
+          input,
+          title: data.tool,
+          time: { start: eventAt },
+        },
+      } satisfies SessionV1.ToolPart)
+      continue
+    }
+
+    if (
+      (type === "session.next.tool.progress" || type === "session.next.tool.success") &&
+      typeof data.assistantMessageID === "string" &&
+      typeof data.callID === "string"
+    ) {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      const current = findToolPart(assistant, data.callID)
+      const input = current?.state.status === "running" || current?.state.status === "completed" ? current.state.input : {}
+      const output = contentText(data.content)
+      upsertAssistantPart(assistant, {
+        id: current?.id ?? partID("prt_tool", data.callID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "tool",
+        callID: data.callID,
+        tool: current?.tool ?? data.callID,
+        metadata: isRecord(data.provider) ? (data.provider as Record<string, unknown>) : current?.metadata,
+        state:
+          type === "session.next.tool.success"
+            ? {
+                status: "completed",
+                input,
+                output,
+                title: current?.tool ?? data.callID,
+                metadata: {},
+                time: {
+                  start:
+                    current?.state.status === "running" || current?.state.status === "completed"
+                      ? current.state.time.start
+                      : eventAt,
+                  end: eventAt,
+                },
+              }
+            : {
+                status: "running",
+                input,
+                title: current?.tool ?? data.callID,
+                time:
+                  current?.state.status === "running"
+                    ? current.state.time
+                    : { start: eventAt },
+              },
+      } satisfies SessionV1.ToolPart)
+      continue
+    }
+
+    if (type === "session.next.tool.failed" && typeof data.assistantMessageID === "string" && typeof data.callID === "string") {
+      const assistant = ensureAssistantMessage(info, messages, {
+        id: data.assistantMessageID,
+        timestamp: eventAt,
+        parentID: lastUserMessageID,
+      })
+      const current = findToolPart(assistant, data.callID)
+      upsertAssistantPart(assistant, {
+        id: current?.id ?? partID("prt_tool", data.callID),
+        sessionID: info.id,
+        messageID: data.assistantMessageID as SessionV1.MessageID,
+        type: "tool",
+        callID: data.callID,
+        tool: current?.tool ?? data.callID,
+        metadata: isRecord(data.provider) ? (data.provider as Record<string, unknown>) : current?.metadata,
+        state: {
+          status: "error",
+          input:
+            current?.state.status === "running" || current?.state.status === "completed" ? current.state.input : {},
+          error: isRecord(data.error) && typeof data.error.message === "string" ? data.error.message : "Tool failed",
+          metadata: {},
+          time: {
+            start:
+              current?.state.status === "running" || current?.state.status === "completed"
+                ? current.state.time.start
+                : eventAt,
+            end: eventAt,
+          },
+        },
+      } satisfies SessionV1.ToolPart)
+      continue
+    }
 
     if (type === "message.updated" && data.message && typeof data.message === "object") {
       const message = data.message as SessionV1.Info
@@ -395,6 +876,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
       messages.set(message.id, { info: message, parts })
       orphanParts.delete(message.id)
       removedMessageIDs.delete(message.id)
+      if (message.role === "user") lastUserMessageID = message.id
       continue
     }
 

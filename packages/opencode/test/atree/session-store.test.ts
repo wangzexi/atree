@@ -759,4 +759,144 @@ describe("atree session store", () => {
     expect(projection.removedPartIDs.has("msg_recreated:prt_recreated")).toBe(false)
     expect(projection.messages[0]?.parts[0]).toMatchObject({ id: "prt_recreated", text: "second" })
   })
+
+  test("replays durable session.next events into messages from session jsonl", async () => {
+    const directory = await tempdir()
+    const session = {
+      id: "ses_v2_replay",
+      slug: "ses-v2-replay",
+      version: "test",
+      projectID: "proj_test",
+      directory,
+      title: "V2 replay",
+      agent: "build",
+      model: { id: "model_test", providerID: "provider_test" },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "session.next.prompted",
+      sessionID: "ses_v2_replay",
+      messageID: "msg_v2_user",
+      timestamp: 10,
+      delivery: "queue",
+      prompt: {
+        text: "hello from v2",
+        files: [{ uri: "data:text/plain;base64,aGk=", mime: "text/plain", name: "note.txt" }],
+        agents: [{ name: "review" }],
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.step.started",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 20,
+      agent: "build",
+      model: { id: "model_test", providerID: "provider_test" },
+      snapshot: "before",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.text.started",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 21,
+      textID: "answer",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.text.delta",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 22,
+      textID: "answer",
+      delta: "ignored",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.text.ended",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 23,
+      textID: "answer",
+      text: "assistant answer",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.reasoning.ended",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 24,
+      reasoningID: "thought",
+      text: "short reasoning",
+      providerMetadata: { provider_test: { signature: "sig" } },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.tool.input.started",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 25,
+      callID: "call_bash",
+      name: "bash",
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.tool.called",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 26,
+      callID: "call_bash",
+      tool: "bash",
+      input: { command: "pwd" },
+      provider: { executed: false },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.tool.success",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 27,
+      callID: "call_bash",
+      structured: {},
+      content: [{ type: "text", text: "/tmp/project" }],
+      provider: { executed: false },
+    })
+    await appendSessionJsonl(session, {
+      type: "session.next.step.ended",
+      sessionID: "ses_v2_replay",
+      assistantMessageID: "msg_v2_assistant",
+      timestamp: 30,
+      finish: "stop",
+      cost: 0.25,
+      tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
+      snapshot: "after",
+    })
+
+    const messages = await readSessionJsonlMessages(session)
+    expect(messages).toHaveLength(2)
+    expect(messages[0]?.info).toMatchObject({ id: "msg_v2_user", role: "user" })
+    expect(messages[0]?.parts).toMatchObject([
+      { type: "text", text: "hello from v2" },
+      { type: "file", filename: "note.txt", mime: "text/plain" },
+      { type: "agent", name: "review" },
+    ])
+    expect(messages[1]?.info).toMatchObject({
+      id: "msg_v2_assistant",
+      role: "assistant",
+      parentID: "msg_v2_user",
+      finish: "stop",
+      cost: 0.25,
+      time: { created: 20, completed: 30 },
+    })
+    expect(messages[1]?.parts).toMatchObject([
+      { type: "reasoning", text: "short reasoning" },
+      { type: "step-finish", reason: "stop", snapshot: "after" },
+      { type: "step-start", snapshot: "before" },
+      { type: "text", text: "assistant answer" },
+      {
+        type: "tool",
+        callID: "call_bash",
+        tool: "bash",
+        state: { status: "completed", input: { command: "pwd" }, output: "/tmp/project" },
+      },
+    ])
+    expect(messages[1]?.parts.find((part) => part.type === "text")).toMatchObject({ text: "assistant answer" })
+  })
 })
