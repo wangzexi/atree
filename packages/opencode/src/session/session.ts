@@ -179,6 +179,13 @@ function sameDirectory(left: string, right: string) {
   return path.resolve(left) === path.resolve(right)
 }
 
+function isWithinDirectory(parent: string | undefined, child: string | undefined) {
+  if (!parent || !child) return false
+  const root = path.resolve(parent)
+  const target = path.resolve(child)
+  return target === root || target.startsWith(root + path.sep)
+}
+
 function localizeFileSession(file: Info, ctx: InstanceContext | undefined): Info {
   if (!ctx || !sameDirectory(file.directory, ctx.directory)) return file
   return {
@@ -725,6 +732,12 @@ export const layer: Layer.Layer<
           return merged
         }
         if (directoryHint) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+        )
+        if (isWithinDirectory(state.rootDirectory ?? undefined, cached.directory)) {
+          return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+        }
         return cached
       }
       return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
