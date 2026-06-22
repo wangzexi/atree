@@ -152,6 +152,26 @@ export const childSessionOnPath = (sessions: Session[] | undefined, rootID: stri
   }
 }
 
+export function findSessionForDirectoryEvent(
+  states: Iterable<{ sessions?: Session[] }>,
+  sessionID: string,
+  directory?: string,
+) {
+  if (directory) {
+    const target = pathKey(directory)
+    for (const state of states) {
+      const session = state.sessions?.find((item) => item.id === sessionID && pathKey(item.directory) === target)
+      if (session) return session
+    }
+    return
+  }
+
+  for (const state of states) {
+    const session = state.sessions?.find((item) => item.id === sessionID)
+    if (session) return session
+  }
+}
+
 export const displayName = (project: { name?: string; worktree: string }) =>
   project.name || getFilename(project.worktree) || project.worktree
 

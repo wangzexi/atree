@@ -79,6 +79,7 @@ import {
   displayName,
   effectiveWorkspaceOrder,
   errorMessage,
+  findSessionForDirectoryEvent,
   latestRootSession,
   sessionEmoji,
   sessionHasSchedule,
@@ -2742,12 +2743,8 @@ export default function Layout(props: ParentProps) {
       switchToSessions(directorySessions(directory, Date.now()))
     }
     const rootProject = createMemo(() => layout.projects.list()[0])
-    const knownSession = (sessionID: string) => {
-      for (const state of Object.values(tree.directory)) {
-        const session = state.sessions?.find((item) => item.id === sessionID)
-        if (session) return session
-      }
-    }
+    const knownSession = (sessionID: string, directory?: string) =>
+      findSessionForDirectoryEvent(Object.values(tree.directory), sessionID, directory)
     let routeDirectoryGroupRun = 0
     createEffect(() => {
       const run = ++routeDirectoryGroupRun
@@ -2781,7 +2778,7 @@ export default function Layout(props: ParentProps) {
     const stopScheduleEvents = serverSDK.event.listen((event) => {
       const sessionID = extractSessionScheduleEventSessionID(event.details)
       if (!sessionID) return
-      const session = knownSession(sessionID)
+      const session = knownSession(sessionID, event.name === "global" ? undefined : event.name)
       if (!session) return
       void fetchSessionSchedules(session)
     })

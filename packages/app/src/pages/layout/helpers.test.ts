@@ -13,6 +13,7 @@ import {
   displayName,
   effectiveWorkspaceOrder,
   errorMessage,
+  findSessionForDirectoryEvent,
   hasProjectPermissions,
   homeProjectNavigation,
   homeProjectDirectories,
@@ -370,6 +371,23 @@ describe("layout workspace helpers", () => {
     expect(childSessionOnPath(list, "child", "leaf")?.id).toBe("leaf")
     expect(childSessionOnPath(list, "root", "root")).toBeUndefined()
     expect(childSessionOnPath(list, "root", "other")).toBeUndefined()
+  })
+
+  test("finds directory event sessions by id and directory", () => {
+    const source = session({ id: "copied", directory: "/source" })
+    const target = session({ id: "copied", directory: "/target" })
+
+    expect(
+      findSessionForDirectoryEvent([{ sessions: [source] }, { sessions: [target] }], "copied", "/target/"),
+    ).toBe(target)
+    expect(findSessionForDirectoryEvent([{ sessions: [source] }], "copied", "/target")).toBeUndefined()
+  })
+
+  test("falls back to session id lookup when a directory event has no directory", () => {
+    const source = session({ id: "copied", directory: "/source" })
+    const target = session({ id: "copied", directory: "/target" })
+
+    expect(findSessionForDirectoryEvent([{ sessions: [source] }, { sessions: [target] }], "copied")).toBe(source)
   })
 
   test("formats fallback project display name", () => {
