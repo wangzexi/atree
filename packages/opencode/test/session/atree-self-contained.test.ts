@@ -156,6 +156,83 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("replies to restored pending question and permission from session.jsonl", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+      const instance = yield* TestInstance
+
+      const session = yield* sessions.create({ title: "restored interaction replies" })
+      const pendingQuestionID = QuestionID.ascending("que_atree_restore_reply")
+      const pendingPermissionID = PermissionV1.ID.ascending("per_atree_restore_reply")
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "question.asked",
+          question: {
+            id: pendingQuestionID,
+            sessionID: session.id,
+            questions: [
+              {
+                question: "Reply to restored question?",
+                header: "Restore",
+                options: [{ label: "Yes", description: "Append the reply" }],
+              },
+            ],
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "permission.asked",
+          permission: {
+            id: pendingPermissionID,
+            sessionID: session.id,
+            permission: "bash",
+            patterns: ["echo restored"],
+            metadata: {},
+            always: [],
+          },
+        }),
+      )
+
+      expect((yield* questions.list()).map((item) => item.id)).toEqual([pendingQuestionID])
+      expect((yield* permissions.list()).map((item) => item.id)).toEqual([pendingPermissionID])
+
+      yield* questions.reply({ requestID: pendingQuestionID, answers: [["Yes"]] })
+      yield* permissions.reply({ requestID: pendingPermissionID, reply: "once" })
+
+      expect(yield* questions.list()).toEqual([])
+      expect(yield* permissions.list()).toEqual([])
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "question.replied",
+          sessionID: session.id,
+          requestID: pendingQuestionID,
+          answers: [["Yes"]],
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.replied",
+          sessionID: session.id,
+          requestID: pendingPermissionID,
+          reply: "once",
+        }),
+      )
+    }),
+  )
+
   it.instance("records pending question and permission decisions in session.jsonl", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
