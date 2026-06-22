@@ -6,6 +6,7 @@ import { QuestionID } from "./schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
+import { readSessionInteractionState } from "@/atree/interaction-store"
 
 // Schemas — these are pure data; nothing checks class identity (see PR
 // description) so they're plain `Schema.Struct` + type alias. That lets
@@ -104,6 +105,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Que
 interface PendingEntry {
   info: Request
   deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
+  restored?: boolean
 }
 
 interface State {
@@ -133,14 +135,22 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const events = yield* EventV2Bridge.Service
     const state = yield* InstanceState.make<State>(
-      Effect.fn("Question.state")(function* () {
+      Effect.fn("Question.state")(function* (ctx) {
+        const restored = yield* Effect.promise(() => readSessionInteractionState(ctx.directory)).pipe(
+          Effect.catchCause(() => Effect.succeed({ questions: [], permissions: [] })),
+        )
         const state = {
           pending: new Map<QuestionID, PendingEntry>(),
+        }
+        for (const item of restored.questions) {
+          const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
+          state.pending.set(item.id, { info: item, deferred, restored: true })
         }
 
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
+              if (item.restored) continue
               yield* events.publish(Event.Rejected, {
                 sessionID: item.info.sessionID,
                 requestID: item.info.id,

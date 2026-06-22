@@ -8,6 +8,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
+import { readSessionInteractionState } from "@/atree/interaction-store"
 
 export const Event = {
   Asked: EventV2.define({ type: "permission.asked", schema: PermissionV1.Request.fields }),
@@ -30,6 +31,7 @@ export interface Interface {
 interface PendingEntry {
   info: PermissionV1.Request
   deferred: Deferred.Deferred<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>
+  restored?: boolean
 }
 
 interface State {
@@ -57,15 +59,22 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
     const state = yield* InstanceState.make<State>(
       Effect.fn("Permission.state")(function* (ctx) {
-        void ctx
+        const restored = yield* Effect.promise(() => readSessionInteractionState(ctx.directory)).pipe(
+          Effect.catchCause(() => Effect.succeed({ questions: [], permissions: [] })),
+        )
         const state = {
           pending: new Map<PermissionV1.ID, PendingEntry>(),
           approved: [],
+        }
+        for (const item of restored.permissions) {
+          const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
+          state.pending.set(item.id, { info: item, deferred, restored: true })
         }
 
         yield* Effect.addFinalizer(() =>
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
+              if (item.restored) continue
               yield* events.publish(Event.Replied, {
                 sessionID: item.info.sessionID,
                 requestID: item.info.id,

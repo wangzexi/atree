@@ -10,13 +10,14 @@ import { WorkspaceV2 } from "@opencode-ai/core/workspace"
 import { and, eq } from "drizzle-orm"
 import { Effect, Fiber, Layer } from "effect"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
-import { readSessionStore, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { readSessionTodoState } from "@/atree/todo-store"
 import { BackgroundJob } from "@/background/job"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Permission } from "@/permission"
 import { Question } from "@/question"
+import { QuestionID } from "@/question/schema"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { Schedule } from "@/session/schedule"
 import { ScheduleRunTable, ScheduleTable } from "@/session/schedule.sql"
@@ -58,6 +59,103 @@ const waitFor = <T>(load: Effect.Effect<T | undefined>) =>
   })
 
 describe("atree directory self-contained state", () => {
+  it.instance("restores pending question and permission lists from session.jsonl", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+
+      const session = yield* sessions.create({ title: "restored interactions" })
+      const pendingQuestionID = QuestionID.ascending("que_atree_restore_pending")
+      const answeredQuestionID = QuestionID.ascending("que_atree_restore_answered")
+      const pendingPermissionID = PermissionV1.ID.ascending("per_atree_restore_pending")
+      const answeredPermissionID = PermissionV1.ID.ascending("per_atree_restore_answered")
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "question.asked",
+          question: {
+            id: pendingQuestionID,
+            sessionID: session.id,
+            questions: [
+              {
+                question: "Restore this question?",
+                header: "Restore",
+                options: [{ label: "Yes", description: "Keep it pending" }],
+              },
+            ],
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "question.asked",
+          question: {
+            id: answeredQuestionID,
+            sessionID: session.id,
+            questions: [
+              {
+                question: "Already answered?",
+                header: "Done",
+                options: [{ label: "Yes", description: "Do not restore" }],
+              },
+            ],
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "question.replied",
+          sessionID: session.id,
+          requestID: answeredQuestionID,
+          answers: [["Yes"]],
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "permission.asked",
+          permission: {
+            id: pendingPermissionID,
+            sessionID: session.id,
+            permission: "bash",
+            patterns: ["echo pending"],
+            metadata: {},
+            always: [],
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "permission.asked",
+          permission: {
+            id: answeredPermissionID,
+            sessionID: session.id,
+            permission: "bash",
+            patterns: ["echo answered"],
+            metadata: {},
+            always: [],
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "permission.replied",
+          sessionID: session.id,
+          requestID: answeredPermissionID,
+          reply: "once",
+        }),
+      )
+
+      const restoredQuestions = yield* questions.list()
+      const restoredPermissions = yield* permissions.list()
+
+      expect(restoredQuestions.map((item) => item.id)).toEqual([pendingQuestionID])
+      expect(restoredQuestions[0]?.sessionID).toBe(session.id)
+      expect(restoredPermissions.map((item) => item.id)).toEqual([pendingPermissionID])
+      expect(restoredPermissions[0]?.sessionID).toBe(session.id)
+    }),
+  )
+
   it.instance("records pending question and permission decisions in session.jsonl", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
