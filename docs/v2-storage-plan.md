@@ -301,6 +301,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 删除 workspace 时会通过 session service 查找当前 workspace 的会话；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。
 - workspace sync history 发送本地 sequence fence 时会合并 SQLite workspace row 和目录事实源中的 workspace 会话；只有目录 `meta.yaml`、没有 `SessionTable` row 的会话也会被纳入同步状态。
 - workspace sessionWarp 写入目标 workspace 后会更新目录会话的 `meta.yaml`/`session.jsonl`，并 claim 对应 EventSequence owner；只有目录事实源、没有 SQLite session row 的会话也能被移动到本地 workspace。
+- workspace sessionWarp 在 `copyChanges` 时会从目录 `meta.yaml` 读取源 `workspaceID`；只有目录事实源、没有 SQLite session row 的会话也能把源 workspace 的改动复制到目标 workspace。
 
 仍未完成的部分：
 

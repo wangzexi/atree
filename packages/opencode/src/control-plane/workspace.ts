@@ -33,6 +33,7 @@ import { Vcs } from "@/project/vcs"
 import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
+import { resolveFileSession } from "@/atree/session-resolver"
 
 export const Info = Schema.Struct({
   ...WorkspaceInfoSchema.fields,
@@ -578,12 +579,23 @@ export const layer = Layer.effect(
 
     const sessionWarp = Effect.fn("Workspace.sessionWarp")(function* (input: SessionWarpInput) {
       return yield* Effect.gen(function* () {
-        const current = yield* db
+        const currentRow = yield* db
           .select({ workspaceID: SessionTable.workspace_id, directory: SessionTable.directory })
           .from(SessionTable)
           .where(eq(SessionTable.id, input.sessionID))
           .get()
           .pipe(Effect.orDie)
+        const currentFileSession =
+          !input.copyChanges || currentRow?.workspaceID
+            ? undefined
+            : yield* resolveFileSession(db, {
+                sessionID: input.sessionID,
+                directory: currentRow?.directory ?? undefined,
+              })
+        const current = {
+          workspaceID: currentRow?.workspaceID ?? currentFileSession?.workspaceID ?? null,
+          directory: currentRow?.directory,
+        }
 
         if (current?.workspaceID) {
           const previous = yield* get(current.workspaceID)
