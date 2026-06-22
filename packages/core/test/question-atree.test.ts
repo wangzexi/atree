@@ -5,7 +5,7 @@ import { Global } from "@opencode-ai/core/global"
 import { QuestionV2 } from "@opencode-ai/core/question"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { Effect, Layer } from "effect"
+import { Context, Effect, Exit, Layer, Scope } from "effect"
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
@@ -214,6 +214,66 @@ describe("QuestionV2 atree state", () => {
       )
 
       expect(yield* service.list()).toEqual([])
+    }),
+  )
+
+  it.effect("does not reject restored pending questions when the service scope closes", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_question_scope_close")
+      const pendingID = QuestionV2.ID.ascending("que_core_question_scope_close")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core question scope close",
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(node, sessionID, [
+          {
+            type: "question.v2.asked",
+            id: pendingID,
+            sessionID,
+            questions: [
+              {
+                question: "Should remain pending after process closes?",
+                header: "Pending",
+                options: [{ label: "Yes", description: "Keep pending" }],
+              },
+            ],
+          },
+        ]),
+      )
+
+      const scope = yield* Scope.make()
+      const service = Context.get(yield* Layer.buildWithScope(Layer.fresh(questions), scope), QuestionV2.Service)
+      expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
+      yield* Scope.close(scope, Exit.void)
+
+      const raw = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.some((entry) => entry.type === "question.v2.rejected" && entry.requestID === pendingID)).toBe(false)
     }),
   )
 })

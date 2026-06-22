@@ -156,7 +156,7 @@ export const layer = Layer.effect(
 
     yield* Effect.addFinalizer(() =>
       Effect.forEach(
-        pending.values(),
+        Array.from(pending.values()).filter((item) => !item.restored),
         (item) =>
           publish(item.request.sessionID, Event.Rejected, {
             sessionID: item.request.sessionID,
