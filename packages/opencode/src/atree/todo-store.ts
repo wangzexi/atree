@@ -23,6 +23,10 @@ type SessionTodoState = {
   todos: StoredTodo[]
 }
 
+function publicTodoProjection(input: { hasState: boolean; todos: StoredTodo[] }) {
+  return { hasState: input.hasState, todos: input.todos }
+}
+
 function legacyStatePath(directory: string) {
   return path.join(directory, ".agents", "atree", "extensions", "todo", "state.json")
 }
@@ -162,16 +166,16 @@ export async function readSessionTodoProjection(directory: string, sessionID: st
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
   if (sessionState.hasState) {
     const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return jsonlState
-    return sessionState
+    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return publicTodoProjection(jsonlState)
+    return publicTodoProjection(sessionState)
   }
 
   const state = await readState(legacyStatePath(directory))
   const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-  if (!Object.hasOwn(state.sessions, sessionID)) return jsonlState
+  if (!Object.hasOwn(state.sessions, sessionID)) return publicTodoProjection(jsonlState)
   const todos = state.sessions[sessionID]
-  if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return jsonlState
-  return { hasState: true, todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [] }
+  if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return publicTodoProjection(jsonlState)
+  return publicTodoProjection({ hasState: true, todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [] })
 }
 
 export async function readSessionTodoState(directory: string, sessionID: string) {
