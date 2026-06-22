@@ -132,6 +132,7 @@ interface Pending {
   readonly request: Request
   readonly agent?: AgentV2.ID
   readonly deferred: Deferred.Deferred<void, RejectedError | CorrectedError>
+  readonly restored?: boolean
 }
 
 export const layer = Layer.effect(
@@ -148,10 +149,14 @@ export const layer = Layer.effect(
       const restored = yield* EffectRuntime.promise(() => readPermissionState()).pipe(
         EffectRuntime.catchCause(() => EffectRuntime.succeed([] as Request[])),
       )
+      const restoredIDs = new Set(restored.map((request) => request.id))
+      for (const [id, item] of pending) {
+        if (item.restored && !restoredIDs.has(id)) pending.delete(id)
+      }
       for (const request of restored) {
         if (pending.has(request.id)) continue
         const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
-        pending.set(request.id, { request, deferred })
+        pending.set(request.id, { request, deferred, restored: true })
       }
     })
 

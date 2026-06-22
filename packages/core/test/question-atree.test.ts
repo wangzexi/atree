@@ -6,7 +6,7 @@ import { QuestionV2 } from "@opencode-ai/core/question"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { Effect, Layer } from "effect"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 import { testEffect } from "./lib/effect"
@@ -151,6 +151,69 @@ describe("QuestionV2 atree state", () => {
           answers: [["Yes"]],
         }),
       )
+    }),
+  )
+
+  it.effect("removes restored questions when session.jsonl is answered externally", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_question_external_reply")
+      const pendingID = QuestionV2.ID.ascending("que_core_question_external")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core question external reply",
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(node, sessionID, [
+          {
+            type: "question.v2.asked",
+            id: pendingID,
+            sessionID,
+            questions: [
+              {
+                question: "Answered outside this process?",
+                header: "External",
+                options: [{ label: "Yes", description: "Remove from pending state" }],
+              },
+            ],
+          },
+        ]),
+      )
+
+      const service = yield* QuestionV2.Service
+      expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
+
+      yield* Effect.promise(() =>
+        appendFile(
+          path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"),
+          JSON.stringify({
+            type: "question.v2.replied",
+            sessionID,
+            requestID: pendingID,
+            answers: [["Yes"]],
+          }) + "\n",
+        ),
+      )
+
+      expect(yield* service.list()).toEqual([])
     }),
   )
 })

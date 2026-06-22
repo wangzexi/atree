@@ -12,7 +12,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { Effect, Layer } from "effect"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 import { location } from "./fixture/location"
@@ -174,6 +174,68 @@ describe("PermissionV2 atree state", () => {
           reply: "once",
         }),
       )
+    }),
+  )
+
+  it.effect("removes restored permissions when session.jsonl is answered externally", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_permission_external_reply")
+      const pendingID = PermissionV2.ID.create("per_core_permission_external")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core permission external reply",
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(node, sessionID, [
+          {
+            type: "permission.v2.asked",
+            id: pendingID,
+            sessionID,
+            action: "bash",
+            resources: ["echo pending"],
+            save: ["echo pending"],
+            metadata: {},
+          },
+        ]),
+      )
+
+      const service = yield* PermissionV2.Service
+      expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
+
+      yield* Effect.promise(() =>
+        appendFile(
+          path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"),
+          JSON.stringify({
+            type: "permission.v2.replied",
+            sessionID,
+            requestID: pendingID,
+            reply: "once",
+          }) + "\n",
+        ),
+      )
+
+      expect(yield* service.list()).toEqual([])
+      expect(yield* service.get(pendingID)).toBeUndefined()
+      expect(yield* service.forSession(sessionID)).toEqual([])
     }),
   )
 })

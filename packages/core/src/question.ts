@@ -115,6 +115,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 interface Pending {
   readonly request: Request
   readonly deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
+  readonly restored?: boolean
 }
 
 /**
@@ -133,10 +134,14 @@ export const layer = Layer.effect(
       const restored = yield* Effect.promise(() => readQuestionState()).pipe(
         Effect.catchCause(() => Effect.succeed([] as Request[])),
       )
+      const restoredIDs = new Set(restored.map((request) => request.id))
+      for (const [id, item] of pending) {
+        if (item.restored && !restoredIDs.has(id)) pending.delete(id)
+      }
       for (const request of restored) {
         if (pending.has(request.id)) continue
         const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
-        pending.set(request.id, { request, deferred })
+        pending.set(request.id, { request, deferred, restored: true })
       }
     })
 
