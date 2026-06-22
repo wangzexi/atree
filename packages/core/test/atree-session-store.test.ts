@@ -14,7 +14,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { readSessionStore } from "@opencode-ai/core/atree/session-store"
+import { readSessionStore, readSessionStoresDeep } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer, Stream } from "effect"
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "fs/promises"
@@ -191,6 +191,45 @@ describe("atree file-backed SessionV2 discovery", () => {
         SessionV2.ID.make("ses_core_list_a"),
       ])
       expect(listed.map((session) => session.title)).toEqual(["Core list B", "Core list A"])
+    }),
+  )
+
+  it.effect("sorts deep file-backed session scans by updated time", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-deep-order-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-deep-order-root-")))
+      const nested = path.join(root, "projects", "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: root,
+          sessionID: "ses_core_deep_old",
+          title: "Older root session",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: nested,
+          sessionID: "ses_core_deep_new",
+          title: "Newer nested session",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+
+      const scanned = yield* Effect.promise(() => readSessionStoresDeep(root))
+
+      expect(scanned.map((session) => session.id)).toEqual([
+        SessionV2.ID.make("ses_core_deep_new"),
+        SessionV2.ID.make("ses_core_deep_old"),
+      ])
     }),
   )
 

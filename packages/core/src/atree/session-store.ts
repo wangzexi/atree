@@ -316,6 +316,9 @@ export async function readSessionStores(directory: string) {
     const session = await readSessionStore(directory, SessionSchema.ID.make(entry.name))
     if (session) sessions.push(session)
   }
+  sessions.sort(
+    (a, b) => DateTime.toEpochMillis(b.time.updated) - DateTime.toEpochMillis(a.time.updated) || b.id.localeCompare(a.id),
+  )
   return sessions
 }
 
@@ -349,6 +352,9 @@ export async function readSessionStoresDeep(rootDirectory: string) {
   }
 
   await walk(root, 0)
+  result.sort(
+    (a, b) => DateTime.toEpochMillis(b.time.updated) - DateTime.toEpochMillis(a.time.updated) || b.id.localeCompare(a.id),
+  )
   return result
 }
 
