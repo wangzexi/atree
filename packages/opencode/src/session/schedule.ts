@@ -943,6 +943,7 @@ export const layer = Layer.effect(
             })),
           )
         }
+        return yield* reconcileDirectorySchedules(sessionID, directory, [])
       }
       if (directoryHint && !directory) return [] as Info[]
       const rows = yield* db

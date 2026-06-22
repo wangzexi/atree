@@ -1245,6 +1245,89 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not revive stale database schedules when a directory session has no schedule state",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_schedule_missing_projection" as SessionID
+      const scheduleID = "sch_stale_missing_projection"
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_missing_schedule_projection",
+          worktree: directory,
+          vcs: "git",
+          name: "missing schedule projection",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_missing_schedule_projection",
+          slug: "missing-schedule-projection",
+          directory,
+          title: "Missing schedule projection",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "missing-schedule-projection",
+          version: "test",
+          projectID: "proj_missing_schedule_projection",
+          directory,
+          path: ".",
+          title: "Missing schedule projection",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale database schedule without directory state",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+
+      expect(schedules).toEqual([])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
+
+  it.effect(
     "prefers directory schedule details over stale database rows with the same id",
     Effect.gen(function* () {
       const directory = yield* tempdir
