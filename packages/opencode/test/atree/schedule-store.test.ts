@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "bun:test"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { findSessionScheduleState, readSessionScheduleState, writeSessionScheduleState } from "../../src/atree/schedule-store"
+import {
+  findSessionScheduleState,
+  readSessionScheduleProjection,
+  readSessionScheduleState,
+  writeSessionScheduleState,
+} from "../../src/atree/schedule-store"
 import { appendSessionJsonl, readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 
 const temps: string[] = []
@@ -84,6 +89,7 @@ describe("atree schedule store", () => {
     const schedules = await readSessionScheduleState(directory, "ses_read")
     expect(schedules).toEqual([schedule])
     expect(await readSessionScheduleState(directory, "missing")).toEqual([])
+    expect(await readSessionScheduleProjection(directory, "ses_read")).not.toHaveProperty("updatedAt")
   })
 
   test("creates the session payload skeleton when writing schedule state", async () => {

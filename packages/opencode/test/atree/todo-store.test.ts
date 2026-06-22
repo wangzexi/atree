@@ -61,6 +61,7 @@ describe("atree todo store", () => {
     expect(await readSessionTodoState(directory, "ses_empty")).toEqual([])
     expect(await readSessionTodoProjection(directory, "ses_empty")).toMatchObject({ hasState: true, todos: [] })
     expect(await readSessionTodoProjection(directory, "ses_missing")).toMatchObject({ hasState: false, todos: [] })
+    expect(await readSessionTodoProjection(directory, "ses_empty")).not.toHaveProperty("updatedAt")
   })
 
   test("creates the session payload skeleton when writing todo state", async () => {
