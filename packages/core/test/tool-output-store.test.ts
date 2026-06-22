@@ -249,6 +249,66 @@ describe("ToolOutputStore", () => {
     ),
   )
 
+  it.live("stores oversized output in a persisted file-backed session without a SQLite row", () =>
+    Effect.acquireUseRelease(
+      Effect.all({
+        data: Effect.promise(() => tmpdir()),
+        root: Effect.promise(() => tmpdir()),
+      }),
+      ({ data, root }) =>
+        Effect.gen(function* () {
+          const directory = path.join(root.path, "node")
+          const previousData = Global.Path.data
+          ;(Global.Path as { data: string }).data = data.path
+          yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+          yield* Effect.promise(() => mkdir(path.join(data.path, "atree"), { recursive: true }))
+          yield* Effect.promise(() =>
+            writeFile(
+              path.join(data.path, "atree", "state.json"),
+              JSON.stringify({ version: 1, rootDirectory: root.path, updatedAt: 1 }),
+            ),
+          )
+          yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              projectID: Project.ID.global,
+              title: "Directory-only tool output",
+              location: { directory: AbsolutePath.make(directory) },
+              time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+          )
+
+          const storeLayer = ToolOutputStore.layer.pipe(
+            Layer.provide(FSUtil.defaultLayer),
+            Layer.provide(Global.layerWith({ data: data.path })),
+          )
+          const result = yield* Effect.gen(function* () {
+            const store = yield* ToolOutputStore.Service
+            return yield* store.bound({
+              sessionID,
+              toolCallID: "call-directory-only-session-assets",
+              output: { structured: {}, content: [{ type: "text", text: "z".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
+            })
+          }).pipe(Effect.provide(storeLayer))
+
+          expect(result.outputPaths).toHaveLength(1)
+          expect(result.outputPaths[0]).toContain(
+            path.join(directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"),
+          )
+          expect(result.outputPaths[0]).not.toContain(path.join(data.path, "tool-output"))
+        }),
+      ({ data, root }) =>
+        Effect.all([
+          Effect.promise(() => data[Symbol.asyncDispose]()),
+          Effect.promise(() => root[Symbol.asyncDispose]()),
+        ]).pipe(Effect.ignore),
+    ),
+  )
+
   it.live("preserves native media and structured metadata without applying a settlement media limit", () =>
     withStore(({ store }) =>
       Effect.gen(function* () {

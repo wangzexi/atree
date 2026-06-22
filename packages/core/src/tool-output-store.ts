@@ -5,7 +5,7 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 import { Config } from "./config"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
-import { ensureSessionPayloadFilesByID, readSessionStore } from "./atree/session-store"
+import { ensureSessionPayloadFilesByID, findSessionStore, readSessionStore, readWorkspaceRoot } from "./atree/session-store"
 import { SessionSchema } from "./session/schema"
 import { SessionStore } from "./session/store"
 import { Identifier } from "./util/identifier"
@@ -124,12 +124,24 @@ export const layer = Layer.effect(
     })
 
     const sessionDirectory = Effect.fn("ToolOutputStore.sessionDirectory")(function* (sessionID: SessionSchema.ID) {
-      if (Option.isNone(sessions)) return
-      const session = yield* sessions.value.get(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
-      if (!session) return
-      const fileSession = yield* Effect.promise(() => readSessionStore(session.location.directory, sessionID)).pipe(
-        Effect.catchCause(() => Effect.succeed(undefined)),
-      )
+      const session = Option.isSome(sessions)
+        ? yield* sessions.value.get(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+        : undefined
+      const cachedFileSession = session
+        ? yield* Effect.promise(() => readSessionStore(session.location.directory, sessionID)).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+        : undefined
+      const root = cachedFileSession
+        ? undefined
+        : yield* Effect.promise(() => readWorkspaceRoot()).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+      const fileSession =
+        cachedFileSession ??
+        (root
+          ? yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+          : undefined)
       if (!fileSession) return
       yield* Effect.promise(() => ensureSessionPayloadFilesByID(fileSession.location.directory, sessionID))
       return path.join(fileSession.location.directory, ".agents", "atree", "sessions", sessionID, "assets", MANAGED_DIRECTORY)
