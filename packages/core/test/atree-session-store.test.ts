@@ -1306,6 +1306,109 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("does not revive stale SQLite message rows missing from a file-backed session", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-root-")))
+      const node = path.join(root, "node")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = "ses_core_store_message_removed"
+      const messageID = "msg_core_store_message_removed"
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Removed message",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "global",
+          worktree: node,
+          vcs: null,
+          name: "Global",
+          icon_url: null,
+          icon_url_override: null,
+          icon_color: null,
+          time_created: 10,
+          time_updated: 10,
+          time_initialized: null,
+          sandboxes: [],
+          commands: null,
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make(sessionID),
+          project_id: "global",
+          workspace_id: null,
+          parent_id: null,
+          slug: sessionID,
+          directory: node,
+          path: ".",
+          title: "Removed message",
+          version: "test",
+          share_url: null,
+          summary_additions: null,
+          summary_deletions: null,
+          summary_files: null,
+          summary_diffs: null,
+          metadata: {},
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          revert: null,
+          permission: null,
+          agent: null,
+          model: null,
+          time_created: 10,
+          time_updated: 10,
+          time_compacting: null,
+          time_archived: null,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionMessageTable)
+        .values({
+          id: SessionMessage.ID.make(messageID),
+          session_id: SessionV2.ID.make(sessionID),
+          type: "user",
+          seq: 0,
+          time_created: 10,
+          time_updated: 10,
+          data: {
+            text: "stale sqlite message",
+            files: [],
+            agents: {},
+            time: { created: 10 },
+          },
+        } as typeof SessionMessageTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      const result = yield* store.message(SessionMessage.ID.make(messageID))
+
+      expect(result).toBeUndefined()
+    }),
+  )
+
   it.effect("records v2 prompts into file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

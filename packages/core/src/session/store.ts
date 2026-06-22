@@ -82,6 +82,28 @@ export const layer = Layer.effect(
       return found ? { sessionID: found.session.id, message: found.message } : undefined
     })
 
+    const findFileBackedSession = Effect.fn("SessionStore.findFileBackedSession")(function* (
+      sessionID: SessionSchema.ID,
+      directory?: string,
+    ) {
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (root) {
+        const fileSession = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
+        )
+        if (fileSession) return fileSession
+      }
+      if (directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (fileSession) return fileSession
+      }
+      return undefined
+    })
+
     const runnerEntries = Effect.fn("SessionStore.runnerEntries")(function* (
       sessionID: SessionSchema.ID,
       baselineSeq: number,
@@ -127,6 +149,20 @@ export const layer = Layer.effect(
         const fileMessage = yield* findFileBackedMessage(messageID)
         if (fileMessage) return fileMessage
         if (!row) return undefined
+
+        const cachedSession = yield* db
+          .select({ directory: SessionTable.directory })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, row.session_id))
+          .get()
+          .pipe(Effect.orDie)
+        const fileSession = yield* findFileBackedSession(SessionSchema.ID.make(row.session_id), cachedSession?.directory)
+        if (fileSession) {
+          const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
+            Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+          )
+          if (!messages.some((message) => message.id === messageID)) return undefined
+        }
 
         return {
           sessionID: SessionSchema.ID.make(row.session_id),
