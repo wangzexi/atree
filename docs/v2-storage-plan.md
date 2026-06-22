@@ -279,7 +279,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core 和 opencode 的 todo 更新会先追加到当前会话目录的 `session.jsonl`，再刷新 SQLite/`todo.json` 投影；当会话目录的 `todo.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `todo.updated` 事件时，todo store 可以从最近一条事件恢复当前 todo 状态，并保留“显式空 todo”和“缺失 todo 状态”的区别。
 - todo 的显式目录写入也已经按目录边界收紧：当调用方传入 `directory`，但该目录没有对应 file-backed session 时，`update` 不会写入全局 `TodoTable`，也不会在错误目录创建 todo 投影。
 - todo/schedule 的无显式目录解析不再直接信任 SQLite 中缓存的 `SessionTable.directory`；会优先从当前 instance 或持久化 root 查找真实 file-backed session，最后才接受仍有效的旧缓存目录。
-- todo 的显式目录读取如果找不到该目录下的 file-backed session，会返回空列表，不再读取全局 SQLite `TodoTable` 中的旧投影。
+- todo 的显式目录读取如果找不到该目录下的 file-backed session，会返回空列表，不再读取全局 SQLite `TodoTable` 中的旧投影；当已经定位到 file-backed session 时，即使目录里还没有 `todo.json` 或 `todo.updated` 事件，也以目录缺失状态为准返回空列表，避免旧 DB todo 被复活。
 - opencode 的 session、message、todo、schedule 现在共享同一个 file-backed session resolver。解析顺序集中为：显式目录、当前 instance 目录、持久化 atree root 扫描、最后才回退仍有效的 SQLite 缓存目录。复制 `.agents/atree/` 到当前 root 后，即使旧 SQLite 目录仍然存在，相关读写也会优先定位到当前 root 内的目录事实源；当当前 instance 和持久化 root 中存在同 ID 会话时，当前 instance 目录优先。
 - core `ToolOutputStore` 在能通过 `SessionStore` 定位到 file-backed session 时，会把超长工具输出写入该会话的 `assets/tool-output/`；不能定位会话目录时仍回退到全局 `tool-output`，保持旧链路兼容。
 - opencode V1 工具截断链路也会携带当前 `sessionID`：普通工具、插件工具、shell 输出和 session tools 的超长输出会优先写入 `.agents/atree/sessions/<session-id>/assets/tool-output/`；缺少会话或 instance 上下文时仍回退全局 `tool-output`。

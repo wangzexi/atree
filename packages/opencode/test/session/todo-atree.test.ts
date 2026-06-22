@@ -96,6 +96,29 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.instance("does not revive stale database todos when a directory session has no todo state", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const todo = yield* Todo.Service
+      const { db } = yield* Database.Service
+      const session = yield* sessions.create({ title: "todo-missing-state-priority" })
+
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: session.id,
+          content: "stale database todo without directory state",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      expect(yield* todo.get(session.id)).toEqual([])
+    }),
+  )
+
   it.instance("does not read explicit directory todos from stale database rows", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

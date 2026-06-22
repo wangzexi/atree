@@ -118,21 +118,6 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const sessionDirectory = Effect.fn("Todo.sessionDirectory")(function* (
-      sessionID: SessionID,
-      fallbackDirectory?: string,
-    ) {
-      const instance = yield* currentInstance
-      const fileSession = yield* resolveFileSession(db, {
-        sessionID,
-        directory: fallbackDirectory,
-        instanceDirectory: instance?.directory,
-      })
-      if (!fileSession) return
-      yield* upsertFileSessionCache(fileSession)
-      return fileSession.directory
-    })
-
     const fileSessionForTodo = Effect.fn("Todo.fileSessionForTodo")(function* (
       sessionID: SessionID,
       fallbackDirectory?: string,
@@ -205,10 +190,11 @@ export const layer = Layer.effect(
     })
 
     const get = Effect.fn("Todo.get")(function* (sessionID: SessionID, options?: { directory?: string }) {
-      const directory = yield* sessionDirectory(sessionID, options?.directory)
-      if (directory) {
-        const projection = yield* Effect.promise(() => readSessionTodoProjection(directory, sessionID))
+      const fileSession = yield* fileSessionForTodo(sessionID, options?.directory)
+      if (fileSession) {
+        const projection = yield* Effect.promise(() => readSessionTodoProjection(fileSession.directory, sessionID))
         if (projection.hasState) return projection.todos
+        return []
       }
       if (options?.directory) return []
 
