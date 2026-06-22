@@ -1701,3 +1701,24 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
   }
   await appendJsonl(sessionJsonl(info), entries)
 }
+
+export async function readSessionJsonlEntries(info: SessionSchema.Info) {
+  const raw = await fs.readFile(sessionJsonl(info), "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  const entries: Array<{ index: number; entry: Record<string, unknown> }> = []
+  let index = 0
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    index++
+    try {
+      const entry = JSON.parse(trimmed) as unknown
+      if (isRecord(entry)) entries.push({ index, entry })
+    } catch {
+      continue
+    }
+  }
+  return entries
+}

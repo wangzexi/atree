@@ -33,6 +33,7 @@ import { publishSessionEvent } from "./session/publish-session-event"
 import {
   appendSessionJsonl,
   appendPromptJsonl,
+  readSessionJsonlEntries,
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
@@ -299,6 +300,35 @@ export const layer = Layer.effect(
       )
     })
 
+    const fileBackedEvents = Effect.fn("V2Session.fileBackedEvents")(function* (
+      session: SessionSchema.Info,
+      after?: EventV2.Cursor,
+    ) {
+      const entries = yield* Effect.promise(() => readSessionJsonlEntries(session)).pipe(
+        Effect.catchCause(() => Effect.succeed([] as Awaited<ReturnType<typeof readSessionJsonlEntries>>)),
+      )
+      return entries.flatMap(({ index, entry }) => {
+        const type = typeof entry.type === "string" ? entry.type.replace(/\.\d+$/, "") : undefined
+        if (!type?.startsWith("session.next.")) return []
+        if (after !== undefined && index <= after) return []
+        const data = entry.data && typeof entry.data === "object" ? entry.data : entry
+        const definition = EventV2.registry.get(type)
+        if (!definition) return []
+        const decoded = Schema.decodeUnknownOption(definition.data as never)(data)
+        if (decoded._tag === "None") return []
+        const event = {
+          id: EventV2.ID.make(`evt_atree_${session.id}_${index}`),
+          type,
+          version: 1,
+          seq: index,
+          data: decoded.value,
+          location: session.location,
+        }
+        if (!isDurableSessionEvent(event)) return []
+        return [{ cursor: EventV2.Cursor.make(index), event }]
+      })
+    })
+
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
@@ -524,7 +554,27 @@ export const layer = Layer.effect(
         Stream.unwrap(
           result
             .get(input.sessionID)
-            .pipe(Effect.as(events.aggregateEvents({ aggregateID: input.sessionID, after: input.after }))),
+            .pipe(
+              Effect.flatMap((session) =>
+                Effect.gen(function* () {
+                  const fileBacked = yield* Effect.promise(() =>
+                    readSessionStore(session.location.directory, session.id),
+                  ).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+                  if (fileBacked) {
+                    const row = yield* db
+                      .select({ directory: SessionTable.directory })
+                      .from(SessionTable)
+                      .where(eq(SessionTable.id, input.sessionID))
+                      .get()
+                      .pipe(Effect.orDie)
+                    if (!row || !sameDirectory(row.directory, session.location.directory)) {
+                      return Stream.fromIterable(yield* fileBackedEvents(session, input.after))
+                    }
+                  }
+                  return events.aggregateEvents({ aggregateID: input.sessionID, after: input.after })
+                }),
+              ),
+            ),
         ).pipe(
           Stream.filter((event): event is EventV2.CursorEvent<SessionEvent.DurableEvent> =>
             isDurableSessionEvent(event.event),

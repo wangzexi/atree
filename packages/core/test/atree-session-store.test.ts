@@ -15,7 +15,7 @@ import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { readSessionStore } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
-import { DateTime, Effect, Layer } from "effect"
+import { DateTime, Effect, Layer, Stream } from "effect"
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
@@ -1971,6 +1971,63 @@ describe("atree file-backed SessionV2 discovery", () => {
       ])
       expect(context.map((message) => message.id)).toEqual(messages.map((message) => message.id))
       expect(DateTime.toEpochMillis(messages[0]!.time.created)).toBe(30)
+    }),
+  )
+
+  it.effect("replays durable events from file-backed session.jsonl without SQLite rows", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_file_events",
+          title: "Core file events",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_file_events", [
+          {
+            type: "session.next.agent.switched",
+            sessionID: "ses_core_file_events",
+            messageID: "msg_core_file_agent",
+            agent: "build",
+            timestamp: 30,
+          },
+          {
+            type: "session.next.context.updated",
+            sessionID: "ses_core_file_events",
+            messageID: "msg_core_file_context",
+            text: "Context from jsonl",
+            timestamp: 31,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const events = Array.from(
+        yield* sessions.events({ sessionID: SessionV2.ID.make("ses_core_file_events") }).pipe(Stream.runCollect),
+      )
+      const afterFirst = Array.from(
+        yield* sessions
+          .events({ sessionID: SessionV2.ID.make("ses_core_file_events"), after: events[0]!.cursor })
+          .pipe(Stream.runCollect),
+      )
+
+      expect(events.map((event) => [event.cursor, event.event.type])).toEqual([
+        [1, "session.next.agent.switched"],
+        [2, "session.next.context.updated"],
+      ])
+      expect(events[0]?.event.data).toMatchObject({ agent: "build", messageID: "msg_core_file_agent" })
+      expect(afterFirst.map((event) => event.event.type)).toEqual(["session.next.context.updated"])
     }),
   )
 
