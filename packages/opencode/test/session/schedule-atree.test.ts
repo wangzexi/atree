@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import { randomUUID } from "crypto"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
@@ -594,6 +595,108 @@ describe("atree schedule restore", () => {
         .pipe(Effect.orDie)
       expect(rows).toEqual([])
       expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
+    }),
+  )
+
+  it.effect(
+    "does not revive persisted-root schedules when the session store was removed",
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-root-missing-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const node = path.join(root, "node")
+      const suffix = randomUUID().replaceAll("-", "")
+      const projectID = `proj_schedule_root_missing_${suffix}`
+      const sessionID = `ses_schedule_root_missing_${suffix}` as SessionID
+      const scheduleID = `sch_schedule_root_missing_${suffix}` as Schedule.ID
+      const now = Date.now()
+      yield* Effect.promise(() => fs.mkdir(node, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: projectID,
+          worktree: node,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: projectID,
+          slug: "schedule-root-missing",
+          directory: node,
+          title: "Schedule root missing",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale persisted-root schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "schedule-root-missing",
+          version: "test",
+          projectID,
+          directory: node,
+          path: "node",
+          title: "Schedule root missing",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        fs.rm(path.join(node, ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
+      )
+
+      const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      expect(listed).toEqual([])
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule
+          .create({
+            sessionID,
+            kind: "once",
+            runAt: now + 60_000,
+            message: "should not be created",
+          })
+          .pipe(Effect.exit),
+      )
+      expect(Exit.isFailure(created)).toBe(true)
     }),
   )
 
