@@ -306,13 +306,14 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - workspace sessionWarp 在 `copyChanges` 时会从目录 `meta.yaml` 读取源 `workspaceID`；只有目录事实源、没有 SQLite session row 的会话也能把源 workspace 的改动复制到目标 workspace。
 - CLI `export` 的核心读取路径会显式带上当前目录上下文；只有目录 `meta.yaml` / `session.jsonl`、没有 SQLite session/message row 的会话也能导出完整会话和消息。
 - CLI `import` 写入目录事实源时会把导入的 file part 物化到当前会话目录的 `assets/`，`session.jsonl` 中只保留相对资产路径；读取时再按需要恢复为可消费的 file part 内容。
+- snapshot 的 bare gitdir 已从全局 data dir 迁到当前目录的 `.agents/atree/runtime/snapshot/` 下，并会把该 runtime 路径写入 snapshot repo exclude，避免 snapshot 拍到自己的运行文件。
 
 仍未完成的部分：
 
 - 全局 SQLite 仍然存在，并且仍承担运行时投影和部分 OpenCode 兼容链路。
 - `EventV2` 的 durable event log 还没有完整迁移到每个目录的 `session.jsonl`；当前 core reader 已能恢复 prompted 用户消息和 assistant step/text/reasoning/tool，question/permission 事件已开始写入 JSONL，并且 pending 列表可以从 JSONL 重放恢复；但恢复后的 pending 如何重新绑定原本等待中的执行 fiber 仍待单独设计。
 - projector、部分 CLI/旧同步导出仍以 SQLite 为中心；CLI `import` / `export` / `stats` 已开始读写目录事实源，`MessageV2.page/get/parts` 和 session/todo/schedule 的常用读取链路已经会先尝试 file-backed session resolver。
-- snapshot/worktree 等派生产物仍会落到全局 data dir；它们需要后续单独设计迁移路径，不能在没有 session/location 上下文的情况下直接搬进目录。
+- worktree 等派生产物仍会落到全局 data dir；snapshot runtime 已迁入目录内，但其它没有明确 session/location 上下文的产物仍需要后续单独设计迁移路径。
 - `schedule.json`、`todo.json` 仍是 OpenCode spike 的过渡文件，长期应折叠进 Pi/core session 事件或更清晰的 atree 扩展协议。
 
 ## `.agents/atree/meta.yaml` 的职责

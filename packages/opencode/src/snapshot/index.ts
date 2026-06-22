@@ -8,7 +8,6 @@ import { InstanceState } from "@/effect/instance-state"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Hash } from "@opencode-ai/core/util/hash"
 import { Config } from "@/config/config"
-import { Global } from "@opencode-ai/core/global"
 
 export const Patch = Schema.Struct({
   hash: Schema.String,
@@ -40,6 +39,11 @@ interface GitResult {
 }
 
 type State = Omit<Interface, "init">
+
+function pathInside(parent: string, child: string) {
+  const relative = path.relative(parent, child)
+  return relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative)
+}
 
 export interface Interface {
   readonly init: () => Effect.Effect<void>
@@ -73,10 +77,21 @@ export const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Serv
 
     const state = yield* InstanceState.make<State>(
       Effect.fn("Snapshot.state")(function* (ctx) {
+        const gitdir = path.join(
+          ctx.directory,
+          ".agents",
+          "atree",
+          "runtime",
+          "snapshot",
+          ctx.project.id,
+          Hash.fast(ctx.worktree),
+        )
+        const runtimeExclude = pathInside(ctx.worktree, gitdir) ? path.relative(ctx.worktree, gitdir) : undefined
         const state = {
           directory: ctx.directory,
           worktree: ctx.worktree,
-          gitdir: path.join(Global.Path.data, "snapshot", ctx.project.id, Hash.fast(ctx.worktree)),
+          gitdir,
+          runtimeExclude,
           vcs: ctx.project.vcs,
         }
 
@@ -183,6 +198,7 @@ export const layer: Layer.Layer<Service, never, FSUtil.Service | AppProcess.Serv
           const target = path.join(state.gitdir, "info", "exclude")
           const text = [
             file ? (yield* read(file)).trimEnd() : "",
+            state.runtimeExclude ? `/${state.runtimeExclude.replaceAll("\\", "/")}` : "",
             ...list.map((item) => `/${item.replaceAll("\\", "/")}`),
           ]
             .filter(Boolean)

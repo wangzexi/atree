@@ -8,6 +8,7 @@ import { InstanceBootstrap } from "../../src/project/bootstrap-service"
 import { InstanceStore } from "../../src/project/instance-store"
 import { GlobalBus, type GlobalEvent } from "../../src/bus/global"
 import { Snapshot } from "../../src/snapshot"
+import { Hash } from "@opencode-ai/core/util/hash"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -82,6 +83,20 @@ describe("project.initGit endpoint", () => {
         Effect.provideService(InstanceRef, ctx),
       )
       expect(tracked).toBeTruthy()
+      const snapshotGitdir = path.join(
+        tmp.directory,
+        ".agents",
+        "atree",
+        "runtime",
+        "snapshot",
+        ctx.project.id,
+        Hash.fast(ctx.worktree),
+      )
+      expect(yield* fs.exists(snapshotGitdir)).toBe(true)
+      const exclude = yield* fs.readFileString(path.join(snapshotGitdir, "info", "exclude"))
+      expect(exclude).toContain(
+        `/.agents/atree/runtime/snapshot/${ctx.project.id}/${Hash.fast(ctx.worktree)}`,
+      )
     }),
   )
 
