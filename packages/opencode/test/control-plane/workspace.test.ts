@@ -34,7 +34,7 @@ import { Vcs } from "@/project/vcs"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
-import { writeSessionStore } from "@/atree/session-store"
+import { readSessionStore, writeSessionStore } from "@/atree/session-store"
 import { writeWorkspaceRoot } from "@/atree/state"
 
 const originalEnv = {
@@ -901,6 +901,42 @@ describe("workspace CRUD", () => {
             .pipe(Effect.orDie))?.workspaceID,
         ).toBe(target.id)
         expect(yield* sessionSequenceOwner(session.id)).toBe(target.id)
+      })
+    },
+    { git: true },
+  )
+
+  it.instance(
+    "sessionWarp updates directory-backed sessions without SQLite rows",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const targetType = unique("warp-filebacked-target")
+        const target = workspaceInfo(instance.project.id, targetType)
+        const sessionID = "ses_workspace_warp_filebacked" as SessionID
+        yield* insertWorkspace(target)
+        yield* Effect.promise(() => writeWorkspaceRoot(dir))
+        registerAdapter(instance.project.id, targetType, localAdapter(path.join(dir, "warp-filebacked-target")).adapter)
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "workspace-warp-filebacked",
+            projectID: instance.project.id,
+            directory: dir,
+            title: "Workspace warp file-backed",
+            version: "test",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 2 },
+          } as SessionNs.Info),
+        )
+
+        yield* workspace.sessionWarp({ workspaceID: target.id, sessionID })
+
+        expect((yield* Effect.promise(() => readSessionStore(dir, sessionID)))?.workspaceID).toBe(target.id)
+        expect(yield* sessionSequenceOwner(sessionID)).toBe(target.id)
       })
     },
     { git: true },

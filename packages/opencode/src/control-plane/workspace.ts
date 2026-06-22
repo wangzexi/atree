@@ -666,6 +666,7 @@ export const layer = Layer.effect(
             directory: current?.directory ?? undefined,
             workspaceID: input.workspaceID,
           })
+          yield* events.claim(input.sessionID, input.workspaceID)
 
           return
         }
@@ -742,6 +743,7 @@ export const layer = Layer.effect(
           directory: current?.directory ?? undefined,
           workspaceID: input.workspaceID,
         })
+        yield* events.claim(input.sessionID, input.workspaceID)
       })
     })
 
