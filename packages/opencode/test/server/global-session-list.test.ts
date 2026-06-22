@@ -1,17 +1,33 @@
-import { describe, expect } from "bun:test"
+import { afterEach, beforeEach, describe, expect } from "bun:test"
 import { Deferred, Effect, Layer } from "effect"
 import { Project } from "@/project/project"
 import { Session as SessionNs } from "@/session/session"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
+import { Global } from "@opencode-ai/core/global"
 import { provideInstance, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 import { writeSessionStore } from "@/atree/session-store"
 import { writeWorkspaceRoot } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
 import fs from "fs/promises"
+import os from "os"
 import path from "path"
 
 const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Project.defaultLayer, CrossSpawnSpawner.defaultLayer))
+const temps: string[] = []
+let previousData = Global.Path.data
+
+beforeEach(async () => {
+  previousData = Global.Path.data
+  const data = await fs.mkdtemp(path.join(os.tmpdir(), "atree-global-session-data-"))
+  temps.push(data)
+  ;(Global.Path as { data: string }).data = data
+})
+
+afterEach(async () => {
+  ;(Global.Path as { data: string }).data = previousData
+  await Promise.all(temps.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })))
+})
 
 const withSession = (input?: Parameters<SessionNs.Interface["create"]>[0]) =>
   Effect.acquireRelease(SessionNs.use.create(input), (created) =>
@@ -20,7 +36,7 @@ const withSession = (input?: Parameters<SessionNs.Interface["create"]>[0]) =>
 
 describe("session.listGlobal", () => {
   it.instance(
-    "lists sessions across projects with project metadata",
+    "scopes an unqualified global list to the current instance when no atree root is persisted",
     () =>
       Effect.gen(function* () {
         const first = yield* TestInstance
@@ -33,18 +49,14 @@ describe("session.listGlobal", () => {
         const ids = sessions.map((session) => session.id)
 
         expect(ids).toContain(firstSession.id)
-        expect(ids).toContain(secondSession.id)
+        expect(ids).not.toContain(secondSession.id)
 
         const firstProject = yield* Project.use.get(firstSession.projectID)
-        const secondProject = yield* Project.use.get(secondSession.projectID)
 
         const firstItem = sessions.find((session) => session.id === firstSession.id)
-        const secondItem = sessions.find((session) => session.id === secondSession.id)
 
         expect(firstItem?.project?.id).toBe(firstProject?.id)
         expect(firstItem?.project?.worktree).toBe(firstProject?.worktree)
-        expect(secondItem?.project?.id).toBe(secondProject?.id)
-        expect(secondItem?.project?.worktree).toBe(secondProject?.worktree)
         expect(first.directory).not.toBe(second)
       }),
     { git: true },
@@ -154,6 +166,26 @@ describe("session.listGlobal", () => {
         const fileOnly = sessions.find((session) => String(session.id) === "ses_global_root_file_only")
         expect(fileOnly?.directory).toBe(test.directory)
         expect(fileOnly?.project?.id).toBe(ctx.project.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "excludes sessions outside the persisted atree root when no directory is provided",
+    () =>
+      Effect.gen(function* () {
+        const root = yield* TestInstance
+        const outside = yield* tmpdirScoped({ git: true })
+        yield* Effect.promise(() => writeWorkspaceRoot(root.directory))
+
+        const rootSession = yield* withSession({ title: "root-scoped-session" })
+        const outsideSession = yield* withSession({ title: "outside-root-session" }).pipe(provideInstance(outside))
+
+        const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200, archived: true }))
+        const ids = sessions.map((session) => session.id)
+
+        expect(ids).toContain(rootSession.id)
+        expect(ids).not.toContain(outsideSession.id)
       }),
     { git: true },
   )
