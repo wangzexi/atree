@@ -1,5 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { SessionID } from "./schema"
+import fs from "fs/promises"
+import path from "path"
 import { Effect, Layer, Context, Schema } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
 import { eq } from "drizzle-orm"
@@ -13,6 +15,18 @@ import { appendSessionJsonl, readSessionStore } from "@/atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "@/atree/todo-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import { InstanceRef } from "@/effect/instance-ref"
+import { readWorkspaceState } from "@/atree/state"
+
+async function realpathOrResolve(input: string) {
+  return fs.realpath(input).catch(() => path.resolve(input))
+}
+
+async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
+  if (!parent || !child) return false
+  const root = await realpathOrResolve(parent)
+  const target = await realpathOrResolve(child)
+  return target === root || target.startsWith(root + path.sep)
+}
 
 export const Info = Schema.Struct({
   content: Schema.String.annotate({ description: "Brief description of the task" }),
@@ -47,6 +61,7 @@ export const layer = Layer.effect(
     const { db } = yield* Database.Service
 
     type FileSession = NonNullable<Awaited<ReturnType<typeof readSessionStore>>>
+    type FileSessionResolution = { type: "found"; session: FileSession } | { type: "missing" } | { type: "none" }
     const currentInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 
     const ensureFileSessionProject = Effect.fn("Todo.ensureFileSessionProject")(function* (session: FileSession) {
@@ -128,9 +143,25 @@ export const layer = Layer.effect(
         directory: fallbackDirectory,
         instanceDirectory: instance?.directory,
       })
-      if (!fileSession) return
+      if (!fileSession) {
+        if (!fallbackDirectory) {
+          const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+            Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+          )
+          const row = yield* db
+            .select({ directory: SessionTable.directory })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get()
+            .pipe(Effect.orDie)
+          if (yield* Effect.promise(() => isWithinDirectory(state.rootDirectory ?? undefined, row?.directory))) {
+            return { type: "missing" }
+          }
+        }
+        return { type: "none" }
+      }
       yield* upsertFileSessionCache(fileSession)
-      return fileSession
+      return { type: "found", session: fileSession } satisfies FileSessionResolution
     })
 
     const appendTodoSessionEvent = Effect.fn("Todo.appendTodoSessionEvent")(function* (
@@ -151,7 +182,9 @@ export const layer = Layer.effect(
       todos: Info[]
       directory?: string
     }) {
-      const fileSession = yield* fileSessionForTodo(input.sessionID, input.directory)
+      const resolved = yield* fileSessionForTodo(input.sessionID, input.directory)
+      const fileSession = resolved.type === "found" ? resolved.session : undefined
+      if (resolved.type === "missing") return
       if (input.directory && !fileSession) return
       if (fileSession) {
         yield* appendTodoSessionEvent(fileSession, input.todos).pipe(
@@ -190,7 +223,9 @@ export const layer = Layer.effect(
     })
 
     const get = Effect.fn("Todo.get")(function* (sessionID: SessionID, options?: { directory?: string }) {
-      const fileSession = yield* fileSessionForTodo(sessionID, options?.directory)
+      const resolved = yield* fileSessionForTodo(sessionID, options?.directory)
+      if (resolved.type === "missing") return []
+      const fileSession = resolved.type === "found" ? resolved.session : undefined
       if (fileSession) {
         const projection = yield* Effect.promise(() => readSessionTodoProjection(fileSession.directory, sessionID))
         if (projection.hasState) return projection.todos
