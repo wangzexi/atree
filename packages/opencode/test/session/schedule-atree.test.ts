@@ -902,6 +902,14 @@ describe("atree schedule restore", () => {
         } as any),
       )
       yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [storedSchedule]))
+      expect(yield* schedules.list(sessionID, { directory: source.directory })).toHaveLength(1)
+      const beforeClear = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, storedSchedule.id as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(beforeClear?.message).toBe("copied schedule")
       yield* Effect.promise(() =>
         fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
       )
@@ -912,6 +920,13 @@ describe("atree schedule restore", () => {
       expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual([
         storedSchedule,
       ])
+      const afterClear = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, storedSchedule.id as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(afterClear?.message).toBe("copied schedule")
     }),
   )
 

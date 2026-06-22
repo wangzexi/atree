@@ -232,6 +232,10 @@ function stopSessionTimers(timers: Map<ID, Timer>, sessionID: SessionID) {
   }
 }
 
+function timerBelongsToDirectory(timer: Timer | undefined, directory: string) {
+  return timer?.directory !== undefined && path.resolve(timer.directory) === path.resolve(directory)
+}
+
 function canRestoreStoredSchedule(schedule: {
   kind: Kind
   expression: string
@@ -922,13 +926,25 @@ export const layer = Layer.effect(
       schedules: ReadonlyArray<Info>,
     ) {
       const wantedIDs = new Set(schedules.filter(canRestoreStoredSchedule).map((schedule) => schedule.id))
+      const sessionRow = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      const cacheBelongsToDirectory =
+        sessionRow?.directory !== undefined && path.resolve(sessionRow.directory) === path.resolve(directory)
       const rows = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
         .where(eq(ScheduleTable.session_id, sessionID))
         .all()
         .pipe(Effect.orDie)
-      const staleIDs = rows.map((row) => row.id as ID).filter((id) => !wantedIDs.has(id))
+      const staleIDs = rows
+        .map((row) => row.id as ID)
+        .filter(
+          (id) => !wantedIDs.has(id) && (cacheBelongsToDirectory || timerBelongsToDirectory(timers.get(id), directory)),
+        )
       if (staleIDs.length > 0) {
         for (const id of staleIDs) {
           const timer = timers.get(id)
@@ -1291,6 +1307,42 @@ export const layer = Layer.effect(
       const directory = yield* sessionDirectory(sessionID, options?.directory)
       if (options?.directory && !directory) return
       const stored = directory ? yield* Effect.promise(() => readSessionScheduleState(directory, sessionID)) : []
+      if (options?.directory && directory) {
+        const deletedIDs: ID[] = []
+        for (const schedule of stored) {
+          yield* appendScheduleSessionEventBestEffort(
+            sessionID,
+            {
+              type: "schedule.deleted",
+              scheduleID: schedule.id,
+              sessionID,
+              reason: "cleared",
+            },
+            directory,
+          )
+          const id = schedule.id as ID
+          const timer = timers.get(id)
+          if (!timerBelongsToDirectory(timer, directory)) continue
+          if (timer) {
+            stopTimer(timer)
+            timers.delete(id)
+          }
+          deletedIDs.push(id)
+        }
+        if (deletedIDs.length > 0) {
+          yield* db
+            .delete(ScheduleRunTable)
+            .where(inArray(ScheduleRunTable.schedule_id, deletedIDs))
+            .run()
+            .pipe(Effect.orDie)
+          yield* db.delete(ScheduleTable).where(inArray(ScheduleTable.id, deletedIDs)).run().pipe(Effect.orDie)
+          for (const id of deletedIDs) {
+            yield* events.publish(Event.Deleted, { scheduleID: id, sessionID })
+          }
+        }
+        yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
+        return
+      }
       const rows = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
