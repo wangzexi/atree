@@ -5,14 +5,18 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { Config } from "@opencode-ai/core/config"
 import { ConfigToolOutput } from "@opencode-ai/core/config/tool-output"
+import { Database } from "@opencode-ai/core/database/database"
 import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { Project } from "@opencode-ai/core/project"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
+import { mkdir, writeFile } from "fs/promises"
 
 const sessionID = SessionV2.ID.make("ses_tool_output_store")
 
@@ -140,6 +144,107 @@ describe("ToolOutputStore", () => {
         Effect.all([
           Effect.promise(() => data[Symbol.asyncDispose]()),
           Effect.promise(() => directory[Symbol.asyncDispose]()),
+        ]).pipe(Effect.ignore),
+    ),
+  )
+
+  it.live("stores oversized output in the persisted file-backed session when SQLite points at a stale directory", () =>
+    Effect.acquireUseRelease(
+      Effect.all({
+        data: Effect.promise(() => tmpdir()),
+        root: Effect.promise(() => tmpdir()),
+      }),
+      ({ data, root }) =>
+        Effect.gen(function* () {
+          const staleDirectory = path.join(root.path, "old")
+          const actualDirectory = path.join(root.path, "new")
+          const previousData = Global.Path.data
+          ;(Global.Path as { data: string }).data = data.path
+          yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+          yield* Effect.promise(() => mkdir(path.join(data.path, "atree"), { recursive: true }))
+          yield* Effect.promise(() =>
+            writeFile(
+              path.join(data.path, "atree", "state.json"),
+              JSON.stringify({ version: 1, rootDirectory: root.path, updatedAt: 1 }),
+            ),
+          )
+          yield* Effect.promise(() => mkdir(staleDirectory, { recursive: true }))
+          yield* Effect.promise(() => mkdir(actualDirectory, { recursive: true }))
+
+          const actual = {
+            id: sessionID,
+            projectID: Project.ID.global,
+            title: "Actual tool output",
+            location: { directory: AbsolutePath.make(actualDirectory) },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(2) },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }
+          yield* Effect.promise(() => writeSessionStore(actual))
+
+          const database = Database.layerFromPath(":memory:")
+          const sessions = SessionStore.layer.pipe(Layer.provide(database))
+          const storeLayer = ToolOutputStore.layer.pipe(
+            Layer.provide(FSUtil.defaultLayer),
+            Layer.provide(Global.layerWith({ data: data.path })),
+            Layer.provide(sessions),
+          )
+          const result = yield* Effect.gen(function* () {
+            const { db } = yield* Database.Service
+            yield* db
+              .insert(ProjectTable)
+              .values({
+                id: Project.ID.global,
+                worktree: staleDirectory,
+                vcs: null,
+                name: null,
+                time_created: 1,
+                time_updated: 1,
+                sandboxes: [],
+              } as unknown as typeof ProjectTable.$inferInsert)
+              .onConflictDoNothing()
+              .run()
+              .pipe(Effect.orDie)
+            yield* db
+              .insert(SessionTable)
+              .values({
+                id: sessionID,
+                project_id: Project.ID.global,
+                slug: "stale-tool-output",
+                directory: staleDirectory,
+                title: "Stale tool output",
+                version: "test",
+                cost: 0,
+                tokens_input: 0,
+                tokens_output: 0,
+                tokens_reasoning: 0,
+                tokens_cache_read: 0,
+                tokens_cache_write: 0,
+                time_created: 1,
+                time_updated: 1,
+              } as typeof SessionTable.$inferInsert)
+              .run()
+              .pipe(Effect.orDie)
+
+            const store = yield* ToolOutputStore.Service
+            return yield* store.bound({
+              sessionID,
+              toolCallID: "call-stale-directory-session-assets",
+              output: { structured: {}, content: [{ type: "text", text: "y".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
+            })
+          }).pipe(Effect.provide(Layer.mergeAll(database, storeLayer)))
+
+          expect(result.outputPaths).toHaveLength(1)
+          expect(result.outputPaths[0]).toContain(
+            path.join(actualDirectory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"),
+          )
+          expect(result.outputPaths[0]).not.toContain(staleDirectory)
+        }),
+      ({ data, root }) =>
+        Effect.all([
+          Effect.promise(() => data[Symbol.asyncDispose]()),
+          Effect.promise(() => root[Symbol.asyncDispose]()),
         ]).pipe(Effect.ignore),
     ),
   )
