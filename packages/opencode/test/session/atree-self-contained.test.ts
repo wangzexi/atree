@@ -1,7 +1,9 @@
 import { describe, expect } from "bun:test"
 import fs from "fs/promises"
+import os from "os"
 import path from "path"
 import { Database } from "@opencode-ai/core/database/database"
+import { Global } from "@opencode-ai/core/global"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { MessageTable, PartTable, SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
@@ -11,6 +13,7 @@ import { and, eq } from "drizzle-orm"
 import { Effect, Fiber, Layer } from "effect"
 import { readSessionScheduleState, writeSessionScheduleState } from "@/atree/schedule-store"
 import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@/atree/session-store"
+import { writeWorkspaceRoot } from "@/atree/state"
 import { readSessionTodoState } from "@/atree/todo-store"
 import { BackgroundJob } from "@/background/job"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
@@ -697,6 +700,77 @@ describe("atree directory self-contained state", () => {
         .get()
         .pipe(Effect.orDie)
       expect(row).toBeUndefined()
+    }),
+  )
+
+  it.instance("archiving a nested file-backed session from the persisted root clears schedule state", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-root-archive-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const now = Date.now()
+      const directory = path.join(instance.directory, "nested", "archive-node")
+      const sessionID = "ses_root_archive_clears_schedule" as SessionID
+      const scheduleID = "sch_root_archive_clears_schedule"
+      yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "root-archive-clears-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: "nested/archive-node",
+          title: "Root archive clears schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "clear from persisted root",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+
+      yield* sessions.setArchived({ sessionID, time: now + 1 })
+
+      expect((yield* Effect.promise(() => readSessionStore(directory, sessionID)))?.time.archived).toBe(now + 1)
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      const jsonl = yield* Effect.promise(() =>
+        fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "schedule.deleted",
+          scheduleID,
+          sessionID,
+          reason: "archived",
+        }),
+      )
     }),
   )
 })
