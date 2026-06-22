@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import type { Request as QuestionRequest } from "@/question"
-import { readSessionStores } from "./session-store"
+import { readSessionStoresDeep } from "./session-store"
 
 type RecordValue = Record<string, unknown>
 
@@ -28,7 +28,7 @@ function sessionJsonlPath(directory: string, sessionID: string) {
 }
 
 export async function readSessionInteractionState(directory: string): Promise<InteractionState> {
-  const sessions = await readSessionStores(directory)
+  const sessions = await readSessionStoresDeep(directory)
   const questions = new Map<string, QuestionRequest>()
   const permissions = new Map<string, PermissionV1.Request>()
 
