@@ -1164,6 +1164,28 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("archives copied file-backed session metadata only in the explicit target directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* tmpdirScoped({ git: true })
+      const info = yield* session.create({ title: "copied archive source", metadata: { icon: "🦊" } })
+
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* session.setArchived({ sessionID: info.id, directory: target, time: 1234 })
+
+      const targetStore = yield* Effect.promise(() => readSessionStore(target, info.id))
+      const sourceStore = yield* Effect.promise(() => readSessionStore(source.directory, info.id))
+      expect(targetStore?.directory).toBe(target)
+      expect(targetStore?.time.archived).toBe(1234)
+      expect(sourceStore?.directory).toBe(source.directory)
+      expect(sourceStore?.time.archived).toBeUndefined()
+    }),
+  )
+
   it.instance("appends copied file-backed messages to the explicit target directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
