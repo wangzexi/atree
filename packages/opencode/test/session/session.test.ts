@@ -1186,6 +1186,28 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("removes copied file-backed session metadata only in the explicit target directory", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* TestInstance
+      const target = yield* tmpdirScoped({ git: true })
+      const info = yield* session.create({ title: "copied remove source", metadata: { icon: "🦊" } })
+
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* session.remove(info.id, { directory: target })
+
+      expect(yield* Effect.promise(() => readSessionStore(target, info.id))).toBeUndefined()
+      const sourceStore = yield* Effect.promise(() => readSessionStore(source.directory, info.id))
+      expect(sourceStore?.directory).toBe(source.directory)
+      expect(sourceStore?.title).toBe("copied remove source")
+      expect((yield* session.list({ directory: source.directory })).map((item) => item.id)).toContain(info.id)
+      expect((yield* session.list({ directory: target, archived: true })).map((item) => item.id)).not.toContain(info.id)
+    }),
+  )
+
   it.instance("appends copied file-backed messages to the explicit target directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
