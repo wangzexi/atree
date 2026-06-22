@@ -35,6 +35,7 @@ import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { writeSessionStore } from "@/atree/session-store"
+import { writeWorkspaceRoot } from "@/atree/state"
 
 const originalEnv = {
   OPENCODE_AUTH_CONTENT: process.env.OPENCODE_AUTH_CONTENT,
@@ -1451,6 +1452,70 @@ describe("workspace sync state", () => {
             } finally {
               captured.dispose()
             }
+          }),
+        { git: true },
+      )
+    })
+  })
+
+  it.live("sync history includes directory-backed workspace sessions without SQLite rows", () => {
+    const historyBodies: unknown[] = []
+    return Effect.gen(function* () {
+      yield* HttpServer.serveEffect()(
+        Effect.gen(function* () {
+          const req = yield* HttpServerRequest.HttpServerRequest
+          const bodyText = yield* req.text
+          const url = new URL(req.url, "http://localhost")
+          if (url.pathname === "/file-history/global/event") return HttpServerResponse.fromWeb(eventStreamResponse())
+          if (url.pathname === "/file-history/sync/history") {
+            historyBodies.push(bodyText ? JSON.parse(bodyText) : undefined)
+            return HttpServerResponse.fromWeb(Response.json([]))
+          }
+          return HttpServerResponse.text("unexpected", { status: 500 })
+        }),
+      )
+      const url = yield* serverUrl()
+      yield* provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const workspace = yield* Workspace.Service
+            const instance = yield* requireInstance
+            const type = unique("file-history")
+            const info = workspaceInfo(instance.project.id, type)
+            const sessionID = "ses_workspace_file_history" as SessionID
+            yield* insertWorkspace(info)
+            yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+            yield* Effect.promise(() =>
+              writeSessionStore({
+                id: sessionID,
+                slug: "workspace-file-history",
+                projectID: instance.project.id,
+                workspaceID: info.id,
+                directory: instance.directory,
+                title: "Workspace file history",
+                version: "test",
+                cost: 0,
+                tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+                time: { created: 1, updated: 2 },
+              } as SessionNs.Info),
+            )
+            yield* Database.Service.use(({ db }) =>
+              db
+                .insert(EventSequenceTable)
+                .values({ aggregate_id: sessionID, seq: 7, owner_id: null })
+                .run()
+                .pipe(Effect.orDie),
+            )
+            registerAdapter(instance.project.id, type, remoteAdapter(`${url}/file-history`).adapter)
+
+            yield* workspace.startWorkspaceSyncing(instance.project.id)
+
+            yield* eventuallyEffect(
+              Effect.sync(() => {
+                expect(historyBodies).toContainEqual({ [sessionID]: 7 })
+              }),
+            )
+            yield* workspace.remove(info.id)
           }),
         { git: true },
       )

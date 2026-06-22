@@ -325,12 +325,16 @@ export const layer = Layer.effect(
       url: URL | string,
       headers: HeadersInit | undefined,
     ) {
-      const sessionIDs = (yield* db
+      const databaseSessionIDs = (yield* db
         .select({ id: SessionTable.id })
         .from(SessionTable)
         .where(eq(SessionTable.workspace_id, space.id))
         .all()
         .pipe(Effect.orDie)).map((row) => row.id)
+      const directorySessionIDs = (yield* session.listGlobal({ archived: true, limit: 1_000_000 }))
+        .filter((sessionInfo) => sessionInfo.workspaceID === space.id)
+        .map((sessionInfo) => sessionInfo.id)
+      const sessionIDs = [...new Set([...databaseSessionIDs, ...directorySessionIDs])]
       const state = sessionIDs.length
         ? Object.fromEntries(
             (yield* db

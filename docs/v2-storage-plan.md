@@ -299,6 +299,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 - 删除 workspace 时会通过 session service 查找当前 workspace 的会话；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。
+- workspace sync history 发送本地 sequence fence 时会合并 SQLite workspace row 和目录事实源中的 workspace 会话；只有目录 `meta.yaml`、没有 `SessionTable` row 的会话也会被纳入同步状态。
 
 仍未完成的部分：
 
