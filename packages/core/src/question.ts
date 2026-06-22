@@ -7,7 +7,8 @@ import { withStatics } from "./schema"
 import { publishSessionEvent } from "./session/publish-session-event"
 import { SessionSchema } from "./session/schema"
 import { SessionStore } from "./session/store"
-import { readQuestionState } from "./atree/question-store"
+import { readQuestionStateEntries } from "./atree/question-store"
+import { readSessionStore } from "./atree/session-store"
 
 export const ID = Schema.String.check(Schema.isStartsWith("que")).pipe(
   Schema.brand("QuestionV2.ID"),
@@ -116,6 +117,7 @@ interface Pending {
   readonly request: Request
   readonly deferred: Deferred.Deferred<ReadonlyArray<Answer>, RejectedError>
   readonly restored?: boolean
+  readonly directory?: string
 }
 
 /**
@@ -131,17 +133,19 @@ export const layer = Layer.effect(
     const pending = new Map<ID, Pending>()
 
     const restorePending = Effect.fn("QuestionV2.restorePending")(function* () {
-      const restored = yield* Effect.promise(() => readQuestionState()).pipe(
-        Effect.catchCause(() => Effect.succeed([] as Request[])),
+      const restored = yield* Effect.promise(() => readQuestionStateEntries()).pipe(
+        Effect.catchCause(() =>
+          Effect.succeed([] as Awaited<ReturnType<typeof readQuestionStateEntries>>),
+        ),
       )
-      const restoredIDs = new Set(restored.map((request) => request.id))
+      const restoredIDs = new Set(restored.map((entry) => entry.request.id))
       for (const [id, item] of pending) {
         if (item.restored && !restoredIDs.has(id)) pending.delete(id)
       }
-      for (const request of restored) {
+      for (const { request, directory } of restored) {
         if (pending.has(request.id)) continue
         const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
-        pending.set(request.id, { request, deferred, restored: true })
+        pending.set(request.id, { request, deferred, restored: true, directory })
       }
     })
 
@@ -149,8 +153,13 @@ export const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       definition: D,
       data: EventV2.Data<D>,
+      directory?: string,
     ) {
-      const session = yield* sessions.get(sessionID)
+      const session = directory
+        ? yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+            Effect.catchCause(() => sessions.get(sessionID)),
+          )
+        : yield* sessions.get(sessionID)
       return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "question event")
     })
 
@@ -206,11 +215,16 @@ export const layer = Layer.effect(
           yield* restorePending()
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
-          yield* publish(existing.request.sessionID, Event.Replied, {
-            sessionID: existing.request.sessionID,
-            requestID: existing.request.id,
-            answers: input.answers.map((answer) => [...answer]),
-          })
+          yield* publish(
+            existing.request.sessionID,
+            Event.Replied,
+            {
+              sessionID: existing.request.sessionID,
+              requestID: existing.request.id,
+              answers: input.answers.map((answer) => [...answer]),
+            },
+            existing.directory,
+          )
           yield* Deferred.succeed(existing.deferred, input.answers)
           pending.delete(input.requestID)
         }),
@@ -223,10 +237,15 @@ export const layer = Layer.effect(
           yield* restorePending()
           const existing = pending.get(requestID)
           if (!existing) return yield* new NotFoundError({ requestID })
-          yield* publish(existing.request.sessionID, Event.Rejected, {
-            sessionID: existing.request.sessionID,
-            requestID: existing.request.id,
-          })
+          yield* publish(
+            existing.request.sessionID,
+            Event.Rejected,
+            {
+              sessionID: existing.request.sessionID,
+              requestID: existing.request.id,
+            },
+            existing.directory,
+          )
           yield* Deferred.fail(existing.deferred, new RejectedError())
           pending.delete(requestID)
         }),

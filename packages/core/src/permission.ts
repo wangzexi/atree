@@ -12,7 +12,8 @@ import { Identifier } from "./util/identifier"
 import { Wildcard } from "./util/wildcard"
 import { PermissionSchema } from "./permission/schema"
 import { PermissionSaved } from "./permission/saved"
-import { readPermissionState } from "./atree/permission-store"
+import { readPermissionStateEntries } from "./atree/permission-store"
+import { readSessionStore } from "./atree/session-store"
 
 export { Effect, Rule, Ruleset } from "./permission/schema"
 type Effect = PermissionSchema.Effect
@@ -133,6 +134,7 @@ interface Pending {
   readonly agent?: AgentV2.ID
   readonly deferred: Deferred.Deferred<void, RejectedError | CorrectedError>
   readonly restored?: boolean
+  readonly directory?: string
 }
 
 export const layer = Layer.effect(
@@ -146,17 +148,19 @@ export const layer = Layer.effect(
     const pending = new Map<ID, Pending>()
 
     const restorePending = EffectRuntime.fn("PermissionV2.restorePending")(function* () {
-      const restored = yield* EffectRuntime.promise(() => readPermissionState()).pipe(
-        EffectRuntime.catchCause(() => EffectRuntime.succeed([] as Request[])),
+      const restored = yield* EffectRuntime.promise(() => readPermissionStateEntries()).pipe(
+        EffectRuntime.catchCause(() =>
+          EffectRuntime.succeed([] as Awaited<ReturnType<typeof readPermissionStateEntries>>),
+        ),
       )
-      const restoredIDs = new Set(restored.map((request) => request.id))
+      const restoredIDs = new Set(restored.map((entry) => entry.request.id))
       for (const [id, item] of pending) {
         if (item.restored && !restoredIDs.has(id)) pending.delete(id)
       }
-      for (const request of restored) {
+      for (const { request, directory } of restored) {
         if (pending.has(request.id)) continue
         const deferred = yield* Deferred.make<void, RejectedError | CorrectedError>()
-        pending.set(request.id, { request, deferred, restored: true })
+        pending.set(request.id, { request, deferred, restored: true, directory })
       }
     })
 
@@ -164,8 +168,13 @@ export const layer = Layer.effect(
       sessionID: SessionV2.ID,
       definition: D,
       data: EventV2.Data<D>,
+      directory?: string,
     ) {
-      const session = yield* sessions.get(sessionID)
+      const session = directory
+        ? yield* EffectRuntime.promise(() => readSessionStore(directory, sessionID)).pipe(
+            EffectRuntime.catchCause(() => sessions.get(sessionID)),
+          )
+        : yield* sessions.get(sessionID)
       return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "permission event")
     })
 
@@ -290,11 +299,16 @@ export const layer = Layer.effect(
           yield* restorePending()
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
-          yield* publish(existing.request.sessionID, Event.Replied, {
-            sessionID: existing.request.sessionID,
-            requestID: existing.request.id,
-            reply: input.reply,
-          })
+          yield* publish(
+            existing.request.sessionID,
+            Event.Replied,
+            {
+              sessionID: existing.request.sessionID,
+              requestID: existing.request.id,
+              reply: input.reply,
+            },
+            existing.directory,
+          )
 
           if (input.reply === "reject") {
             yield* Deferred.fail(
@@ -304,11 +318,16 @@ export const layer = Layer.effect(
             pending.delete(input.requestID)
             for (const [id, item] of pending) {
               if (item.request.sessionID !== existing.request.sessionID) continue
-              yield* publish(item.request.sessionID, Event.Replied, {
-                sessionID: item.request.sessionID,
-                requestID: item.request.id,
-                reply: "reject",
-              })
+              yield* publish(
+                item.request.sessionID,
+                Event.Replied,
+                {
+                  sessionID: item.request.sessionID,
+                  requestID: item.request.id,
+                  reply: "reject",
+                },
+                item.directory,
+              )
               yield* Deferred.fail(item.deferred, new RejectedError())
               pending.delete(id)
             }
@@ -341,11 +360,16 @@ export const layer = Layer.effect(
               )
             )
               continue
-            yield* publish(item.request.sessionID, Event.Replied, {
-              sessionID: item.request.sessionID,
-              requestID: item.request.id,
-              reply: "always",
-            })
+            yield* publish(
+              item.request.sessionID,
+              Event.Replied,
+              {
+                sessionID: item.request.sessionID,
+                requestID: item.request.id,
+                reply: "always",
+              },
+              item.directory,
+            )
             yield* Deferred.succeed(item.deferred, undefined)
             pending.delete(id)
           }

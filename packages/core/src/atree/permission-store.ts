@@ -4,6 +4,10 @@ import type { PermissionV2 } from "../permission"
 import { readSessionStoresDeep, readWorkspaceRoot } from "./session-store"
 
 type RecordValue = Record<string, unknown>
+export type PermissionStateEntry = {
+  readonly request: PermissionV2.Request
+  readonly directory: string
+}
 
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -21,12 +25,12 @@ function sessionJsonlPath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
 }
 
-export async function readPermissionState(rootDirectory?: string) {
+export async function readPermissionStateEntries(rootDirectory?: string) {
   const rootInput = rootDirectory ?? (await readWorkspaceRoot())
-  if (!rootInput) return [] as PermissionV2.Request[]
+  if (!rootInput) return [] as PermissionStateEntry[]
 
   const sessions = await readSessionStoresDeep(rootInput)
-  const permissions = new Map<string, PermissionV2.Request>()
+  const permissions = new Map<string, PermissionStateEntry>()
 
   for (const session of sessions) {
     const raw = await fs.readFile(sessionJsonlPath(session.location.directory, session.id), "utf8").catch((error: unknown) => {
@@ -48,7 +52,11 @@ export async function readPermissionState(rootDirectory?: string) {
 
       if (type === "permission.v2.asked") {
         const permission = isRecord(data.permission) ? data.permission : data
-        if (typeof permission.id === "string") permissions.set(permission.id, permission as PermissionV2.Request)
+        if (typeof permission.id === "string")
+          permissions.set(permission.id, {
+            request: permission as PermissionV2.Request,
+            directory: session.location.directory,
+          })
         continue
       }
       if (type === "permission.v2.replied") {
@@ -58,4 +66,8 @@ export async function readPermissionState(rootDirectory?: string) {
   }
 
   return [...permissions.values()]
+}
+
+export async function readPermissionState(rootDirectory?: string) {
+  return (await readPermissionStateEntries(rootDirectory)).map((entry) => entry.request)
 }

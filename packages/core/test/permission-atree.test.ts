@@ -50,6 +50,7 @@ async function writeAtreeSession(input: {
   directory: string
   sessionID: string
   title: string
+  updatedAt?: number
 }) {
   await mkdir(path.join(input.data, "atree"), { recursive: true })
   await writeFile(
@@ -74,7 +75,7 @@ async function writeAtreeSession(input: {
       `agent: null`,
       `model: null`,
       `createdAt: 10`,
-      `updatedAt: 20`,
+      `updatedAt: ${input.updatedAt ?? 20}`,
       `archivedAt: null`,
       `cost: 0`,
       `tokens: {"input":0,"output":0,"reasoning":0,"cache":{"read":0,"write":0}}`,
@@ -236,6 +237,84 @@ describe("PermissionV2 atree state", () => {
       expect(yield* service.list()).toEqual([])
       expect(yield* service.get(pendingID)).toBeUndefined()
       expect(yield* service.forSession(sessionID)).toEqual([])
+    }),
+  )
+
+  it.effect("replies to restored permissions in their source directory when session ids overlap", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_permission_overlap")
+      const pendingID = PermissionV2.ID.create("per_core_permission_overlap")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: source,
+          sessionID,
+          title: "Permission source",
+          updatedAt: 200,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(source, sessionID, [
+          {
+            type: "session.updated",
+            sessionID,
+            title: "newer unrelated source",
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: target,
+          sessionID,
+          title: "Permission target",
+          updatedAt: 100,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(target, sessionID, [
+          {
+            type: "permission.v2.asked",
+            id: pendingID,
+            sessionID,
+            action: "bash",
+            resources: ["echo target"],
+            save: ["echo target"],
+            metadata: {},
+          },
+        ]),
+      )
+
+      const service = yield* PermissionV2.Service
+      expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
+      yield* service.reply({ requestID: pendingID, reply: "once" })
+
+      const sourceRaw = yield* Effect.promise(() =>
+        readFile(path.join(source, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const targetRaw = yield* Effect.promise(() =>
+        readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      expect(sourceRaw).not.toContain("permission.v2.replied")
+      expect(targetRaw).toContain("permission.v2.replied")
+      expect(targetRaw).toContain(pendingID)
     }),
   )
 

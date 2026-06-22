@@ -4,6 +4,10 @@ import type { QuestionV2 } from "../question"
 import { readSessionStoresDeep, readWorkspaceRoot } from "./session-store"
 
 type RecordValue = Record<string, unknown>
+export type QuestionStateEntry = {
+  readonly request: QuestionV2.Request
+  readonly directory: string
+}
 
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -21,12 +25,12 @@ function sessionJsonlPath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
 }
 
-export async function readQuestionState(rootDirectory?: string) {
+export async function readQuestionStateEntries(rootDirectory?: string) {
   const rootInput = rootDirectory ?? (await readWorkspaceRoot())
-  if (!rootInput) return [] as QuestionV2.Request[]
+  if (!rootInput) return [] as QuestionStateEntry[]
 
   const sessions = await readSessionStoresDeep(rootInput)
-  const questions = new Map<string, QuestionV2.Request>()
+  const questions = new Map<string, QuestionStateEntry>()
 
   for (const session of sessions) {
     const raw = await fs.readFile(sessionJsonlPath(session.location.directory, session.id), "utf8").catch((error: unknown) => {
@@ -48,7 +52,8 @@ export async function readQuestionState(rootDirectory?: string) {
 
       if (type === "question.v2.asked") {
         const question = isRecord(data.question) ? data.question : data
-        if (typeof question.id === "string") questions.set(question.id, question as QuestionV2.Request)
+        if (typeof question.id === "string")
+          questions.set(question.id, { request: question as QuestionV2.Request, directory: session.location.directory })
         continue
       }
       if (type === "question.v2.replied" || type === "question.v2.rejected") {
@@ -58,4 +63,8 @@ export async function readQuestionState(rootDirectory?: string) {
   }
 
   return [...questions.values()]
+}
+
+export async function readQuestionState(rootDirectory?: string) {
+  return (await readQuestionStateEntries(rootDirectory)).map((entry) => entry.request)
 }
