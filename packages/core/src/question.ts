@@ -7,6 +7,7 @@ import { withStatics } from "./schema"
 import { publishSessionEvent } from "./session/publish-session-event"
 import { SessionSchema } from "./session/schema"
 import { SessionStore } from "./session/store"
+import { readQuestionState } from "./atree/question-store"
 
 export const ID = Schema.String.check(Schema.isStartsWith("que")).pipe(
   Schema.brand("QuestionV2.ID"),
@@ -128,6 +129,17 @@ export const layer = Layer.effect(
     const sessions = yield* SessionStore.Service
     const pending = new Map<ID, Pending>()
 
+    const restorePending = Effect.fn("QuestionV2.restorePending")(function* () {
+      const restored = yield* Effect.promise(() => readQuestionState()).pipe(
+        Effect.catchCause(() => Effect.succeed([] as Request[])),
+      )
+      for (const request of restored) {
+        if (pending.has(request.id)) continue
+        const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
+        pending.set(request.id, { request, deferred })
+      }
+    })
+
     const publish = Effect.fn("QuestionV2.publish")(function* <D extends EventV2.Definition>(
       sessionID: SessionSchema.ID,
       definition: D,
@@ -186,6 +198,7 @@ export const layer = Layer.effect(
     const reply = Effect.fn("QuestionV2.reply")((input: ReplyInput) =>
       Effect.uninterruptible(
         Effect.gen(function* () {
+          yield* restorePending()
           const existing = pending.get(input.requestID)
           if (!existing) return yield* new NotFoundError({ requestID: input.requestID })
           yield* publish(existing.request.sessionID, Event.Replied, {
@@ -202,6 +215,7 @@ export const layer = Layer.effect(
     const reject = Effect.fn("QuestionV2.reject")((requestID: ID) =>
       Effect.uninterruptible(
         Effect.gen(function* () {
+          yield* restorePending()
           const existing = pending.get(requestID)
           if (!existing) return yield* new NotFoundError({ requestID })
           yield* publish(existing.request.sessionID, Event.Rejected, {
@@ -215,6 +229,7 @@ export const layer = Layer.effect(
     )
 
     const list = Effect.fn("QuestionV2.list")(function* () {
+      yield* restorePending()
       return Array.from(pending.values(), (item) => item.request)
     })
 
