@@ -17,7 +17,7 @@ import { SessionStore } from "@opencode-ai/core/session/store"
 import { readSessionStore } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer, Stream } from "effect"
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "fs/promises"
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 import { testEffect } from "./lib/effect"
@@ -645,6 +645,46 @@ describe("atree file-backed SessionV2 discovery", () => {
       })
       yield* Effect.promise(() =>
         rm(path.join(node, ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
+      )
+
+      const error = yield* Effect.flip(sessions.get(sessionID))
+
+      expect(error).toBeInstanceOf(SessionV2.NotFoundError)
+    }),
+  )
+
+  it.effect("does not revive a persisted-root session through a symlinked cached directory", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-realpath-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-realpath-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const alias = `${root}-alias`
+      const node = path.join(alias, "node")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(alias, { force: true })).pipe(Effect.ignore))
+      yield* Effect.promise(() => rm(alias, { force: true }))
+      yield* Effect.promise(() => symlink(root, alias, "dir"))
+      yield* Effect.promise(() => mkdir(path.join(root, "node"), { recursive: true }))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_core_store_symlink_stale")
+      yield* sessions.create({
+        id: sessionID,
+        location: Location.Ref.make({ directory: AbsolutePath.make(node) }),
+      })
+      yield* Effect.promise(() =>
+        rm(path.join(root, "node", ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
       )
 
       const error = yield* Effect.flip(sessions.get(sessionID))

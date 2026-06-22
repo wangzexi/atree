@@ -13,7 +13,7 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
 import { testEffect } from "./lib/effect"
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 
@@ -407,6 +407,66 @@ describe("SessionTodo", () => {
       yield* Effect.promise(() =>
         rm(path.join(node, ".agents", "atree", "sessions", fileSessionID), { recursive: true, force: true }),
       )
+
+      expect(yield* todos.get(fileSessionID)).toEqual([])
+    }),
+  )
+
+  it.effect("does not revive persisted-root todos through a symlinked cached directory", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-realpath-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-realpath-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const alias = `${root}-alias`
+      const node = path.join(alias, "node")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(alias, { force: true })).pipe(Effect.ignore))
+      yield* Effect.promise(() => rm(alias, { force: true }))
+      yield* Effect.promise(() => symlink(root, alias, "dir"))
+      yield* Effect.promise(() => mkdir(path.join(root, "node"), { recursive: true }))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_symlink_stale")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo-symlink-stale",
+          directory: node,
+          title: "file todo symlink stale",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: fileSessionID,
+          content: "stale symlink root database todo",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
 
       expect(yield* todos.get(fileSessionID)).toEqual([])
     }),

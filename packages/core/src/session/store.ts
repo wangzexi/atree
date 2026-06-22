@@ -1,6 +1,7 @@
 export * as SessionStore from "./store"
 
 import path from "path"
+import fs from "fs/promises"
 import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
@@ -18,10 +19,14 @@ import {
   readWorkspaceRoot,
 } from "../atree/session-store"
 
-function isWithinDirectory(parent: string | undefined, child: string | undefined) {
+async function realpathOrResolve(input: string) {
+  return fs.realpath(input).catch(() => path.resolve(input))
+}
+
+async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
   if (!parent || !child) return false
-  const root = path.resolve(parent)
-  const target = path.resolve(child)
+  const root = await realpathOrResolve(parent)
+  const target = await realpathOrResolve(child)
   return target === root || target.startsWith(root + path.sep)
 }
 
@@ -65,7 +70,7 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileSession) return fileSession
-        if (isWithinDirectory(root, cached.location.directory)) return undefined
+        if (yield* Effect.promise(() => isWithinDirectory(root, cached.location.directory))) return undefined
       }
       return cached
     })

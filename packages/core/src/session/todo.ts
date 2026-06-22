@@ -1,6 +1,7 @@
 export * as SessionTodo from "./todo"
 
 import path from "path"
+import fs from "fs/promises"
 import { asc, eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { appendSessionJsonl, findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
@@ -10,10 +11,14 @@ import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
 import { SessionTable, TodoTable } from "./sql"
 
-function isWithinDirectory(parent: string | undefined, child: string | undefined) {
+async function realpathOrResolve(input: string) {
+  return fs.realpath(input).catch(() => path.resolve(input))
+}
+
+async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
   if (!parent || !child) return false
-  const root = path.resolve(parent)
-  const target = path.resolve(child)
+  const root = await realpathOrResolve(parent)
+  const target = await realpathOrResolve(child)
   return target === root || target.startsWith(root + path.sep)
 }
 
@@ -79,7 +84,8 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (session) return { type: "found", session }
-        if (rootSessionMissing && isWithinDirectory(root, row.directory)) return { type: "missing" }
+        if (rootSessionMissing && (yield* Effect.promise(() => isWithinDirectory(root, row.directory))))
+          return { type: "missing" }
       }
       return { type: "none" }
     })
