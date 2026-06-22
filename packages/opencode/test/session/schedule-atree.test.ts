@@ -1003,18 +1003,23 @@ describe("atree schedule restore", () => {
         } as any),
       )
       yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [storedSchedule]))
+      expect(yield* schedules.list(sessionID, { directory: source.directory })).toHaveLength(1)
+      const sourceBeforeDelete = yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))
       yield* Effect.promise(() =>
         fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
       )
 
-      const restored = yield* schedules.list(sessionID, { directory: target })
-      expect(restored).toHaveLength(1)
       yield* schedules.delete(storedSchedule.id as Schedule.ID, { directory: target })
 
       expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
-      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual([
-        storedSchedule,
-      ])
+      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual(sourceBeforeDelete)
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, storedSchedule.id as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("delete copied schedule")
     }),
   )
 

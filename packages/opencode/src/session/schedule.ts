@@ -1231,7 +1231,7 @@ export const layer = Layer.effect(
         if (!found) return false
         const remaining = found.schedules.filter((schedule) => schedule.id !== scheduleID)
         const timer = timers.get(scheduleID)
-        if (timer) {
+        if (timer && timerBelongsToDirectory(timer, found.directory)) {
           stopTimer(timer)
           timers.delete(scheduleID)
         }
@@ -1258,7 +1258,7 @@ export const layer = Layer.effect(
         const remaining = stored.filter((schedule) => schedule.id !== scheduleID)
         if (remaining.length === stored.length) continue
         const timer = timers.get(scheduleID)
-        if (timer) {
+        if (timer && timerBelongsToDirectory(timer, directory)) {
           stopTimer(timer)
           timers.delete(scheduleID)
         }
