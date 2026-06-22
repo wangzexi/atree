@@ -342,6 +342,80 @@ describe("SessionTodo", () => {
     }),
   )
 
+  it.effect("uses the explicit directory when reading and updating overlapping file-backed todos", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-overlap-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-overlap-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => mkdir(path.join(data, "atree"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(path.join(data, "atree", "state.json"), JSON.stringify({ version: 1, rootDirectory: root })),
+      )
+      yield* Effect.promise(() => mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => mkdir(target, { recursive: true }))
+
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_overlap")
+      const sourceSession = {
+        id: fileSessionID,
+        projectID: Project.ID.global,
+        title: "source todo",
+        location: { directory: AbsolutePath.make(source) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(200) },
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      }
+      const targetSession = {
+        ...sourceSession,
+        title: "target todo",
+        location: { directory: AbsolutePath.make(target) },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(100) },
+      }
+      yield* Effect.promise(() => writeSessionStore(sourceSession))
+      yield* Effect.promise(() => writeSessionStore(targetSession))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(sourceSession, {
+          type: "todo.updated",
+          sessionID: fileSessionID,
+          todos: [{ content: "source todo", status: "pending", priority: "low" }],
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(targetSession, {
+          type: "todo.updated",
+          sessionID: fileSessionID,
+          todos: [{ content: "target todo", status: "pending", priority: "medium" }],
+        }),
+      )
+
+      expect(yield* todos.get(fileSessionID, { directory: target })).toEqual([
+        { content: "target todo", status: "pending", priority: "medium" },
+      ])
+
+      const replacement = [{ content: "target replacement", status: "in_progress", priority: "high" }]
+      yield* todos.update({ sessionID: fileSessionID, directory: target, todos: replacement })
+
+      expect(yield* Effect.promise(() => readSessionTodoProjection(target, fileSessionID))).toEqual({
+        hasState: true,
+        todos: replacement,
+      })
+      expect(yield* Effect.promise(() => readSessionTodoProjection(source, fileSessionID))).toEqual({
+        hasState: true,
+        todos: [{ content: "source todo", status: "pending", priority: "low" }],
+      })
+    }),
+  )
+
   it.effect("does not revive persisted-root todos when the session store was removed", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(

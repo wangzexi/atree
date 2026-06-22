@@ -44,9 +44,13 @@ export const Event = {
 export interface Interface {
   readonly update: (input: {
     readonly sessionID: SessionSchema.ID
+    readonly directory?: string
     readonly todos: ReadonlyArray<Info>
   }) => Effect.Effect<void>
-  readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<ReadonlyArray<Info>>
+  readonly get: (
+    sessionID: SessionSchema.ID,
+    options?: { readonly directory?: string },
+  ) => Effect.Effect<ReadonlyArray<Info>>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionTodo") {}
@@ -61,7 +65,16 @@ export const layer = Layer.effect(
       | { type: "missing" }
       | { type: "none" }
 
-    const fileSession = Effect.fn("SessionTodo.fileSession")(function* (sessionID: SessionSchema.ID) {
+    const fileSession = Effect.fn("SessionTodo.fileSession")(function* (
+      sessionID: SessionSchema.ID,
+      directory?: string,
+    ) {
+      if (directory) {
+        const session = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        return session ? { type: "found", session } : { type: "missing" }
+      }
       const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
@@ -92,9 +105,10 @@ export const layer = Layer.effect(
 
     const update = Effect.fn("SessionTodo.update")(function* (input: {
       readonly sessionID: SessionSchema.ID
+      readonly directory?: string
       readonly todos: ReadonlyArray<Info>
     }) {
-      const resolved = yield* fileSession(input.sessionID)
+      const resolved = yield* fileSession(input.sessionID, input.directory)
       const session = resolved.type === "found" ? resolved.session : undefined
       if (resolved.type === "missing") return
       if (session) {
@@ -147,8 +161,11 @@ export const layer = Layer.effect(
       yield* events.publish(Event.Updated, input)
     })
 
-    const get = Effect.fn("SessionTodo.get")(function* (sessionID: SessionSchema.ID) {
-      const resolved = yield* fileSession(sessionID)
+    const get = Effect.fn("SessionTodo.get")(function* (
+      sessionID: SessionSchema.ID,
+      options?: { readonly directory?: string },
+    ) {
+      const resolved = yield* fileSession(sessionID, options?.directory)
       if (resolved.type === "missing") return []
       const session = resolved.type === "found" ? resolved.session : undefined
       if (session) {
