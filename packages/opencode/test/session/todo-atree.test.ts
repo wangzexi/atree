@@ -588,6 +588,48 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.instance("clears copied file-backed todo state only in the explicit target directory", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const todo = yield* Todo.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-copy-clear-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const session = yield* sessions.create({ title: "copied-todo-clear" })
+
+      yield* Effect.promise(() =>
+        writeSessionTodoState(source.directory, session.id, [
+          { content: "source todo survives clear", status: "pending", priority: "low" },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionTodoState(target, session.id, [
+          { content: "target todo clears", status: "in_progress", priority: "high" },
+        ]),
+      )
+
+      yield* todo.update({
+        sessionID: session.id,
+        directory: target,
+        todos: [],
+      })
+
+      expect(yield* Effect.promise(() => readSessionTodoState(target, session.id))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionTodoState(source.directory, session.id))).toEqual([
+        { content: "source todo survives clear", status: "pending", priority: "low" },
+      ])
+      expect(yield* todo.get(session.id, { directory: target })).toEqual([])
+      expect(yield* todo.get(session.id, { directory: source.directory })).toEqual([
+        { content: "source todo survives clear", status: "pending", priority: "low" },
+      ])
+    }),
+  )
+
   it.effect("does not revive persisted-root todos when the session store was removed", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service
