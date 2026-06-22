@@ -130,3 +130,83 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
     expect(eventTypes).toEqual(["session.created", "message.updated", "message.part.updated"])
   }),
 )
+
+it.effect("materializes imported file parts into the session assets directory", () =>
+  Effect.gen(function* () {
+    const directory = yield* Effect.acquireRelease(
+      Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-import-assets-"))),
+      (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+    )
+    const sessionID = "ses_import_assets" as any
+    const messageID = "msg_import_assets" as any
+    const partID = "prt_import_asset" as any
+
+    const imported = yield* persistImportedSession(
+      {
+        info: {
+          id: sessionID,
+          slug: "imported-assets",
+          title: "Imported assets",
+          version: "test",
+          time: { created: 10, updated: 20 },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        } as any,
+        messages: [
+          {
+            info: {
+              id: messageID,
+              sessionID,
+              role: "user",
+              time: { created: 30 },
+              agent: "build",
+              model: { providerID: "test", modelID: "test-model" },
+            } as any,
+            parts: [
+              {
+                id: partID,
+                sessionID,
+                messageID,
+                type: "file",
+                mime: "image/png",
+                filename: "pixel.png",
+                url: "data:image/png;base64,cGl4ZWw=",
+              } as any,
+            ],
+          },
+        ],
+      },
+      {
+        project: { id: ProjectV2.ID.global },
+        directory,
+        worktree: directory,
+      } as any,
+    )
+
+    const raw = yield* Effect.promise(() =>
+      fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+    )
+    expect(raw).not.toContain("data:image/png;base64")
+    expect(raw).toContain("\"assets\"")
+
+    const messages = yield* Effect.promise(() => readSessionJsonlMessages(imported))
+    const filePart = messages[0]?.parts[0] as any
+    expect(filePart).toMatchObject({
+      id: partID,
+      type: "file",
+      mime: "image/png",
+      filename: "pixel.png",
+      url: "data:image/png;base64,cGl4ZWw=",
+    })
+
+    const files = yield* Effect.promise(() =>
+      fs.readdir(path.join(directory, ".agents", "atree", "sessions", sessionID, "assets")),
+    )
+    expect(files).toHaveLength(1)
+    expect(
+      yield* Effect.promise(() =>
+        fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "assets", files[0]), "utf8"),
+      ),
+    ).toBe("pixel")
+  }),
+)

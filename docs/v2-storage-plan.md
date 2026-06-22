@@ -304,6 +304,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - workspace sessionWarp 写入目标 workspace 后会更新目录会话的 `meta.yaml`/`session.jsonl`，并 claim 对应 EventSequence owner；只有目录事实源、没有 SQLite session row 的会话也能被移动到本地 workspace。
 - workspace sessionWarp 在 `copyChanges` 时会从目录 `meta.yaml` 读取源 `workspaceID`；只有目录事实源、没有 SQLite session row 的会话也能把源 workspace 的改动复制到目标 workspace。
 - CLI `export` 的核心读取路径会显式带上当前目录上下文；只有目录 `meta.yaml` / `session.jsonl`、没有 SQLite session/message row 的会话也能导出完整会话和消息。
+- CLI `import` 写入目录事实源时会把导入的 file part 物化到当前会话目录的 `assets/`，`session.jsonl` 中只保留相对资产路径；读取时再按需要恢复为可消费的 file part 内容。
 
 仍未完成的部分：
 
