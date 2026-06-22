@@ -1008,6 +1008,78 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "records a run for a file-backed schedule from the persisted atree root without a directory hint",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-record-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const directory = path.join(root, "nodes", "automation")
+      const previousData = Global.Path.data
+      const sessionID = "ses_root_record_run_schedule" as SessionID
+      const scheduleID = "sch_root_record_run"
+      const now = Date.now()
+      const ranAt = now + 1_000
+
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "root-record-run-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: "nodes/automation",
+          title: "Root record run schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "recurring",
+            expression: "* * * * *",
+            runAt: null,
+            message: "record from persisted root",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.recordRun(scheduleID as Schedule.ID, sessionID, "ran", ranAt))
+
+      const state = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
+      expect(state).toHaveLength(1)
+      expect(state[0]).toMatchObject({
+        id: scheduleID,
+        lastRanAt: ranAt,
+        lastRunStatus: "ran",
+      })
+
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, scheduleID as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
   it.instance(
     "creates a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {
