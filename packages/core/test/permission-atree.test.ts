@@ -239,6 +239,88 @@ describe("PermissionV2 atree state", () => {
     }),
   )
 
+  it.effect("rejecting one restored permission records sibling rejections in session.jsonl", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_permission_reject_siblings")
+      const firstID = PermissionV2.ID.create("per_core_permission_reject_first")
+      const secondID = PermissionV2.ID.create("per_core_permission_reject_second")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core permission reject siblings",
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionJsonl(node, sessionID, [
+          {
+            type: "permission.v2.asked",
+            id: firstID,
+            sessionID,
+            action: "bash",
+            resources: ["echo first"],
+            save: ["echo first"],
+            metadata: {},
+          },
+          {
+            type: "permission.v2.asked",
+            id: secondID,
+            sessionID,
+            action: "bash",
+            resources: ["echo second"],
+            save: ["echo second"],
+            metadata: {},
+          },
+        ]),
+      )
+
+      const service = yield* PermissionV2.Service
+      expect((yield* service.list()).map((item) => item.id)).toEqual([firstID, secondID])
+      yield* Effect.exit(service.reply({ requestID: firstID, reply: "reject" }))
+      expect(yield* service.list()).toEqual([])
+
+      const raw = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.v2.replied",
+          sessionID,
+          requestID: firstID,
+          reply: "reject",
+        }),
+      )
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.v2.replied",
+          sessionID,
+          requestID: secondID,
+          reply: "reject",
+        }),
+      )
+    }),
+  )
+
   it.effect("does not reject restored pending permissions when the service scope closes", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
