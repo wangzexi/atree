@@ -597,6 +597,48 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("removing a copied scheduled session does not clear the source directory schedule cache", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const schedules = yield* Schedule.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-remove-scheduled-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "copied scheduled delete" })
+      const schedule = yield* schedules.create({
+        sessionID: session.id,
+        kind: "once",
+        runAt: Date.now() + 120_000,
+        message: "source schedule should survive copied removal",
+      })
+      const sourceBeforeRemove = yield* Effect.promise(() => readSessionScheduleState(source.directory, session.id))
+      const rowBeforeRemove = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, schedule.id))
+        .get()
+        .pipe(Effect.orDie)
+      expect(rowBeforeRemove?.id).toBe(schedule.id)
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* sessions.remove(session.id, { directory: target })
+
+      expect(yield* Effect.promise(() => readSessionStore(target, session.id))).toBeUndefined()
+      expect(yield* Effect.promise(() => readSessionStore(source.directory, session.id))).not.toBeUndefined()
+      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, session.id))).toEqual(
+        sourceBeforeRemove,
+      )
+      const restored = yield* schedules.list(session.id, { directory: source.directory })
+      expect(restored.map((item) => item.id)).toContain(schedule.id)
+    }),
+  )
+
   it.instance("archiving a scheduled session clears its directory schedule state immediately", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
@@ -647,6 +689,47 @@ describe("atree directory self-contained state", () => {
         .get()
         .pipe(Effect.orDie)
       expect(row).toBeUndefined()
+    }),
+  )
+
+  it.instance("archiving a copied scheduled session clears only the target directory schedule state", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const schedules = yield* Schedule.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-archive-scheduled-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "copied scheduled archive" })
+      const schedule = yield* schedules.create({
+        sessionID: session.id,
+        kind: "once",
+        runAt: Date.now() + 120_000,
+        message: "source schedule should survive copied archive",
+      })
+      const sourceBeforeArchive = yield* Effect.promise(() => readSessionScheduleState(source.directory, session.id))
+      const rowBeforeArchive = yield* db
+        .select({ id: ScheduleTable.id })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, schedule.id))
+        .get()
+        .pipe(Effect.orDie)
+      expect(rowBeforeArchive?.id).toBe(schedule.id)
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* sessions.setArchived({ sessionID: session.id, directory: target, time: Date.now() })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, session.id))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, session.id))).toEqual(
+        sourceBeforeArchive,
+      )
+      const restored = yield* schedules.list(session.id, { directory: source.directory })
+      expect(restored.map((item) => item.id)).toContain(schedule.id)
     }),
   )
 

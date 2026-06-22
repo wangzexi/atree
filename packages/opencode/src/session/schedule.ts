@@ -24,6 +24,7 @@ import {
 } from "@/atree/schedule-store"
 import {
   appendSessionJsonl,
+  findSessionStore,
   readSessionStore,
   readSessionStores,
   readSessionStoresDeep,
@@ -236,6 +237,15 @@ function timerBelongsToDirectory(timer: Timer | undefined, directory: string) {
   return timer?.directory !== undefined && path.resolve(timer.directory) === path.resolve(directory)
 }
 
+function stopSessionTimersInDirectory(timers: Map<ID, Timer>, sessionID: SessionID, directory: string) {
+  for (const [id, timer] of timers.entries()) {
+    if (timer.sessionID !== sessionID) continue
+    if (!timerBelongsToDirectory(timer, directory)) continue
+    stopTimer(timer)
+    timers.delete(id)
+  }
+}
+
 function canRestoreStoredSchedule(schedule: {
   kind: Kind
   expression: string
@@ -279,24 +289,63 @@ export const layer = Layer.effect(
 
     const currentInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 
-    const clearRuntimeState = Effect.fn("Schedule.clearRuntimeState")(function* (sessionID: SessionID) {
-      stopSessionTimers(timers, sessionID)
+    const clearRuntimeState = Effect.fn("Schedule.clearRuntimeState")(function* (
+      sessionID: SessionID,
+      directory?: string,
+    ) {
+      if (directory) stopSessionTimersInDirectory(timers, sessionID, directory)
+      else stopSessionTimers(timers, sessionID)
       const rows = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
         .where(eq(ScheduleTable.session_id, sessionID))
         .all()
         .pipe(Effect.orDie)
-      if (rows.length === 0) return
-      const ids = rows.map((row) => row.id)
+      const sessionRow = directory
+        ? yield* db
+            .select({ directory: SessionTable.directory })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get()
+            .pipe(Effect.orDie)
+        : undefined
+      const cacheBelongsToDirectory =
+        directory !== undefined &&
+        sessionRow?.directory !== undefined &&
+        path.resolve(sessionRow.directory) === path.resolve(directory)
+      const alternateFileSession =
+        directory !== undefined
+          ? yield* Effect.promise(() => readWorkspaceState())
+              .pipe(
+                Effect.flatMap((state) =>
+                  state.rootDirectory
+                    ? Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
+                    : Effect.succeed(undefined),
+                ),
+                Effect.catchCause(() => Effect.succeed(undefined)),
+              )
+          : undefined
+      const hasAlternateFileSession =
+        directory !== undefined &&
+        alternateFileSession?.directory !== undefined &&
+        path.resolve(alternateFileSession.directory) !== path.resolve(directory)
+      const ids = rows
+        .map((row) => row.id as ID)
+        .filter((id) => {
+          if (!directory) return true
+          const timer = timers.get(id)
+          if (timer) return timerBelongsToDirectory(timer, directory)
+          return cacheBelongsToDirectory && !hasAlternateFileSession
+        })
+      if (ids.length === 0) return
       yield* db.delete(ScheduleRunTable).where(inArray(ScheduleRunTable.schedule_id, ids)).run().pipe(Effect.orDie)
-      yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
+      yield* db.delete(ScheduleTable).where(inArray(ScheduleTable.id, ids)).run().pipe(Effect.orDie)
     })
 
     const unsubscribeDeleted = yield* events.listen((event) => {
       if (event.type !== SessionV1.Event.Deleted.type) return Effect.void
       const data = event.data as typeof SessionV1.Event.Deleted.data.Type
-      return clearRuntimeState(data.sessionID)
+      return clearRuntimeState(data.sessionID, data.info.directory)
     })
     yield* Effect.addFinalizer(() => unsubscribeDeleted)
 
@@ -318,7 +367,7 @@ export const layer = Layer.effect(
             data.info.directory,
           )
         }
-        yield* clearRuntimeState(data.sessionID)
+        yield* clearRuntimeState(data.sessionID, data.info.directory)
         yield* Effect.promise(() => writeSessionScheduleState(data.info.directory, data.sessionID, []))
       })
     })
@@ -707,7 +756,7 @@ export const layer = Layer.effect(
           directory,
         )
       }
-      yield* clearRuntimeState(sessionID)
+      yield* clearRuntimeState(sessionID, directory)
       yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
     })
 
