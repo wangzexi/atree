@@ -206,6 +206,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `SessionV2.list({ directory })` 默认会过滤归档的 file-backed session；只有显式传 `archived: true` 时才会把归档会话并入结果。
 - 消息、消息片段、删除消息、删除片段会写入 `session.jsonl`，并能在 SQLite 投影缺失时恢复。
 - data URL 文件 part 会物化到会话自己的 `assets/`，fork 会话时也会复制到 fork 会话自己的 `assets/`。
+- 超长工具输出会优先写入当前 file-backed session 自己的 `assets/tool-output/`；即使 SQLite 中没有 session row，只要该会话能从持久化 atree root 下的目录事实源找到，也不会退回全局 `tool-output`。
 - 写入消息事件后会推进 `meta.yaml` 的 `updatedAt`，目录列表排序不会只依赖 SQLite 的更新时间。
 - 复制 `.agents/atree/` 到另一个目录后，显式传入目标目录的元数据、消息和 part 写入只落在目标目录；读取源目录时不会再被同一 session id 的全局 MessageV2 投影串入目标消息。
 - 复制 `.agents/atree/` 到另一个目录后，显式传入目标目录的 fork 会从目标目录读取历史，并把新 fork 会话写入目标目录。
