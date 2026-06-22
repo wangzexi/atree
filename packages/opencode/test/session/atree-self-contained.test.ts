@@ -773,4 +773,68 @@ describe("atree directory self-contained state", () => {
       )
     }),
   )
+
+  it.instance("removing a nested file-backed session from the persisted root deletes schedule state", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-root-remove-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const now = Date.now()
+      const directory = path.join(instance.directory, "nested", "remove-node")
+      const sessionID = "ses_root_remove_clears_schedule" as SessionID
+      const scheduleID = "sch_root_remove_clears_schedule"
+      yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "root-remove-clears-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: "nested/remove-node",
+          title: "Root remove clears schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "delete from persisted root",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+
+      yield* sessions.remove(sessionID)
+
+      expect(yield* Effect.promise(() => readSessionStore(directory, sessionID))).toBeUndefined()
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      expect(
+        yield* Effect.promise(() =>
+          fs.stat(path.join(directory, ".agents", "atree", "sessions", sessionID)).then(
+            () => true,
+            () => false,
+          ),
+        ),
+      ).toBe(false)
+    }),
+  )
 })
