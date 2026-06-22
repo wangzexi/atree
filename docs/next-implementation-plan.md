@@ -47,6 +47,8 @@
 - `packages/opencode/test/session/atree-self-contained.test.ts`
 - `packages/opencode/test/atree/schedule-store.test.ts`
 - `packages/core/test/atree-session-store.test.ts`
+- `packages/core/test/question-atree.test.ts`
+- `packages/core/test/permission-atree.test.ts`
 - `packages/opencode/test/server/httpapi-session.test.ts` 中 file-backed v2 相关用例
 - `packages/app/e2e/atree/invariants.spec.ts`
 - `packages/app/e2e/atree/smoke.spec.ts`
@@ -55,14 +57,15 @@
 
 - OpenCode V1 session 服务和 core `SessionV2` 仍是两套读写入口。
 - SQLite 仍承担运行时投影、执行队列和部分兼容缓存；目前还不能删除。
-- core `SessionV2` 已经能恢复文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件，但还没有覆盖 permission/question 等更完整的 v2 结构。
+- core `SessionV2` 已经能恢复文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件。
+- core `QuestionV2` 和 `PermissionV2` 已能从目录 `session.jsonl` 恢复 pending question/permission，并把 reply 继续写回对应会话日志；但 permission/question 的更完整 UI 状态和历史展示还没有统一成 typed session view model。
 - 真正模型输出链路仍主要由 OpenCode 原有 projector/runtime 推动，目录 JSONL 目前是事实源化过程中的镜像与恢复层。
 
 下一步优先级：
 
 1. 继续补护栏测试，固定当前可用行为，尤其是直接打开 session URL、切换目录、归档、一次性 schedule 触发后清空 header。
 2. 把“会话读写事实源”集中到一个 atree session store 模块，减少 `packages/core/src/atree/session-store.ts` 和 `packages/opencode/src/atree/session-store.ts` 的重复逻辑。
-3. 扩展 core JSONL reader，让它能恢复 permission/question 等更完整的 v2 结构。
+3. 继续扩展 core JSONL reader 和 typed view model，让 permission/question、schedule、todo 等目录状态在 UI/API 侧有统一投影。
 4. 等读写边界稳定后，再考虑收敛 HTTP facade；不要先删 OpenCode 接口，否则测试与回退路径会不够。
 5. Pi core 替换应新开分支做，保留当前 OpenCode spike 作为可运行对照。
 
