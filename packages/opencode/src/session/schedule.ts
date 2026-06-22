@@ -630,14 +630,40 @@ export const layer = Layer.effect(
       directoryHint?: string,
     ) {
       const existing = yield* db
-        .select({ id: ScheduleTable.id })
+        .select({ id: ScheduleTable.id, sessionID: ScheduleTable.session_id })
         .from(ScheduleTable)
         .where(eq(ScheduleTable.id, scheduleID))
         .get()
         .pipe(Effect.orDie)
-      if (existing) return true
-
+      const existingSessionDirectory =
+        existing && directoryHint
+          ? yield* db
+              .select({ directory: SessionTable.directory })
+              .from(SessionTable)
+              .where(eq(SessionTable.id, existing.sessionID))
+              .get()
+              .pipe(Effect.orDie)
+          : undefined
       const directory = yield* sessionDirectory(sessionID, directoryHint)
+      if (existing) {
+        if (!directoryHint) return true
+        if (!directory) return false
+        if (
+          timerBelongsToDirectory(timers.get(scheduleID), directory) ||
+          (existingSessionDirectory?.directory !== undefined &&
+            path.resolve(existingSessionDirectory.directory) === path.resolve(directory))
+        ) {
+          return true
+        }
+        const timer = timers.get(scheduleID)
+        if (timer) {
+          stopTimer(timer)
+          timers.delete(scheduleID)
+        }
+        yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, scheduleID)).run().pipe(Effect.orDie)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
+      }
+
       if (!directory) return false
       const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
       const schedule = projection.schedules.find((item) => item.id === scheduleID)

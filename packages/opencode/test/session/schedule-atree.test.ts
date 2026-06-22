@@ -1137,6 +1137,116 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.instance(
+    "records a run for copied file-backed schedule state in the explicit target directory",
+    Effect.gen(function* () {
+      const schedules = yield* Schedule.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-record-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const sessionID = "ses_copied_schedule_record" as SessionID
+      const scheduleID = "sch_copied_schedule_record"
+      const now = Date.now()
+      const ranAt = now + 1_000
+      const storedSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "recurring" as const,
+        expression: "* * * * *",
+        runAt: null,
+        message: "source copied schedule",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_copied_schedule_record",
+          worktree: source.directory,
+          vcs: "git",
+          name: "copied schedule record",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_copied_schedule_record",
+          slug: "copied-schedule-record",
+          directory: source.directory,
+          title: "Copied schedule record",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "copied-schedule-record",
+          version: "test",
+          projectID: "proj_copied_schedule_record",
+          directory: source.directory,
+          path: ".",
+          title: "Copied schedule record",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [storedSchedule]))
+      expect(yield* schedules.list(sessionID, { directory: source.directory })).toHaveLength(1)
+      const sourceBeforeRecord = yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(target, sessionID, [
+          {
+            ...storedSchedule,
+            message: "target copied schedule",
+          },
+        ]),
+      )
+
+      yield* schedules.recordRun(scheduleID as Schedule.ID, sessionID, "ran", ranAt, { directory: target })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual(sourceBeforeRecord)
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toMatchObject([
+        {
+          id: scheduleID,
+          message: "target copied schedule",
+          lastRanAt: ranAt,
+          lastRunStatus: "ran",
+        },
+      ])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("target copied schedule")
+    }),
+  )
+
   it.effect(
     "records a run for a file-backed schedule from the persisted atree root without a directory hint",
     Effect.gen(function* () {
