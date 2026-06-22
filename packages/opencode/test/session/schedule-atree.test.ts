@@ -683,8 +683,19 @@ describe("atree schedule restore", () => {
         fs.rm(path.join(node, ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
       )
 
+      const events = yield* EventV2Bridge.Service
+      const triggered: unknown[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === "schedule.triggered") triggered.push(event)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
       const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
       expect(listed).toEqual([])
+      yield* Schedule.Service.use((schedule) => schedule.tick(scheduleID))
+      expect(triggered).toEqual([])
 
       const created = yield* Schedule.Service.use((schedule) =>
         schedule

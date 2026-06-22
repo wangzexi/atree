@@ -838,9 +838,16 @@ export const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (!row) return
+      const sessionID = row.session_id as SessionID
+      const location = yield* resolveSessionLocation(sessionID)
+      if (location.type === "missing") return
+      if (location.type === "found" && location.archived) {
+        yield* clearArchivedScheduleState(sessionID, location.directory)
+        return
+      }
       yield* events.publish(Event.Triggered, {
         scheduleID,
-        sessionID: row.session_id as SessionID,
+        sessionID,
         message: row.message,
       })
     })
