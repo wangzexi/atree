@@ -1,5 +1,8 @@
 import path from "path"
 import { Effect } from "effect"
+import { eq } from "drizzle-orm"
+import type { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import type { SessionID } from "@/session/schema"
 import { findSessionStore, readSessionStore } from "./session-store"
 import { readWorkspaceState } from "./state"
@@ -12,7 +15,7 @@ function sameDirectory(left: string | undefined, right: string | undefined) {
 }
 
 export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function* (
-  _db: unknown,
+  db: Database.Interface["db"],
   input: {
     sessionID: SessionID
     directory?: string
@@ -46,4 +49,12 @@ export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function
     )
     if (found) return found
   }
+
+  const cached = yield* db
+    .select({ directory: SessionTable.directory })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, input.sessionID))
+    .get()
+    .pipe(Effect.catchCause(() => Effect.succeed(undefined)))
+  return yield* tryDirectory(cached?.directory)
 })

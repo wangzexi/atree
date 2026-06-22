@@ -126,4 +126,53 @@ describe("atree session resolver", () => {
       expect(resolved?.title).toBe("Instance copy")
     }),
   )
+
+  it.effect("uses a valid SQLite directory row as the final file-backed session hint", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-db-row-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const sessionID = "ses_resolver_db_row" as never
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "resolver-db-row",
+          version: "test",
+          projectID: "global" as never,
+          path: ".",
+          directory,
+          title: "DB row file-backed session",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 1 },
+        } as never),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: "global", worktree: directory, sandboxes: [] } as unknown as typeof ProjectTable.$inferInsert)
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "global" as never,
+          slug: "resolver-db-row",
+          directory,
+          title: "Stale cache title",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const resolved = yield* resolveFileSession(db, { sessionID })
+
+      expect(resolved?.directory).toBe(path.resolve(directory))
+      expect(resolved?.title).toBe("DB row file-backed session")
+    }),
+  )
 })
