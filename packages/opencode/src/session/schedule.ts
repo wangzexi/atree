@@ -1004,7 +1004,22 @@ export const layer = Layer.effect(
       if (input.directory && !directory) {
         return yield* Effect.fail(new SessionNotFound({ sessionID: input.sessionID }))
       }
-      yield* restoreStoredSchedules(input.sessionID, directory)
+      if (directory) {
+        const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, input.sessionID))
+        yield* reconcileDirectorySchedules(
+          input.sessionID,
+          directory,
+          projection.hasState
+            ? projection.schedules.map((schedule) => ({
+                ...schedule,
+                id: schedule.id as ID,
+                sessionID: schedule.sessionID as SessionID,
+              }))
+            : [],
+        )
+      } else {
+        yield* restoreStoredSchedules(input.sessionID, directory)
+      }
       yield* cleanupCompletedOnceForSession(input.sessionID, directory)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })
