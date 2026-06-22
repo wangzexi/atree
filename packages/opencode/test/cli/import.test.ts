@@ -51,6 +51,10 @@ test("transforms share data to storage format", () => {
     { type: "message", data: { id: "msg-1", sessionID: "sess-1" } as any },
     { type: "part", data: { id: "part-1", messageID: "msg-1" } as any },
     { type: "part", data: { id: "part-2", messageID: "msg-1" } as any },
+    {
+      type: "session_diff",
+      data: [{ file: "changed.ts", additions: 2, deletions: 1, status: "modified" }],
+    },
   ]
 
   const result = transformShareData(data)!
@@ -58,6 +62,7 @@ test("transforms share data to storage format", () => {
   expect(result.info.id).toBe("sess-1")
   expect(result.messages).toHaveLength(1)
   expect(result.messages[0].parts).toHaveLength(2)
+  expect(result.sessionDiff).toEqual([{ file: "changed.ts", additions: 2, deletions: 1, status: "modified" }])
 })
 
 test("returns null for invalid share data", () => {
@@ -87,6 +92,7 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
           cost: 0,
           tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
         } as any,
+        sessionDiff: [{ file: "imported.ts", additions: 3, deletions: 1, status: "modified", patch: "@@" }],
         messages: [
           {
             info: {
@@ -110,6 +116,12 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
 
     const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
     expect(stored?.title).toBe("Imported session")
+    expect(stored?.summary).toMatchObject({
+      additions: 3,
+      deletions: 1,
+      files: 1,
+      diffs: [{ file: "imported.ts", additions: 3, deletions: 1, status: "modified", patch: "@@" }],
+    })
 
     const { db } = yield* Database.Service
     yield* db.delete(PartTable).where(eq(PartTable.session_id, sessionID)).run().pipe(Effect.orDie)
@@ -127,7 +139,7 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line).type)
-    expect(eventTypes).toEqual(["session.created", "message.updated", "message.part.updated"])
+    expect(eventTypes).toEqual(["session.created", "session.diff", "message.updated", "message.part.updated"])
   }),
 )
 

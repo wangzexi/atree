@@ -13,6 +13,7 @@ import path from "path"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Effect, Schema } from "effect"
 import type { InstanceContext } from "@/project/instance-context"
+import type { Snapshot } from "@/snapshot"
 
 const decodeMessageInfo = Schema.decodeUnknownSync(SessionV1.Info)
 const decodePart = Schema.decodeUnknownSync(SessionV1.Part)
@@ -50,6 +51,7 @@ export function shouldAttachShareAuthHeaders(shareUrl: string, accountBaseUrl: s
 export function transformShareData(shareData: ShareData[]): {
   info: SDKSession
   messages: Array<{ info: Message; parts: Part[] }>
+  sessionDiff?: Snapshot.FileDiff[]
 } | null {
   const sessionItem = shareData.find((d) => d.type === "session")
   if (!sessionItem) return null
@@ -76,26 +78,48 @@ export function transformShareData(shareData: ShareData[]): {
       info: msg,
       parts: partMap.get(msg.id) ?? [],
     })),
+    sessionDiff: shareData.find((item) => item.type === "session_diff")?.data as Snapshot.FileDiff[] | undefined,
   }
 }
 
-type ExportData = { info: SDKSession; messages: Array<{ info: Message; parts: Part[] }> }
+type ExportData = {
+  info: SDKSession
+  messages: Array<{ info: Message; parts: Part[] }>
+  sessionDiff?: Snapshot.FileDiff[]
+}
+
+function diffSummary(diffs: Snapshot.FileDiff[] | undefined): Session.Info["summary"] | undefined {
+  if (!diffs) return
+  return {
+    additions: diffs.reduce((sum, item) => sum + item.additions, 0),
+    deletions: diffs.reduce((sum, item) => sum + item.deletions, 0),
+    files: diffs.length,
+    diffs,
+  }
+}
 
 export const persistImportedSession = Effect.fn("Cli.import.persist")(function* (
   exportData: ExportData,
   ctx: Pick<InstanceContext, "project" | "directory" | "worktree">,
 ) {
   const { db } = yield* Database.Service
+  const summary = exportData.info.summary ?? diffSummary(exportData.sessionDiff)
   const info = Schema.decodeUnknownSync(Session.Info)({
     ...exportData.info,
     projectID: ctx.project.id,
     directory: ctx.directory,
     path: path.relative(path.resolve(ctx.worktree), ctx.directory).replaceAll("\\", "/"),
+    ...(summary ? { summary } : {}),
   }) as Session.Info
   const row = Session.toRow(info)
 
   yield* Effect.promise(() => writeSessionStore(info))
   yield* Effect.promise(() => appendSessionJsonl(info, { type: "session.created", sessionID: info.id, info }))
+  if (exportData.sessionDiff) {
+    yield* Effect.promise(() =>
+      appendSessionJsonl(info, { type: "session.diff", sessionID: info.id, diff: exportData.sessionDiff }),
+    )
+  }
 
   yield* db
     .insert(SessionTable)
