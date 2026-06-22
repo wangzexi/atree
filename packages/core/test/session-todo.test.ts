@@ -156,6 +156,59 @@ describe("SessionTodo", () => {
     }),
   )
 
+  it.effect("does not revive stale database todos when a file-backed session has no todo state", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-missing-state-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_missing_state")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(directory), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo-missing-state",
+          directory,
+          title: "file todo missing state",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: fileSessionID,
+          content: "stale core database todo",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          projectID: Project.ID.global,
+          title: "file todo missing state",
+          location: { directory: AbsolutePath.make(directory) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+
+      expect(yield* todos.get(fileSessionID)).toEqual([])
+    }),
+  )
+
   it.effect("updates a file-backed todo list without a SQLite session row", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(

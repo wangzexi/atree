@@ -275,6 +275,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - `schedule.json` 和 `todo.json` 已经按会话落到同一个会话目录下；写入它们时会确保 `session.jsonl` 和 `assets/` 骨架存在。
 - schedule 的显式目录操作已经按目录边界收紧：当调用方传入 `directory`，但该目录没有对应 file-backed session 时，`list` 返回空，`delete` 返回 NotFound，`clear` 不会清理全局 DB 投影，`create` 不会创建 DB-only 自动化消息。
 - core `SessionTodo` 会在能定位到 file-backed session 时把 todo 状态镜像到同一会话目录的 `todo.json`，读取时目录状态优先；即使 SQLite todo 投影缺失，也能从目录恢复。
+- core `SessionTodo.get` 在已经定位到 file-backed session 但目录里还没有 todo 投影或 JSONL 事件时，也以目录缺失状态为准返回空列表，不再读取旧 `TodoTable` 投影。
 - core `SessionTodo` 的文件态行为已经和 opencode 侧保持一致：写入 todo 时会确保 `session.jsonl` / `assets/` 骨架存在，读取旧 `extensions/todo/state.json` 作为迁移兼容，重写该会话 todo 后会从旧扩展状态中移除对应 session，并推进会话 `meta.yaml` 的更新时间。
 - core 和 opencode 的 todo 更新会先追加到当前会话目录的 `session.jsonl`，再刷新 SQLite/`todo.json` 投影；当会话目录的 `todo.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `todo.updated` 事件时，todo store 可以从最近一条事件恢复当前 todo 状态，并保留“显式空 todo”和“缺失 todo 状态”的区别。
 - todo 的显式目录写入也已经按目录边界收紧：当调用方传入 `directory`，但该目录没有对应 file-backed session 时，`update` 不会写入全局 `TodoTable`，也不会在错误目录创建 todo 投影。
