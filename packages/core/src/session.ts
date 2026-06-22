@@ -543,22 +543,26 @@ export const layer = Layer.effect(
             const matchingSessionRow =
               sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
             const messageID = input.id ?? SessionMessage.ID.create()
+            const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
+              Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+            )
+            const existingFileMessage = fileMessages.find((message) => message.id === messageID)
+            const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+            if (existingFileMessage && (!matchingSessionRow || fileBacked)) {
+              if (existingFileMessage.type !== "user" || !promptsMatch(input.prompt, existingFileMessage))
+                return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+              return new SessionInput.Admitted({
+                admittedSeq: 0,
+                id: messageID,
+                sessionID: input.sessionID,
+                prompt: input.prompt,
+                delivery: input.delivery ?? "steer",
+                timeCreated: existingFileMessage.time.created,
+              })
+            }
             if (!matchingSessionRow) {
-              const existing = (yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
-                Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
-              )).find((message) => message.id === messageID)
-              if (existing) {
-                if (existing.type !== "user" || !promptsMatch(input.prompt, existing))
-                  return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-                return new SessionInput.Admitted({
-                  admittedSeq: 0,
-                  id: messageID,
-                  sessionID: input.sessionID,
-                  prompt: input.prompt,
-                  delivery: input.delivery ?? "steer",
-                  timeCreated: existing.time.created,
-                })
-              }
               const admitted = new SessionInput.Admitted({
                 admittedSeq: 0,
                 id: messageID,

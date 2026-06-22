@@ -11,7 +11,7 @@ import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
-import { SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { readSessionStore } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
@@ -1514,6 +1514,95 @@ describe("atree file-backed SessionV2 discovery", () => {
         type: "user",
         text: "record in the file session",
       })
+    }),
+  )
+
+  it.effect("does not append duplicate prompt entries when retrying an existing file-backed prompt", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_existing_file")
+      const messageID = SessionMessage.ID.make("msg_core_prompt_existing_file")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core existing prompt",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_prompt_existing_file",
+              messageID,
+              type: "text",
+              text: "already recorded",
+            },
+          },
+        ]),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "existing-file-prompt",
+          directory: AbsolutePath.make(node),
+          title: "Existing file prompt",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const before = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const admitted = yield* sessions.prompt({
+        sessionID,
+        id: messageID,
+        prompt: new Prompt({ text: "already recorded" }),
+        resume: false,
+      })
+      const after = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const inputRow = yield* db
+        .select({ id: SessionInputTable.id })
+        .from(SessionInputTable)
+        .where(eq(SessionInputTable.id, messageID))
+        .get()
+        .pipe(Effect.orDie)
+
+      expect(admitted.id).toBe(messageID)
+      expect(after).toBe(before)
+      expect(inputRow).toBeUndefined()
     }),
   )
 
