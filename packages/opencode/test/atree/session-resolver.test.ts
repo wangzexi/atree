@@ -1,5 +1,6 @@
 import { describe, expect } from "bun:test"
 import { Database } from "@opencode-ai/core/database/database"
+import { Global } from "@opencode-ai/core/global"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Effect, Layer } from "effect"
@@ -29,12 +30,11 @@ describe("atree session resolver", () => {
       const target = path.join(root, "target")
       yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
       yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
-      const previousData = process.env.OPENCODE_DATA
-      process.env.OPENCODE_DATA = data
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
-          if (previousData === undefined) delete process.env.OPENCODE_DATA
-          else process.env.OPENCODE_DATA = previousData
+          ;(Global.Path as { data: string }).data = previousData
         }),
       )
       yield* Effect.promise(() => writeWorkspaceRoot(root))
@@ -77,6 +77,53 @@ describe("atree session resolver", () => {
 
       expect(resolved?.directory).toBe(yield* Effect.promise(() => fs.realpath(target)))
       expect(resolved?.title).toBe("Target root copy")
+    }),
+  )
+
+  it.effect("prefers the current instance directory over the persisted root copy", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-priority-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-priority-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const rootNode = path.join(root, "root-node")
+      const instanceNode = path.join(root, "instance-node")
+      yield* Effect.promise(() => fs.mkdir(rootNode, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(instanceNode, { recursive: true }))
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          ;(Global.Path as { data: string }).data = previousData
+        }),
+      )
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+
+      const sessionID = "ses_resolver_instance_priority" as never
+      const base = {
+        id: sessionID,
+        slug: "resolver-instance-priority",
+        version: "test",
+        projectID: "global" as never,
+        path: ".",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 1 },
+      }
+      yield* Effect.promise(() => writeSessionStore({ ...base, directory: rootNode, title: "Root copy" } as never))
+      yield* Effect.promise(() =>
+        writeSessionStore({ ...base, directory: instanceNode, title: "Instance copy" } as never),
+      )
+
+      const { db } = yield* Database.Service
+      const resolved = yield* resolveFileSession(db, { sessionID, instanceDirectory: instanceNode })
+
+      expect(resolved?.directory).toBe(path.resolve(instanceNode))
+      expect(resolved?.title).toBe("Instance copy")
     }),
   )
 })
