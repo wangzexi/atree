@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import { ensureSessionPayloadFilesByID, touchSessionStore } from "./session-store"
+import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore } from "./session-store"
 import type { SessionID } from "@/session/schema"
 
 export type StoredSchedule = {
@@ -29,21 +29,6 @@ type SessionScheduleState = {
   updatedAt: number
   schedules: StoredSchedule[]
 }
-
-const FindMaxDepth = 8
-const FindMaxNodes = 2_000
-const IgnoredDirectories = new Set([
-  ".agents",
-  ".git",
-  ".hg",
-  ".svn",
-  "node_modules",
-  ".next",
-  ".turbo",
-  ".cache",
-  "dist",
-  "build",
-])
 
 function legacyStatePath(directory: string) {
   return path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json")
@@ -245,61 +230,11 @@ export async function readSessionScheduleState(directory: string, sessionID: str
 
 export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {
   const root = await fs.realpath(rootDirectory)
-  const budget = { count: 0 }
-
-  async function checkDirectory(directory: string) {
-    const sessionsRoot = path.join(directory, ".agents", "atree", "sessions")
-    const entries = await fs.readdir(sessionsRoot, { withFileTypes: true }).catch((error: unknown) => {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error.code === "ENOENT" || error.code === "EACCES")
-      ) {
-        return []
-      }
-      throw error
-    })
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      const sessionID = entry.name
-      const schedules = await readSessionScheduleState(directory, sessionID)
-      if (schedules.some((schedule) => schedule.id === scheduleID)) return { directory, sessionID, schedules }
+  const sessions = await readSessionStoresDeep(root)
+  for (const session of sessions) {
+    const schedules = await readSessionScheduleState(session.directory, session.id)
+    if (schedules.some((schedule) => schedule.id === scheduleID)) {
+      return { directory: session.directory, sessionID: session.id, schedules }
     }
   }
-
-  async function walk(directory: string, depth: number): Promise<
-    | {
-        directory: string
-        sessionID: string
-        schedules: StoredSchedule[]
-      }
-    | undefined
-  > {
-    if (budget.count++ >= FindMaxNodes) return
-    const found = await checkDirectory(directory)
-    if (found) return found
-    if (depth >= FindMaxDepth) return
-
-    const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
-      if (
-        error &&
-        typeof error === "object" &&
-        "code" in error &&
-        (error.code === "ENOENT" || error.code === "EACCES")
-      ) {
-        return []
-      }
-      throw error
-    })
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (IgnoredDirectories.has(entry.name)) continue
-      const result = await walk(path.join(directory, entry.name), depth + 1)
-      if (result) return result
-    }
-  }
-
-  return walk(root, 0)
 }

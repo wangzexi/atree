@@ -41,6 +41,7 @@
 - todo/schedule 在无显式目录时会校验 SQLite 缓存目录仍存在对应 file-backed session；旧目录失效时继续从当前 instance 或持久化 root 定位真实目录。
 - core `SessionTodo` 的目录文件读写已经和 opencode 侧对齐：会创建会话 payload 骨架、读取旧 `extensions/todo/state.json` 作为迁移兼容，并在重写后清理旧状态。
 - opencode 的 session/message/todo/schedule 已经共享同一个 file-backed session resolver；后续收紧“全局 root 回退”只需要优先改这个解析入口，而不是在多个模块里重复修。
+- opencode 的 schedule 根目录查找已复用 file-backed session store 的深度扫描结果，不再维护独立目录遍历策略；schedule 继续作为会话目录内的工具状态读取。
 
 已通过的护栏：
 
