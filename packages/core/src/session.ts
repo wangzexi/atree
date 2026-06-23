@@ -634,18 +634,7 @@ export const layer = Layer.effect(
               .pipe(Effect.orDie)
             const matchingSessionRow =
               sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
-            if (!matchingSessionRow) {
-              const admitted = new SessionInput.Admitted({
-                admittedSeq: 0,
-                id: messageID,
-                sessionID: input.sessionID,
-                prompt: input.prompt,
-                delivery: input.delivery ?? "steer",
-                timeCreated: yield* DateTime.now,
-              })
-              yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
-              return admitted
-            }
+            if (!matchingSessionRow) return yield* new NotFoundError({ sessionID: input.sessionID })
             const returnPrompt = Effect.fnUntraced(function* (admitted: SessionInput.Admitted) {
               if (input.resume !== false) yield* enqueueWake(session, admitted)
               return admitted
@@ -666,17 +655,6 @@ export const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            if (!existingFileMessage) {
-              yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("failed to mirror prompt into atree session store", {
-                    sessionID: input.sessionID,
-                    messageID,
-                    cause,
-                  }),
-                ),
-              )
-            }
             return yield* returnPrompt(admitted)
           }),
         ),
