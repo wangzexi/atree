@@ -124,7 +124,7 @@ describe("atree schedule store", () => {
     expect((await readSessionStore(directory, "ses_touch" as never))?.time.updated).toBeGreaterThan(20)
   })
 
-  test("falls back to legacy directory schedule state until the session is rewritten", async () => {
+  test("does not read legacy directory schedule state as session state", async () => {
     const directory = await tempdir()
     const schedule = {
       id: "sch_legacy",
@@ -145,7 +145,8 @@ describe("atree schedule store", () => {
       JSON.stringify({ version: 1, updatedAt: 1, sessions: { ses_legacy: [schedule] } }),
     )
 
-    expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([schedule])
+    expect(await readSessionScheduleProjection(directory, "ses_legacy")).toEqual({ hasState: false, schedules: [] })
+    expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([])
     await writeSessionScheduleState(directory, "ses_legacy", [])
     expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([])
     expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()

@@ -187,10 +187,7 @@ export async function readSessionTodoProjection(directory: string, sessionID: st
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
   if (sessionState.hasState) return publicTodoProjection(sessionState)
 
-  const state = await readState(legacyStatePath(directory))
-  if (!Object.hasOwn(state.sessions, sessionID)) return publicTodoProjection(jsonlState)
-  const todos = state.sessions[sessionID]
-  return publicTodoProjection({ hasState: true, todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [] })
+  return publicTodoProjection(jsonlState)
 }
 
 export async function readSessionTodoState(directory: string, sessionID: string) {

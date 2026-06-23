@@ -175,15 +175,7 @@ export async function readSessionTodoProjection(directory: string, sessionID: st
     })
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      const state = await readLegacyState(legacyStatePath(directory))
-      if (!Object.hasOwn(state.sessions, sessionID)) {
-        return publicTodoProjection(jsonlState)
-      }
-      const todos = state.sessions[sessionID]
-      return publicTodoProjection({
-        hasState: true,
-        todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [],
-      })
+      return publicTodoProjection(jsonlState)
     }
     throw error
   }

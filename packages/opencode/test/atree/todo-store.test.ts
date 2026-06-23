@@ -96,7 +96,7 @@ describe("atree todo store", () => {
     expect((await readSessionStore(directory, "ses_touch" as never))?.time.updated).toBeGreaterThan(20)
   })
 
-  test("falls back to legacy directory todo state until the session is rewritten", async () => {
+  test("does not read legacy directory todo state as session state", async () => {
     const directory = await tempdir()
     const todo = { content: "legacy todo", status: "pending", priority: "medium" }
 
@@ -106,7 +106,8 @@ describe("atree todo store", () => {
       JSON.stringify({ version: 1, updatedAt: 1, sessions: { ses_legacy: [todo] } }),
     )
 
-    expect(await readSessionTodoState(directory, "ses_legacy")).toEqual([todo])
+    expect(await readSessionTodoProjection(directory, "ses_legacy")).toEqual({ hasState: false, todos: [] })
+    expect(await readSessionTodoState(directory, "ses_legacy")).toEqual([])
     await writeSessionTodoState(directory, "ses_legacy", [])
     expect(await readSessionTodoProjection(directory, "ses_legacy")).toMatchObject({ hasState: true, todos: [] })
     expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()

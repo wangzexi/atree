@@ -45,7 +45,7 @@ const setup = Effect.gen(function* () {
 })
 
 describe("SessionTodo", () => {
-  it.effect("replaces persisted todos in order and publishes updates", () =>
+  it.effect("does not persist todos for SQLite-only sessions", () =>
     Effect.gen(function* () {
       yield* setup
       const { db } = yield* Database.Service
@@ -66,36 +66,20 @@ describe("SessionTodo", () => {
           { content: "first", status: "in_progress", priority: "high" },
         ],
       })
-      expect(yield* todos.get(sessionID)).toEqual([
-        { content: "second", status: "pending", priority: "low" },
-        { content: "first", status: "in_progress", priority: "high" },
-      ])
+      expect(yield* todos.get(sessionID)).toEqual([])
       expect(
         (yield* db.select().from(TodoTable).orderBy(asc(TodoTable.position)).all().pipe(Effect.orDie)).map((row) => ({
           content: row.content,
           position: row.position,
         })),
-      ).toEqual([
-        { content: "second", position: 0 },
-        { content: "first", position: 1 },
-      ])
+      ).toEqual([])
 
       yield* todos.update({ sessionID, todos: [{ content: "replacement", status: "completed", priority: "medium" }] })
-      expect(yield* todos.get(sessionID)).toEqual([{ content: "replacement", status: "completed", priority: "medium" }])
+      expect(yield* todos.get(sessionID)).toEqual([])
 
       yield* todos.update({ sessionID, todos: [] })
       expect(yield* todos.get(sessionID)).toEqual([])
-      expect(published.map((event) => event.data)).toEqual([
-        {
-          sessionID,
-          todos: [
-            { content: "second", status: "pending", priority: "low" },
-            { content: "first", status: "in_progress", priority: "high" },
-          ],
-        },
-        { sessionID, todos: [{ content: "replacement", status: "completed", priority: "medium" }] },
-        { sessionID, todos: [] },
-      ])
+      expect(published).toEqual([])
     }),
   )
 
@@ -606,7 +590,7 @@ describe("SessionTodo", () => {
     }),
   )
 
-  it.effect("reads legacy directory todo state until the session is rewritten", () =>
+  it.effect("does not read legacy directory todo state as session state", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
         Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-legacy-"))),
@@ -653,7 +637,7 @@ describe("SessionTodo", () => {
         ),
       )
 
-      expect(yield* todos.get(fileSessionID)).toEqual(state)
+      expect(yield* todos.get(fileSessionID)).toEqual([])
 
       yield* todos.update({ sessionID: fileSessionID, todos: [] })
       expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({

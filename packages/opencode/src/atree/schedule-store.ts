@@ -247,15 +247,6 @@ export async function readSessionScheduleProjection(directory: string, sessionID
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
   if (sessionState.hasState) return publicScheduleProjection(sessionState)
 
-  const state = await readState(legacyStatePath(directory))
-  const schedules = state.sessions[sessionID]
-  if (Array.isArray(schedules)) {
-    return publicScheduleProjection({
-      hasState: true,
-      schedules: schedules.filter(isStoredSchedule),
-    })
-  }
-
   return publicScheduleProjection(jsonlState)
 }
 
