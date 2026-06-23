@@ -560,7 +560,7 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileBacked) return fileMessages
-        return yield* store.context(sessionID)
+        return yield* store.context(sessionID, { directory: options?.directory })
       }),
       events: (input) =>
         Stream.unwrap(

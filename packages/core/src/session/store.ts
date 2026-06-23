@@ -30,16 +30,29 @@ async function isWithinDirectory(parent: string | undefined, child: string | und
   return target === root || target.startsWith(root + path.sep)
 }
 
+async function isSameDirectory(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false
+  return (await realpathOrResolve(left)) === (await realpathOrResolve(right))
+}
+
 export interface Interface {
-  readonly get: (sessionID: SessionSchema.ID) => Effect.Effect<SessionSchema.Info | undefined>
-  readonly context: (sessionID: SessionSchema.ID) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
+  readonly get: (
+    sessionID: SessionSchema.ID,
+    options?: { directory?: string },
+  ) => Effect.Effect<SessionSchema.Info | undefined>
+  readonly context: (
+    sessionID: SessionSchema.ID,
+    options?: { directory?: string },
+  ) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
   readonly runnerEntries: (
     sessionID: SessionSchema.ID,
     baselineSeq: number,
+    options?: { directory?: string },
   ) => Effect.Effect<Array<{ readonly seq: number; readonly message: SessionMessage.Message }>, MessageDecodeError>
   readonly runnerContext: (
     sessionID: SessionSchema.ID,
     baselineSeq: number,
+    options?: { directory?: string },
   ) => Effect.Effect<SessionMessage.Message[], MessageDecodeError>
   readonly message: (
     messageID: SessionMessage.ID,
@@ -53,9 +66,21 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const { db } = yield* Database.Service
     const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
-    const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (sessionID: SessionSchema.ID) {
+    const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (
+      sessionID: SessionSchema.ID,
+      directory?: string,
+    ) {
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
       const cached = row ? fromRow(row) : undefined
+      if (directory) {
+        const fileSession = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (fileSession) return fileSession
+        if (cached && (yield* Effect.promise(() => isSameDirectory(directory, cached.location.directory))))
+          return cached
+        return undefined
+      }
       const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
@@ -134,8 +159,9 @@ export const layer = Layer.effect(
     const runnerEntries = Effect.fn("SessionStore.runnerEntries")(function* (
       sessionID: SessionSchema.ID,
       baselineSeq: number,
+      options?: { directory?: string },
     ) {
-      const fileSession = yield* resolveFileSession(sessionID)
+      const fileSession = yield* resolveFileSession(sessionID, options?.directory)
       if (fileSession) {
         const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
@@ -150,11 +176,11 @@ export const layer = Layer.effect(
     })
 
     return Service.of({
-      get: Effect.fn("SessionStore.get")(function* (sessionID) {
-        return yield* resolveFileSession(sessionID)
+      get: Effect.fn("SessionStore.get")(function* (sessionID, options) {
+        return yield* resolveFileSession(sessionID, options?.directory)
       }),
-      context: Effect.fn("SessionStore.context")(function* (sessionID) {
-        const fileSession = yield* resolveFileSession(sessionID)
+      context: Effect.fn("SessionStore.context")(function* (sessionID, options) {
+        const fileSession = yield* resolveFileSession(sessionID, options?.directory)
         if (fileSession) {
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
             Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
@@ -167,8 +193,8 @@ export const layer = Layer.effect(
         return stored
       }),
       runnerEntries,
-      runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq) {
-        return (yield* runnerEntries(sessionID, baselineSeq)).map((entry) => entry.message)
+      runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq, options) {
+        return (yield* runnerEntries(sessionID, baselineSeq, options)).map((entry) => entry.message)
       }),
       message: Effect.fn("SessionStore.message")(function* (messageID) {
         const row = yield* db

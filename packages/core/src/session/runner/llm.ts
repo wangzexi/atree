@@ -219,7 +219,9 @@ export const layer = Layer.effect(
       if ((yield* agents.select(current.agent)).id !== agent.id || !sameModel(current.model, session.model))
         return yield* Effect.die(rebuildPreparedTurn())
       const model = yield* models.resolve(session)
-      const entries = yield* store.runnerEntries(session.id, system.baselineSeq)
+      const entries = yield* store.runnerEntries(session.id, system.baselineSeq, {
+        directory: session.location.directory,
+      })
       const context = entries.map((entry) => entry.message)
       const toolMaterialization = yield* tools.materialize(agent.info?.permissions)
       const promptCacheKey = /^ses_[0-9a-f]{64}$/.test(session.id) ? session.id.slice(4) : session.id

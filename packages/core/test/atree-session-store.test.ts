@@ -1101,6 +1101,127 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("resolves SessionStore context by explicit directory before persisted root copies", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-dir-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-dir-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_explicit_dir")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Core store source",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Core store target",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_store_source",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_source",
+              messageID: "msg_core_store_source",
+              type: "text",
+              text: "source context should not leak",
+            },
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_store_target",
+              role: "user",
+              time: { created: 40 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_target",
+              messageID: "msg_core_store_target",
+              type: "text",
+              text: "target context from explicit directory",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      const context = yield* store.context(sessionID, { directory: target })
+      const entries = yield* store.runnerEntries(sessionID, 0, { directory: target })
+      const runnerContext = yield* store.runnerContext(sessionID, 0, { directory: target })
+
+      expect(context.map((message) => message.id)).toEqual([SessionMessage.ID.make("msg_core_store_target")])
+      expect(entries.map((entry) => [entry.seq, entry.message.id])).toEqual([
+        [1, SessionMessage.ID.make("msg_core_store_target")],
+      ])
+      expect(runnerContext.map((message) => message.id)).toEqual([
+        SessionMessage.ID.make("msg_core_store_target"),
+      ])
+    }),
+  )
+
+  storeIt.effect("does not resolve a cached child session from an explicit parent directory", () =>
+    Effect.gen(function* () {
+      const parent = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-parent-")))
+      const child = path.join(parent, "child")
+      yield* Effect.promise(() => mkdir(child, { recursive: true }))
+      const sessionID = SessionV2.ID.make("ses_core_store_parent_no_child")
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(child), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "parent-no-child",
+          directory: child,
+          title: "Child cached session",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      expect(yield* store.get(sessionID, { directory: parent })).toBeUndefined()
+      expect((yield* store.get(sessionID, { directory: child }))?.id).toBe(sessionID)
+    }),
+  )
+
   storeIt.effect("does not revive stale SQLite context when a file-backed session has no messages", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
