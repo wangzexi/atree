@@ -345,7 +345,7 @@ export const layer = Layer.effect(
     const result = Service.of({
       create: Effect.fn("V2Session.create")(function* (input) {
         const sessionID = input.id ?? SessionSchema.ID.create()
-        const recorded = yield* store.get(sessionID)
+        const recorded = yield* store.get(sessionID, { directory: input.location.directory })
         if (recorded) {
           yield* persistFileSession(recorded)
           return recorded
@@ -416,8 +416,9 @@ export const layer = Layer.effect(
           yield* persistFileSession(projected.session)
           return projected.session
         }
-        // TODO: Restore recorded sessions onto replacement synchronized workspaces in a future API slice.
-        const created = yield* result.get(sessionID).pipe(Effect.orDie)
+        const created = yield* Effect.promise(() => readSessionStore(input.location.directory, sessionID)).pipe(
+          Effect.flatMap((session) => (session ? Effect.succeed(session) : Effect.die("missing file-backed session"))),
+        )
         yield* persistFileSession(created)
         return created
       }),
@@ -428,6 +429,7 @@ export const layer = Layer.effect(
             Effect.catchCause(() => Effect.succeed(undefined)),
           )
           if (fileSession) return fileSession
+          return yield* new NotFoundError({ sessionID })
         }
         const session = yield* store.get(sessionID)
         if (!session) return yield* new NotFoundError({ sessionID })
@@ -717,7 +719,7 @@ export const layer = Layer.effect(
             type: SessionEvent.ModelSwitched.type,
             sessionID: input.sessionID,
             messageID,
-            timestamp,
+            timestamp: DateTime.toEpochMillis(timestamp),
             model: input.model,
           }),
         ).pipe(

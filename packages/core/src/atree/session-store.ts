@@ -583,7 +583,7 @@ function metaYaml(info: SessionSchema.Info) {
     `sessionVersion: "core"`,
     `projectID: ${yamlValue(info.projectID)}`,
     `workspaceID: ${yamlValue(info.location.workspaceID)}`,
-    `path: ${yamlValue(info.subpath ?? ".")}`,
+    `path: ${yamlValue(info.subpath)}`,
     `parentID: ${yamlValue(info.parentID)}`,
     `title: ${yamlValue(info.title)}`,
     `agent: ${yamlValue(info.agent)}`,

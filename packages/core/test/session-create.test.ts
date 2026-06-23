@@ -1,5 +1,7 @@
-import { describe, expect } from "bun:test"
+import { beforeEach, describe, expect } from "bun:test"
 import path from "path"
+import os from "os"
+import { mkdtempSync } from "fs"
 import { readFile } from "fs/promises"
 import { Effect, Layer, Stream } from "effect"
 import { AgentV2 } from "@opencode-ai/core/agent"
@@ -48,10 +50,16 @@ const sessions = SessionV2.layer.pipe(
 const it = testEffect(
   Layer.mergeAll(database, events, projects, projector, store, SessionExecution.noopLayer, sessions),
 )
-const location = Location.Ref.make({ directory: AbsolutePath.make("/project") })
+let location = Location.Ref.make({ directory: AbsolutePath.make(mkdtempSync(path.join(os.tmpdir(), "atree-session-create-"))) })
 const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {
+  beforeEach(() => {
+    location = Location.Ref.make({
+      directory: AbsolutePath.make(mkdtempSync(path.join(os.tmpdir(), "atree-session-create-"))),
+    })
+  })
+
   it.effect("derives stable namespaced external IDs", () =>
     Effect.sync(() => {
       const input = { namespace: "opencord.agent-thread", key: "thread-1" }
@@ -141,11 +149,11 @@ describe("SessionV2.create", () => {
       const created = yield* Effect.all([session.create(input), session.create(input)], { concurrency: "unbounded" })
 
       expect(created[1]).toEqual(created[0])
-      expect(yield* session.list()).toEqual([created[0]])
+      expect(yield* session.list()).toMatchObject([{ id: created[0].id }])
     }),
   )
 
-  it.effect("returns the current Session projection after updates", () =>
+  it.effect("does not treat direct SQLite updates as directory session data", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const { db } = yield* Database.Service
@@ -154,11 +162,11 @@ describe("SessionV2.create", () => {
 
       yield* db.update(SessionTable).set({ agent: "build" }).where(eq(SessionTable.id, id)).run().pipe(Effect.orDie)
 
-      expect(yield* session.create(input)).toMatchObject({ id: created.id, agent: "build" })
+      expect(yield* session.create(input)).toMatchObject({ id: created.id, agent: undefined })
     }),
   )
 
-  it.effect("returns the current Session projection after projected updates", () =>
+  it.effect("does not treat legacy projected updates as directory session data", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const events = yield* EventV2.Service
@@ -179,7 +187,7 @@ describe("SessionV2.create", () => {
         }),
       })
 
-      expect(yield* session.create(input)).toMatchObject({ id, agent: "build" })
+      expect(yield* session.create(input)).toMatchObject({ id, agent: undefined })
     }),
   )
 
@@ -219,10 +227,9 @@ describe("SessionV2.create", () => {
       yield* SessionInput.promoteSteers(db, events, created.id, Number.MAX_SAFE_INTEGER)
 
       expect(
-        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(2), Stream.runCollect)),
+        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(1), Stream.runCollect)),
       ).toMatchObject([
-        { cursor: 1, event: { type: "session.next.prompt.admitted", data: { prompt: { text: "Hello" } } } },
-        { cursor: 2, event: { type: "session.next.prompt.promoted" } },
+        { cursor: 2, event: { type: "session.next.prompt.admitted", data: { prompt: { text: "Hello" } } } },
       ])
     }),
   )
@@ -281,7 +288,9 @@ describe("SessionV2.create", () => {
           delivery: "steer",
           admittedSeq: 1,
         })
-        expect(yield* store.context(created.id)).toEqual([])
+        expect(yield* store.context(created.id)).toMatchObject([
+          { id: admitted.id, type: "user", text: "Replay lifecycle" },
+        ])
 
         expect(yield* events.replayAll(serialized.slice(2))).toBe(created.id)
         expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({

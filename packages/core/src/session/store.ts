@@ -1,7 +1,5 @@
 export * as SessionStore from "./store"
 
-import path from "path"
-import fs from "fs/promises"
 import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
@@ -18,15 +16,6 @@ import {
   readSessionStore,
   readWorkspaceRoot,
 } from "../atree/session-store"
-
-async function realpathOrResolve(input: string) {
-  return fs.realpath(input).catch(() => path.resolve(input))
-}
-
-async function isSameDirectory(left: string | undefined, right: string | undefined) {
-  if (!left || !right) return false
-  return (await realpathOrResolve(left)) === (await realpathOrResolve(right))
-}
 
 export interface Interface {
   readonly get: (
@@ -70,8 +59,6 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileSession) return fileSession
-        if (cached && (yield* Effect.promise(() => isSameDirectory(directory, cached.location.directory))))
-          return cached
         return undefined
       }
       const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
@@ -181,6 +168,7 @@ export const layer = Layer.effect(
             return yield* SessionHistory.load(db, sessionID)
           return messages
         }
+        if (options?.directory) return []
         const stored = yield* SessionHistory.load(db, sessionID)
         return stored
       }),
