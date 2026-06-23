@@ -1243,13 +1243,8 @@ describe("session HttpApi", () => {
           headers: { "x-opencode-directory": test.directory },
         })
         const contextBody = yield* responseJson(context)
-        expect(context.status).toBe(500)
-        expect(contextBody).toMatchObject({
-          _tag: "UnknownError",
-          message: "Unexpected server error. Check server logs for details.",
-        })
-        expect((contextBody as { ref?: unknown }).ref).toMatch(/^err_[0-9a-f-]{8}$/)
-        expect(JSON.stringify(contextBody)).not.toContain("assistant")
+        expect(context.status).toBe(200)
+        expect(contextBody).toEqual({ data: [] })
       }),
     { git: true, config: { formatter: false, lsp: false } },
   )

@@ -512,6 +512,13 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     if (projection.hasMessageEvents) return pageFileMessages(projection.messages, { limit: input.limit, before })
+    if (input.directory) {
+      return {
+        items: [] as WithParts[],
+        more: false,
+        cursor: undefined,
+      }
+    }
     const row = yield* db
       .select({ directory: SessionTable.directory })
       .from(SessionTable)

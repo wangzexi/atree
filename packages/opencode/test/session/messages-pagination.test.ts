@@ -1098,6 +1098,53 @@ describe("MessageV2 consistency", () => {
     }),
   )
 
+  it.instance("does not read explicit empty file-backed sessions from stale SQLite projections", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const database = yield* Database.Service
+      const created = yield* session.create({ title: "message-v2 explicit empty" })
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* database.db
+        .insert(MessageTable)
+        .values({
+          id: messageID,
+          session_id: created.id,
+          role: "user",
+          time_created: Date.now(),
+          data: {
+            role: "user",
+            agent: "test",
+            model: { providerID: "test", modelID: "test" },
+            tools: {},
+            mode: "",
+            time: { created: Date.now() },
+          },
+        } as typeof MessageTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* database.db
+        .insert(PartTable)
+        .values({
+          id: partID,
+          session_id: created.id,
+          message_id: messageID,
+          type: "text",
+          data: { type: "text", text: "stale explicit SQLite projection" },
+        } as typeof PartTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const page = yield* MessageV2.page({ sessionID: created.id, directory: instance.directory, limit: 10 })
+      const stream = yield* MessageV2.stream(created.id, { directory: instance.directory })
+
+      expect(page.items).toEqual([])
+      expect(stream).toEqual([])
+    }),
+  )
+
   it.instance("does not read persisted-root messages when the session store was removed", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
