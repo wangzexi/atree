@@ -17,7 +17,7 @@ import { SessionStore } from "@opencode-ai/core/session/store"
 import { readSessionStore, readSessionStoresDeep } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer, Stream } from "effect"
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "fs/promises"
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
 import { testEffect } from "./lib/effect"
@@ -3309,6 +3309,86 @@ describe("atree file-backed SessionV2 discovery", () => {
         type: "user",
         text: "asset attached",
         files: [{ uri: "data:text/plain;base64,aGVsbG8gYXNzZXQ=", mime: "text/plain", name: "hello.txt" }],
+      })
+    }),
+  )
+
+  it.effect("resolves copied user file assets from the explicit target directory", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID: "ses_core_copied_asset",
+          title: "Core copied asset",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        mkdir(path.join(source, ".agents", "atree", "sessions", "ses_core_copied_asset", "assets"), {
+          recursive: true,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeFile(
+          path.join(source, ".agents", "atree", "sessions", "ses_core_copied_asset", "assets", "hello.txt"),
+          "source asset",
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, "ses_core_copied_asset", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_copied_asset",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_copied_asset",
+              messageID: "msg_core_copied_asset",
+              type: "file",
+              mime: "text/plain",
+              filename: "hello.txt",
+              url: "assets/hello.txt",
+            },
+          },
+        ]),
+      )
+
+      yield* Effect.promise(() => mkdir(target, { recursive: true }))
+      yield* Effect.promise(() => cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+      yield* Effect.promise(() =>
+        writeFile(
+          path.join(target, ".agents", "atree", "sessions", "ses_core_copied_asset", "assets", "hello.txt"),
+          "target asset",
+        ),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_copied_asset"),
+        directory: AbsolutePath.make(target),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_copied_asset",
+        type: "user",
+        files: [{ uri: "data:text/plain;base64,dGFyZ2V0IGFzc2V0", mime: "text/plain", name: "hello.txt" }],
       })
     }),
   )
