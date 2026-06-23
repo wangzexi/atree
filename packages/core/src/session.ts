@@ -37,6 +37,8 @@ import {
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
+  readSessionStoresDeep,
+  readWorkspaceRoot,
   writeSessionStore,
 } from "./atree/session-store"
 
@@ -458,6 +460,26 @@ export const layer = Layer.effect(
                 )!,
           )
         }
+        const fileSessions =
+          "directory" in input
+            ? yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
+                Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+              )
+            : yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+                Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+                Effect.flatMap((root) =>
+                  root
+                    ? Effect.promise(() => readSessionStoresDeep(root)).pipe(
+                        Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+                      )
+                    : Effect.succeed([] as SessionSchema.Info[]),
+                ),
+              )
+        if (!("directory" in input) && fileSessions.length === 0) return []
+        const rootScopedFileIndex = !("directory" in input)
+        const itemKey = (item: Pick<SessionSchema.Info, "location" | "id">) =>
+          rootScopedFileIndex ? `${path.resolve(item.location.directory)}\n${item.id}` : item.id
+        const fileKeys = new Set(fileSessions.map(itemKey))
         const query = db
           .select()
           .from(SessionTable)
@@ -469,23 +491,18 @@ export const layer = Layer.effect(
         const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
           Effect.orDie,
         )
-        const fileSessions = "directory" in input
-          ? yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
-              Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
-            )
-          : undefined
-        const fileSessionIDs = fileSessions ? new Set(fileSessions.map((session) => session.id)) : undefined
         const byID = new Map<string, SessionSchema.Info>()
         for (const row of rows) {
-          if (fileSessionIDs && !fileSessionIDs.has(row.id)) continue
-          byID.set(row.id, fromRow(row))
+          const item = fromRow(row)
+          const key = itemKey(item)
+          if (!fileKeys.has(key)) continue
+          byID.set(key, item)
         }
-        if (fileSessions) {
-          for (const fileSession of fileSessions) {
-            byID.delete(fileSession.id)
-            if (!matchesListInput(fileSession, input, order)) continue
-            byID.set(fileSession.id, fileSession)
-          }
+        for (const fileSession of fileSessions) {
+          const key = itemKey(fileSession)
+          byID.delete(key)
+          if (!matchesListInput(fileSession, input, order)) continue
+          byID.set(key, fileSession)
         }
         const sessions = [...byID.values()].sort((a, b) => {
           const diff = sessionTimeCreated(a) - sessionTimeCreated(b) || a.id.localeCompare(b.id)

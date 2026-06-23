@@ -215,6 +215,103 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("does not list global SQLite sessions when no atree root is selected", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-no-root-data-")))
+      const node = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-no-root-node-")))
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make("ses_core_no_root_sqlite"),
+          project_id: Project.ID.global,
+          slug: "no-root-sqlite",
+          directory: node,
+          title: "No root SQLite",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sessions = yield* SessionV2.Service
+      const listed = yield* sessions.list({ limit: 10 })
+
+      expect(listed).toEqual([])
+    }),
+  )
+
+  it.effect("lists global sessions from the persisted atree root instead of SQLite rows", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-list-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-list-root-")))
+      const nested = path.join(root, "projects", "nested")
+      const outside = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-list-outside-")))
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: root,
+          sessionID: "ses_core_global_file_old",
+          title: "Global file old",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: nested,
+          sessionID: "ses_core_global_file_new",
+          title: "Global file new",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(outside), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: SessionV2.ID.make("ses_core_global_sqlite_stale"),
+          project_id: Project.ID.global,
+          slug: "global-sqlite-stale",
+          directory: outside,
+          title: "Global SQLite stale",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sessions = yield* SessionV2.Service
+      const listed = yield* sessions.list({ limit: 10 })
+
+      expect(listed.map((session) => session.id)).toEqual([
+        SessionV2.ID.make("ses_core_global_file_new"),
+        SessionV2.ID.make("ses_core_global_file_old"),
+      ])
+      expect(listed.map((session) => session.title)).toEqual(["Global file new", "Global file old"])
+    }),
+  )
+
   it.effect("sorts deep file-backed session scans by updated time", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-deep-order-data-")))
