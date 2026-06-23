@@ -236,6 +236,81 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("restores copied pending question and permission entries without collapsing duplicate ids", () =>
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const source = path.join(instance.directory, "source")
+      const target = path.join(instance.directory, "target")
+      const sessionID = "ses_copied_pending_runtime" as SessionID
+      const questionID = QuestionID.ascending("que_copied_runtime")
+      const permissionID = PermissionV1.ID.ascending("per_copied_runtime")
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "copied-pending-runtime",
+          version: "test",
+          projectID: "proj_copied_runtime",
+          directory: source,
+          path: "source",
+          title: "Copied pending runtime",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 2 },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          {
+            id: sessionID,
+            directory: source,
+          } as any,
+          {
+            type: "question.asked",
+            question: {
+              id: questionID,
+              sessionID,
+              questions: [
+                {
+                  question: "Restore copied question?",
+                  header: "Copy",
+                  options: [{ label: "Yes", description: "Keep both pending entries" }],
+                },
+              ],
+            },
+          },
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          {
+            id: sessionID,
+            directory: source,
+          } as any,
+          {
+            type: "permission.asked",
+            permission: {
+              id: permissionID,
+              sessionID,
+              permission: "bash",
+              patterns: ["echo copied"],
+              metadata: {},
+              always: [],
+            },
+          },
+        ),
+      )
+      yield* Effect.promise(() => fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+
+      expect((yield* questions.list()).map((item) => item.id)).toEqual([questionID, questionID])
+      expect((yield* permissions.list()).map((item) => item.id)).toEqual([permissionID, permissionID])
+    }),
+  )
+
   it.instance("records pending question and permission decisions in session.jsonl", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

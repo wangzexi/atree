@@ -11,6 +11,10 @@ export type InteractionState = {
   permissions: PermissionV1.Request[]
 }
 
+export type DirectoryScopedInteraction = {
+  directory?: string
+}
+
 function isRecord(value: unknown): value is RecordValue {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
@@ -57,7 +61,9 @@ export async function readSessionInteractionState(directory: string): Promise<In
       if (type === "question.asked") {
         const question = isRecord(data.question) ? data.question : data
         if (typeof question.id === "string") {
-          questions.set(pendingKey(session.directory, session.id, question.id), question as QuestionRequest)
+          const request = question as QuestionRequest & DirectoryScopedInteraction
+          Object.defineProperty(request, "directory", { value: session.directory, enumerable: false })
+          questions.set(pendingKey(session.directory, session.id, question.id), request)
         }
         continue
       }
@@ -69,7 +75,9 @@ export async function readSessionInteractionState(directory: string): Promise<In
       if (type === "permission.asked") {
         const permission = isRecord(data.permission) ? data.permission : data
         if (typeof permission.id === "string") {
-          permissions.set(pendingKey(session.directory, session.id, permission.id), permission as PermissionV1.Request)
+          const request = permission as PermissionV1.Request & DirectoryScopedInteraction
+          Object.defineProperty(request, "directory", { value: session.directory, enumerable: false })
+          permissions.set(pendingKey(session.directory, session.id, permission.id), request)
         }
         continue
       }

@@ -6,7 +6,7 @@ import { QuestionID } from "./schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
-import { readSessionInteractionState } from "@/atree/interaction-store"
+import { readSessionInteractionState, type DirectoryScopedInteraction } from "@/atree/interaction-store"
 
 // Schemas — these are pure data; nothing checks class identity (see PR
 // description) so they're plain `Schema.Struct` + type alias. That lets
@@ -109,7 +109,21 @@ interface PendingEntry {
 }
 
 interface State {
-  pending: Map<QuestionID, PendingEntry>
+  pending: Map<string, PendingEntry>
+}
+
+function pendingKey(info: Request) {
+  const directory = (info as Request & DirectoryScopedInteraction).directory
+  return directory ? `${directory}\0${info.sessionID}\0${info.id}` : String(info.id)
+}
+
+function findPending(pending: Map<string, PendingEntry>, requestID: QuestionID) {
+  const directKey = String(requestID)
+  const direct = pending.get(directKey)
+  if (direct) return [directKey, direct] as const
+  for (const [key, item] of pending.entries()) {
+    if (item.info.id === requestID) return [key, item] as const
+  }
 }
 
 // Service
@@ -140,11 +154,11 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed({ questions: [], permissions: [] })),
         )
         const state = {
-          pending: new Map<QuestionID, PendingEntry>(),
+          pending: new Map<string, PendingEntry>(),
         }
         for (const item of restored.questions) {
           const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
-          state.pending.set(item.id, { info: item, deferred, restored: true })
+          state.pending.set(pendingKey(item), { info: item, deferred, restored: true })
         }
 
         yield* Effect.addFinalizer(() =>
@@ -186,7 +200,7 @@ export const layer = Layer.effect(
         questions: input.questions,
         tool: input.tool,
       }
-      pending.set(id, { info, deferred })
+      pending.set(pendingKey(info), { info, deferred })
       yield* events.publish(Event.Asked, info)
       yield* appendAtreeSessionEventByIDBestEffort(info.sessionID, {
         type: "question.asked",
@@ -196,7 +210,7 @@ export const layer = Layer.effect(
       return yield* Effect.ensuring(
         Deferred.await(deferred),
         Effect.sync(() => {
-          pending.delete(id)
+          pending.delete(pendingKey(info))
         }),
       )
     })
@@ -206,12 +220,13 @@ export const layer = Layer.effect(
       answers: ReadonlyArray<Answer>
     }) {
       const pending = (yield* InstanceState.get(state)).pending
-      const existing = pending.get(input.requestID)
-      if (!existing) {
+      const found = findPending(pending, input.requestID)
+      if (!found) {
         yield* Effect.logWarning("reply for unknown request", { requestID: input.requestID })
         return yield* new NotFoundError({ requestID: input.requestID })
       }
-      pending.delete(input.requestID)
+      const [key, existing] = found
+      pending.delete(key)
       yield* Effect.logInfo("replied", { requestID: input.requestID, answers: input.answers })
       yield* events.publish(Event.Replied, {
         sessionID: existing.info.sessionID,
@@ -229,12 +244,13 @@ export const layer = Layer.effect(
 
     const reject = Effect.fn("Question.reject")(function* (requestID: QuestionID) {
       const pending = (yield* InstanceState.get(state)).pending
-      const existing = pending.get(requestID)
-      if (!existing) {
+      const found = findPending(pending, requestID)
+      if (!found) {
         yield* Effect.logWarning("reject for unknown request", { requestID })
         return yield* new NotFoundError({ requestID })
       }
-      pending.delete(requestID)
+      const [key, existing] = found
+      pending.delete(key)
       yield* Effect.logInfo("rejected", { requestID })
       yield* events.publish(Event.Rejected, {
         sessionID: existing.info.sessionID,

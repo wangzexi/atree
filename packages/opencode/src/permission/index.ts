@@ -8,7 +8,7 @@ import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
-import { readSessionInteractionState } from "@/atree/interaction-store"
+import { readSessionInteractionState, type DirectoryScopedInteraction } from "@/atree/interaction-store"
 
 export const Event = {
   Asked: EventV2.define({ type: "permission.asked", schema: PermissionV1.Request.fields }),
@@ -35,8 +35,29 @@ interface PendingEntry {
 }
 
 interface State {
-  pending: Map<PermissionV1.ID, PendingEntry>
+  pending: Map<string, PendingEntry>
   approved: PermissionV1.Rule[]
+}
+
+function pendingKey(info: PermissionV1.Request) {
+  const directory = (info as PermissionV1.Request & DirectoryScopedInteraction).directory
+  return directory ? `${directory}\0${info.sessionID}\0${info.id}` : info.id
+}
+
+function interactionDirectory(info: PermissionV1.Request) {
+  return (info as PermissionV1.Request & DirectoryScopedInteraction).directory
+}
+
+function sameInteractionScope(left: PermissionV1.Request, right: PermissionV1.Request) {
+  return left.sessionID === right.sessionID && interactionDirectory(left) === interactionDirectory(right)
+}
+
+function findPending(pending: Map<string, PendingEntry>, requestID: PermissionV1.ID) {
+  const direct = pending.get(requestID)
+  if (direct) return [requestID, direct] as const
+  for (const [key, item] of pending.entries()) {
+    if (item.info.id === requestID) return [key, item] as const
+  }
 }
 
 export function evaluate(permission: string, pattern: string, ...rulesets: PermissionV1.Ruleset[]): PermissionV1.Rule {
@@ -63,12 +84,12 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed({ questions: [], permissions: [] })),
         )
         const state = {
-          pending: new Map<PermissionV1.ID, PendingEntry>(),
+          pending: new Map<string, PendingEntry>(),
           approved: [],
         }
         for (const item of restored.permissions) {
           const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
-          state.pending.set(item.id, { info: item, deferred, restored: true })
+          state.pending.set(pendingKey(item), { info: item, deferred, restored: true })
         }
 
         yield* Effect.addFinalizer(() =>
@@ -128,7 +149,7 @@ export const layer = Layer.effect(
       yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
 
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
-      pending.set(id, { info, deferred })
+      pending.set(pendingKey(info), { info, deferred })
       yield* events.publish(Event.Asked, info)
       yield* appendAtreeSessionEventByIDBestEffort(info.sessionID, {
         type: "permission.asked",
@@ -137,17 +158,18 @@ export const layer = Layer.effect(
       return yield* Effect.ensuring(
         Deferred.await(deferred),
         Effect.sync(() => {
-          pending.delete(id)
+          pending.delete(pendingKey(info))
         }),
       )
     })
 
     const reply = Effect.fn("Permission.reply")(function* (input: PermissionV1.ReplyInput) {
       const { approved, pending } = yield* InstanceState.get(state)
-      const existing = pending.get(input.requestID)
-      if (!existing) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
+      const found = findPending(pending, input.requestID)
+      if (!found) return yield* new PermissionV1.NotFoundError({ requestID: input.requestID })
 
-      pending.delete(input.requestID)
+      const [key, existing] = found
+      pending.delete(key)
       yield* events.publish(Event.Replied, {
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
@@ -169,7 +191,7 @@ export const layer = Layer.effect(
         )
 
         for (const [id, item] of pending.entries()) {
-          if (item.info.sessionID !== existing.info.sessionID) continue
+          if (!sameInteractionScope(item.info, existing.info)) continue
           pending.delete(id)
           yield* events.publish(Event.Replied, {
             sessionID: item.info.sessionID,
@@ -199,7 +221,7 @@ export const layer = Layer.effect(
       }
 
       for (const [id, item] of pending.entries()) {
-        if (item.info.sessionID !== existing.info.sessionID) continue
+        if (!sameInteractionScope(item.info, existing.info)) continue
         const ok = item.info.patterns.every(
           (pattern) => evaluate(item.info.permission, pattern, approved).action === "allow",
         )
