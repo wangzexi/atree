@@ -925,6 +925,10 @@ export const layer: Layer.Layer<
         return [...byID.values()]
       }
 
+      const parent = yield* getWithDirectory(parentID, options?.directory).pipe(
+        Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)),
+      )
+      if (!parent) return []
       const rows = yield* db
         .select()
         .from(SessionTable)
@@ -936,11 +940,8 @@ export const layer: Layer.Layer<
         if (item.time.archived !== undefined) continue
         byID.set(item.id, item)
       }
-      const parent = yield* getWithDirectory(parentID, options?.directory).pipe(
-        Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)),
-      )
       const directory =
-        parent?.directory ??
+        parent.directory ??
         options?.directory ??
         ctx?.directory ??
         (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))

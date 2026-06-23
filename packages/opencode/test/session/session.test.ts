@@ -662,6 +662,40 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not read persisted-root children when the parent session store was removed", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-children-missing-root-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      const parent = yield* session.create({ title: "children-root-parent" })
+      const child = yield* session.create({ parentID: parent.id, title: "children-root-child" })
+
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", parent.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", child.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const children = yield* session.children(parent.id)
+      expect(children.map((item) => item.id)).not.toContain(child.id)
+      expect(children).toEqual([])
+    }),
+  )
+
   it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
