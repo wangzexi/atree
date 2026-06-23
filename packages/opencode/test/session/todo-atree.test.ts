@@ -172,6 +172,54 @@ describe("atree todo state", () => {
     }),
   )
 
+  it.instance("does not read or write unscoped todos for a missing file-backed session", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const todo = yield* Todo.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+      const session = yield* sessions.create({ title: "todo-unscoped-cached-only" })
+
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: session.id,
+          content: "stale unscoped todo",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", session.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      expect(yield* todo.get(session.id)).toEqual([])
+      yield* todo.update({
+        sessionID: session.id,
+        todos: [{ content: "should not be written", status: "pending", priority: "high" }],
+      })
+
+      const rows = yield* db
+        .select()
+        .from(TodoTable)
+        .where(eq(TodoTable.session_id, session.id))
+        .all()
+        .pipe(Effect.orDie)
+      expect(rows).toEqual([
+        expect.objectContaining({
+          content: "stale unscoped todo",
+          status: "pending",
+          priority: "low",
+        }),
+      ])
+    }),
+  )
+
   it.instance("reads todo state for a file-backed session without a database row", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service
