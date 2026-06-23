@@ -405,6 +405,28 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "does not serve sessions from another directory through the current directory routes",
+    () =>
+      Effect.gen(function* () {
+        const current = yield* TestInstance
+        const other = yield* tmpdirScoped({ git: true })
+        const headers = { "x-opencode-directory": current.directory }
+        const otherSession = yield* createSession({ title: "other directory" }).pipe(
+          provideInstanceEffect(other),
+        )
+
+        const response = yield* request(pathFor(SessionPaths.get, { sessionID: otherSession.id }), { headers })
+
+        expect(response.status).toBe(404)
+        expect(yield* responseJson(response)).toEqual({
+          name: "NotFoundError",
+          data: { message: `Session not found: ${otherSession.id}` },
+        })
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
     "serves file-backed message read routes when database cache is missing",
     () =>
       Effect.gen(function* () {
@@ -918,7 +940,7 @@ describe("session HttpApi", () => {
     { git: true, config: { formatter: false, lsp: false } },
   )
 
-  it.live("uses the persisted session directory for prompt requests", () =>
+  it.live("does not use another persisted session directory for explicit prompt requests", () =>
     Effect.gen(function* () {
       const llm = yield* TestLLMServer
       yield* llm.text("ok", { usage: { input: 1, output: 1 } })
@@ -943,16 +965,10 @@ describe("session HttpApi", () => {
         },
       )
 
-      expect(response.status).toBe(200)
-      yield* responseJson(response)
-
-      const messages = yield* Session.use
-        .messages({ sessionID: session.id })
-        .pipe(provideInstanceEffect(sessionDirectory), Effect.orDie)
-      const assistant = messages.find((message) => message.info.role === "assistant")
-      expect(assistant?.info.role === "assistant" ? assistant.info.path : undefined).toEqual({
-        cwd: sessionDirectory,
-        root: sessionDirectory,
+      expect(response.status).toBe(404)
+      expect(yield* responseJson(response)).toEqual({
+        name: "NotFoundError",
+        data: { message: `Session not found: ${session.id}` },
       })
     }).pipe(Effect.provide(TestLLMServer.layer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
   )
@@ -1268,7 +1284,7 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
-    "serves a nested file-backed session from the persisted atree root without a database cache",
+    "does not serve a nested file-backed session through the persisted atree root directory",
     () =>
       Effect.gen(function* () {
         const test = yield* TestInstance
@@ -1288,11 +1304,10 @@ describe("session HttpApi", () => {
           headers: { "x-opencode-directory": test.directory },
         })
 
-        expect(response.status).toBe(200)
-        expect(yield* json<Session.Info>(response)).toMatchObject({
-          id: created.id,
-          title: "http nested",
-          directory: nodeDirectory,
+        expect(response.status).toBe(404)
+        expect(yield* responseJson(response)).toEqual({
+          name: "NotFoundError",
+          data: { message: `Session not found: ${created.id}` },
         })
       }),
     { git: true, config: { formatter: false, lsp: false } },
@@ -1681,9 +1696,7 @@ describe("session HttpApi", () => {
         })
         const messages = yield* request(
           `${pathFor(SessionPaths.messages, { sessionID: created.id })}?workspace=${workspace.id}`,
-          {
-            headers: { "x-opencode-directory": test.directory },
-          },
+          {},
         )
 
         expect(created).toMatchObject({ id: created.id, workspaceID: workspace.id })

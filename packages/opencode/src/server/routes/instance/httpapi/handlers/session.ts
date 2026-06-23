@@ -111,20 +111,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         Effect.catchCause(() => Effect.succeed({ directory: undefined } as { directory?: string })),
       )
       const scoped = session.get(sessionID, { directory: context.directory })
-      const found = context.directory
-        ? yield* scoped.pipe(
-            Effect.catchIf(NotFoundError.isInstance, () =>
-              session.get(sessionID).pipe(
-                Effect.flatMap((fallback) =>
-                  path.resolve(fallback.directory) === path.resolve(context.directory!)
-                    ? Effect.fail(new NotFoundError({ message: `Session not found: ${sessionID}` }))
-                    : Effect.succeed(fallback),
-                ),
-              ),
-            ),
-            SessionError.mapStorageNotFound,
-          )
-        : yield* SessionError.mapStorageNotFound(scoped)
+      const found = yield* SessionError.mapStorageNotFound(scoped)
       return found
     })
 
