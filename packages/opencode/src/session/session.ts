@@ -585,7 +585,7 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/Se
 
 export const use = serviceUse(Service)
 
-export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" | "permission"> & {
+export type Patch = Omit<Partial<Info>, "time" | "summary" | "revert" | "permission"> & {
   time?: Partial<Omit<Info["time"], "archived">> & { archived?: Info["time"]["archived"] | null }
   summary?: Info["summary"] | null
   revert?: Info["revert"] | null

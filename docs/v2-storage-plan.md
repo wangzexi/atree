@@ -187,7 +187,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 创建会话会写入 `.agents/atree/sessions/<session-id>/meta.yaml`、`session.jsonl` 和 `assets/`。
 - core `SessionV2.create` 在真实可写目录中也会创建 `.agents/atree/sessions/<session-id>/` 骨架；对不可写的旧测试/虚拟目录，目录镜像失败不会阻断原有 SQLite 创建流程。
 - core `SessionV2.create` 和 opencode `Session.create` 会把 `session.created` 追加到当前会话目录的 `session.jsonl`；如果 `meta.yaml` 投影缺失，session store 可以从创建事件恢复会话元数据，再叠加后续 `session.updated` 事件。
-- opencode 的标题、归档、icon/metadata、permission、summary/share/revert/workspace 等会话元数据更新会先追加 `session.updated` 到 `session.jsonl`，再刷新 `meta.yaml` 和 SQLite 投影；如果投影刷新前中断，后续读取仍能从 JSONL 恢复最新元数据。
+- opencode 的标题、归档、icon/metadata、permission、summary/revert/workspace 等会话元数据更新会先追加 `session.updated` 到 `session.jsonl`，再刷新 `meta.yaml` 和 SQLite 投影；如果投影刷新前中断，后续读取仍能从 JSONL 恢复最新元数据。
 - opencode 读取 file-backed session 时也会从 `session.updated` JSONL 重放 `agent`、`model`、`cost`、`tokens`、`projectID`、`parentID`、`path` 和时间字段；完整 info 事件和局部 patch 事件都可以覆盖陈旧 `meta.yaml`。
 - 会话列表会扫描 `sessions/*/meta.yaml`，并用目录文件覆盖陈旧 SQLite row。
 - 显式按目录读取会话列表时，目录下 `sessions/*/meta.yaml` 是成员事实源；只有 SQLite 中存在但目录文件已不存在的缓存会话不会再出现在 active、archived 或 core `SessionV2.list({ directory })` 结果里。
@@ -199,7 +199,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - file-backed session 回填 SQLite 缓存时会保护已有仍有效的目录行；如果同一个 session id 已经在另一个仍有 `meta.yaml` 的目录中存在，显式读取复制目录不会把全局缓存行漂移到复制目录。
 - opencode session 模块在判断消息/part 投影缓存是否属于当前目录、以及按 path 查询旧 legacy directory session 时，也使用规范化后的目录比较，避免等价路径导致目录事实源被误判为旧缓存。
 - 标题、emoji/metadata、归档状态、workspace/project identity、compacting time 等会话元数据会持久化到 `meta.yaml`。
-- 显式标题、emoji/metadata、权限、归档状态、workspace、share、summary 和 revert 状态变更会追加到当前会话目录的 `session.jsonl`，让会话状态变化也成为目录原始记录的一部分。
+- 显式标题、emoji/metadata、权限、归档状态、workspace、summary 和 revert 状态变更会追加到当前会话目录的 `session.jsonl`，让会话状态变化也成为目录原始记录的一部分。
 - 读取会话元数据时会重放 `session.jsonl` 中的 `session.updated` 事件覆盖陈旧 `meta.yaml`；目录会话列表排序也会使用这些事件推进后的 `updatedAt`。
 - core `SessionV2.get({ directory })` 读取 file-backed session 时也会重放 `session.updated`，因此标题、归档状态和 `updatedAt` 不再只依赖陈旧 `meta.yaml`。
 - core `SessionV2.get({ directory })` 重放 `session.updated` 时也会恢复 `workspaceID`，让目录会话的 workspace 归属可以从 `session.jsonl` 事件恢复。
@@ -216,8 +216,6 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - Shell 执行内部的 session resolve 也使用传入的目录上下文；shell 用户消息、工具 part 和后续恢复 loop 会继续写入当前目录会话。
 - Summary diff/summarize 读取和写入也接受目录上下文；HTTP diff 会用解析出的当前 session 目录读取消息摘要，避免同 session id 的旧缓存目录影响 diff 展示。
 - Revert/unrevert 也接受目录上下文；HTTP revert/unrevert 会把当前 session 目录传给回滚链路，让 revert 状态、message/part 清理继续落在目录会话内。
-- Share/unshare 写入 share 元数据时也接受目录上下文；HTTP share/unshare 会把当前 session 目录传给 metadata 写入链路。
-- ShareNext 创建分享后的 full sync 也会继续使用显式目录上下文；复制 `.agents/atree/` 到目标目录后，首次分享同步出去的 session/messages/diffs 会来自目标目录事实源，而不是源目录或全局 SQLite 缓存。
 - CLI `import` 导入分享或 JSON 文件时，会先写入当前目录的 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl`，再刷新 SQLite 兼容投影；导入来的会话不再只是全局数据库里的会话。
 - CLI `import` 的 SQLite session/message/part 回填只是兼容投影；目录事实源写入成功后，即使兼容投影因为缺少旧 project row 或外键状态失败，也不会阻断导入。
 - CLI `stats` 聚合会话时会通过 `Session.listGlobal()` 和带目录上下文的 `Session.messages()` 读取；只有目录事实源、没有 SQLite session row 的会话也会被统计。
