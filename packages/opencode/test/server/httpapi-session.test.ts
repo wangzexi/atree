@@ -1872,6 +1872,10 @@ describe("session HttpApi", () => {
           }).pipe(Effect.provideService(TestInstance, { directory: currentDir }), Effect.provide(Session.defaultLayer)),
         )
         yield* clearSessionPath(pathlessSession.id)
+        const pathlessStore = yield* Effect.promise(() => readSessionStore(currentDir, pathlessSession.id))
+        if (pathlessStore) {
+          yield* Effect.promise(() => writeSessionStore({ ...pathlessStore, path: undefined }))
+        }
 
         const query = new URLSearchParams({
           scope: "project",
