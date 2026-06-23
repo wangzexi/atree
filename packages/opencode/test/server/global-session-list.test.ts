@@ -36,28 +36,19 @@ const withSession = (input?: Parameters<SessionNs.Interface["create"]>[0]) =>
 
 describe("session.listGlobal", () => {
   it.instance(
-    "scopes an unqualified global list to the current instance when no atree root is persisted",
+    "returns no unqualified global sessions when no atree root is persisted",
     () =>
       Effect.gen(function* () {
-        const first = yield* TestInstance
         const second = yield* tmpdirScoped({ git: true })
 
         const firstSession = yield* withSession({ title: "first-session" })
-        const secondSession = yield* withSession({ title: "second-session" }).pipe(provideInstance(second))
+        yield* withSession({ title: "second-session" }).pipe(provideInstance(second))
 
         const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200 }))
         const ids = sessions.map((session) => session.id)
 
-        expect(ids).toContain(firstSession.id)
-        expect(ids).not.toContain(secondSession.id)
-
-        const firstProject = yield* Project.use.get(firstSession.projectID)
-
-        const firstItem = sessions.find((session) => session.id === firstSession.id)
-
-        expect(firstItem?.project?.id).toBe(firstProject?.id)
-        expect(firstItem?.project?.worktree).toBe(firstProject?.worktree)
-        expect(first.directory).not.toBe(second)
+        expect(ids).not.toContain(firstSession.id)
+        expect(sessions).toEqual([])
       }),
     { git: true },
   )
@@ -66,6 +57,8 @@ describe("session.listGlobal", () => {
     "excludes archived sessions by default",
     () =>
       Effect.gen(function* () {
+        const test = yield* TestInstance
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
         const archived = yield* withSession({ title: "archived-session" })
 
         yield* SessionNs.Service.use((session) => session.setArchived({ sessionID: archived.id, time: Date.now() }))
@@ -91,6 +84,7 @@ describe("session.listGlobal", () => {
       Effect.gen(function* () {
         const test = yield* TestInstance
         const ctx = yield* InstanceState.context
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
 
         yield* Effect.promise(() =>
           writeSessionStore({

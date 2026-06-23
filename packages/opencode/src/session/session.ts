@@ -787,6 +787,14 @@ export const layer: Layer.Layer<
       const ctx = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
+      const directoryInput = input?.directory ? input : undefined
+      const rootDirectory = directoryInput
+        ? undefined
+        : yield* Effect.promise(() => readWorkspaceState()).pipe(
+            Effect.map((state) => state.rootDirectory ?? undefined),
+            Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+          )
+      if (!directoryInput && !rootDirectory) return []
       const conditions: SQL[] = []
       if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
       if (input?.roots) conditions.push(isNull(SessionTable.parent_id))
@@ -807,13 +815,6 @@ export const layer: Layer.Layer<
         .limit(input?.limit ?? 100)
         .all()
         .pipe(Effect.orDie)
-      const directoryInput = input?.directory ? input : undefined
-      const rootDirectory = directoryInput
-        ? undefined
-        : yield* Effect.promise(() => readWorkspaceState()).pipe(
-            Effect.map((state) => state.rootDirectory ?? ctx?.directory),
-            Effect.catchCause(() => Effect.succeed<string | undefined>(ctx?.directory)),
-          )
       const fileSessions = directoryInput
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
         : rootDirectory
