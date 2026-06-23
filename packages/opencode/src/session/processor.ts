@@ -554,6 +554,7 @@ export const layer = Layer.effect(
               permission: "doom_loop",
               patterns: [value.name],
               sessionID: ctx.assistantMessage.sessionID,
+              directory: currentSession.directory,
               metadata: { tool: value.name, input },
               always: [value.name],
               ruleset: agent.permission,

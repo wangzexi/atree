@@ -23,6 +23,7 @@ export const QuestionTool = Tool.define<typeof Parameters, Metadata, Question.Se
         Effect.gen(function* () {
           const answers = yield* question.ask({
             sessionID: ctx.sessionID,
+            directory: ctx.directory,
             questions: params.questions,
             tool: ctx.callID ? { messageID: ctx.messageID, callID: ctx.callID } : undefined,
           })

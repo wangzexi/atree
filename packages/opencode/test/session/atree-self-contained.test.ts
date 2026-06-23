@@ -401,6 +401,83 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("writes newly asked question and permission replies to their explicit directory", () =>
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const source = path.join(instance.directory, "source-new-writeback")
+      const target = path.join(instance.directory, "target-new-writeback")
+      const sessionID = "ses_new_pending_writeback" as SessionID
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "new-pending-writeback",
+          version: "test",
+          projectID: "proj_new_writeback",
+          directory: source,
+          path: "source-new-writeback",
+          title: "New pending writeback",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 2 },
+        } as any),
+      )
+      yield* Effect.promise(() => fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+
+      const questionFiber = yield* questions
+        .ask({
+          sessionID,
+          directory: target,
+          questions: [
+            {
+              question: "Write new question reply to target?",
+              header: "Target",
+              options: [{ label: "Yes", description: "Append to target" }],
+            },
+          ],
+        })
+        .pipe(Effect.forkScoped)
+      const pendingQuestion = yield* waitFor(questions.list().pipe(Effect.map((items) => items[0])))
+      yield* questions.reply({ requestID: pendingQuestion.id, answers: [["Yes"]] })
+      yield* Fiber.join(questionFiber)
+
+      const permissionFiber = yield* permissions
+        .ask({
+          sessionID,
+          directory: target,
+          permission: "bash",
+          patterns: ["echo target"],
+          metadata: {},
+          always: [],
+          ruleset: [],
+        })
+        .pipe(Effect.forkScoped)
+      const pendingPermission = yield* waitFor(permissions.list().pipe(Effect.map((items) => items[0])))
+      yield* permissions.reply({ requestID: pendingPermission.id, reply: "once" })
+      yield* Fiber.join(permissionFiber)
+
+      const sourceRaw = yield* Effect.promise(() =>
+        fs.readFile(path.join(source, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const targetRaw = yield* Effect.promise(() =>
+        fs.readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+
+      expect(sourceRaw).not.toContain("question.asked")
+      expect(sourceRaw).not.toContain("question.replied")
+      expect(sourceRaw).not.toContain("permission.asked")
+      expect(sourceRaw).not.toContain("permission.replied")
+      expect(targetRaw).toContain("question.asked")
+      expect(targetRaw).toContain("question.replied")
+      expect(targetRaw).toContain("permission.asked")
+      expect(targetRaw).toContain("permission.replied")
+    }),
+  )
+
   it.instance("records pending question and permission decisions in session.jsonl", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

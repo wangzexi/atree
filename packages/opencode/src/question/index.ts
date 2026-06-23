@@ -135,6 +135,7 @@ function findPending(pending: Map<string, PendingEntry>, requestID: QuestionID) 
 export interface Interface {
   readonly ask: (input: {
     sessionID: SessionID
+    directory?: string
     questions: ReadonlyArray<Info>
     tool?: Tool
   }) => Effect.Effect<ReadonlyArray<Answer>, RejectedError>
@@ -190,6 +191,7 @@ export const layer = Layer.effect(
 
     const ask = Effect.fn("Question.ask")(function* (input: {
       sessionID: SessionID
+      directory?: string
       questions: ReadonlyArray<Info>
       tool?: Tool
     }) {
@@ -204,6 +206,7 @@ export const layer = Layer.effect(
         questions: input.questions,
         tool: input.tool,
       }
+      if (input.directory) Object.defineProperty(info, "directory", { value: input.directory, enumerable: false })
       pending.set(pendingKey(info), { info, deferred })
       yield* events.publish(Event.Asked, info)
       yield* appendAtreeSessionEventBestEffort(interactionDirectory(info), info.sessionID, {

@@ -23,10 +23,12 @@ export const Event = {
 }
 
 export interface Interface {
-  readonly ask: (input: PermissionV1.AskInput) => Effect.Effect<void, PermissionV1.Error>
+  readonly ask: (input: PermissionAskInput) => Effect.Effect<void, PermissionV1.Error>
   readonly reply: (input: PermissionV1.ReplyInput) => Effect.Effect<void, PermissionV1.NotFoundError>
   readonly list: () => Effect.Effect<ReadonlyArray<PermissionV1.Request>>
 }
+
+type PermissionAskInput = PermissionV1.AskInput & { directory?: string }
 
 interface PendingEntry {
   info: PermissionV1.Request
@@ -117,7 +119,7 @@ export const layer = Layer.effect(
       }),
     )
 
-    const ask = Effect.fn("Permission.ask")(function* (input: PermissionV1.AskInput) {
+    const ask = Effect.fn("Permission.ask")(function* (input: PermissionAskInput) {
       const { approved, pending } = yield* InstanceState.get(state)
       const { ruleset, ...request } = input
       let needsAsk = false
@@ -146,6 +148,7 @@ export const layer = Layer.effect(
         always: request.always,
         tool: request.tool,
       }
+      if (input.directory) Object.defineProperty(info, "directory", { value: input.directory, enumerable: false })
       yield* Effect.logInfo("asking", { id, permission: info.permission, patterns: info.patterns })
 
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()

@@ -66,6 +66,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
         .ask({
           ...req,
           sessionID: input.session.id,
+          directory: input.session.directory,
           tool: { messageID: input.processor.message.id, callID: options.toolCallId },
           ruleset: Permission.merge(input.agent.permission, input.session.permission ?? []),
         })
