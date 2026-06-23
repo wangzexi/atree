@@ -1844,8 +1844,8 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
   await appendJsonl(sessionJsonl(info), entries)
 }
 
-export async function readSessionJsonlEntries(info: SessionSchema.Info) {
-  const raw = await fs.readFile(sessionJsonl(info), "utf8").catch((error: unknown) => {
+async function readSessionJsonlEntriesFromPath(target: string) {
+  const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
     throw error
   })
@@ -1865,6 +1865,10 @@ export async function readSessionJsonlEntries(info: SessionSchema.Info) {
   return entries
 }
 
+export async function readSessionJsonlEntries(info: SessionSchema.Info) {
+  return readSessionJsonlEntriesFromPath(sessionJsonl(info))
+}
+
 export type SessionPromptState = {
   readonly messageID: SessionMessage.ID
   readonly delivery: SessionInput.Delivery
@@ -1876,8 +1880,16 @@ export type SessionPromptState = {
 }
 
 export async function readSessionPromptStates(info: SessionSchema.Info) {
+  return readSessionPromptStatesFromEntries(await readSessionJsonlEntries(info))
+}
+
+export async function readSessionPromptStatesByID(directory: string, sessionID: SessionSchema.ID) {
+  return readSessionPromptStatesFromEntries(await readSessionJsonlEntriesFromPath(path.join(sessionRootByID(directory, sessionID), "session.jsonl")))
+}
+
+function readSessionPromptStatesFromEntries(entries: Array<{ index: number; entry: Record<string, unknown> }>) {
   const states = new Map<SessionMessage.ID, SessionPromptState>()
-  for (const { index, entry } of await readSessionJsonlEntries(info)) {
+  for (const { index, entry } of entries) {
     const type = baseEventType(entry.type)
     if (
       type !== "session.next.prompted" &&

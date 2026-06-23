@@ -3,7 +3,7 @@ export * as SessionContextEpoch from "./context-epoch"
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
 import { AgentV2 } from "../agent"
-import { readSessionStore } from "../atree/session-store"
+import { readSessionPromptStatesByID, readSessionStore } from "../atree/session-store"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { Location } from "../location"
@@ -99,7 +99,7 @@ const prepareOnce = Effect.fnUntraced(function* (
     return { baseline: stored.baseline, baselineSeq: stored.baseline_seq, revision: stored.revision }
   }
   if (result._tag === "ReplacementReady") {
-    const replacementSeq = stored.replacement_seq ?? (yield* SessionInput.latestSeq(db, sessionID))
+    const replacementSeq = stored.replacement_seq ?? (yield* latestInputSeq(db, sessionID, location))
     yield* replace(db, sessionID, agent, stored.revision, replacementSeq, result.generation)
     return { baseline: result.generation.baseline, baselineSeq: replacementSeq, revision: stored.revision + 1 }
   }
@@ -165,6 +165,23 @@ const requireAgentSelection = Effect.fnUntraced(function* (
   if (!selected || (selected.agent !== null && selected.agent !== agent)) return yield* Effect.die(new AgentMismatch())
 })
 
+const latestInputSeq = Effect.fnUntraced(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  location: Location.Ref,
+) {
+  const fileStates = yield* Effect.promise(() => readSessionPromptStatesByID(location.directory, sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(new Map())),
+  )
+  if (fileStates.size > 0)
+    return Math.max(-1, ...[...fileStates.values()].map((state) => state.promotedSeq ?? state.admittedSeq))
+  const fileSession = yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(undefined)),
+  )
+  if (fileSession) return -1
+  return yield* SessionInput.latestSeq(db, sessionID)
+})
+
 export const requestReplacement = Effect.fn("SessionContextEpoch.requestReplacement")(function* (
   db: DatabaseService,
   sessionID: SessionSchema.ID,
@@ -203,6 +220,7 @@ const insert = Effect.fnUntraced(function* (
   generation: SystemContext.Generation,
 ) {
   yield* ensurePlacedSession(db, sessionID, location)
+  const baselineSeq = yield* latestInputSeq(db, sessionID, location)
   return yield* db
     .transaction(
       () =>
@@ -223,7 +241,6 @@ const insert = Effect.fnUntraced(function* (
             .pipe(Effect.orDie)
           if (!placed) return yield* Effect.die(new LocationMismatch())
           if (placed.agent !== null && placed.agent !== agent) return yield* Effect.die(new AgentMismatch())
-          const baselineSeq = yield* SessionInput.latestSeq(db, sessionID)
           yield* db
             .insert(SessionContextEpochTable)
             .values({

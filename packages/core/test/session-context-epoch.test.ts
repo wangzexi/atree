@@ -13,7 +13,13 @@ import { AgentV2 } from "@opencode-ai/core/agent"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionContextEpoch } from "@opencode-ai/core/session/context-epoch"
 import { SessionTable } from "@opencode-ai/core/session/sql"
-import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import {
+  appendSessionJsonl,
+  readSessionPromptStates,
+  readSessionPromptStatesByID,
+  readSessionStore,
+  writeSessionStore,
+} from "@opencode-ai/core/atree/session-store"
 import { SystemContext } from "@opencode-ai/core/system-context"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
@@ -114,8 +120,23 @@ it.effect("prepares context epochs for file-backed sessions without SQLite rows"
       agent,
     })
     yield* Effect.promise(() => writeSessionStore(session))
+    yield* Effect.promise(() =>
+      appendSessionJsonl(session, {
+        type: "session.next.prompt.admitted",
+        sessionID,
+        messageID: "msg_context_epoch_file_prompt",
+        timestamp: 10,
+        prompt: { text: "file-backed prompt before context" },
+        delivery: "steer",
+      }),
+    )
     const { db } = yield* Database.Service
     const events = yield* EventV2.Service
+    expect((yield* Effect.promise(() => readSessionPromptStates(session))).size).toBe(1)
+    const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+    expect(stored).toBeDefined()
+    expect(stored ? (yield* Effect.promise(() => readSessionPromptStates(stored))).size : 0).toBe(1)
+    expect((yield* Effect.promise(() => readSessionPromptStatesByID(directory, sessionID))).size).toBe(1)
 
     let contextText = "Initial context"
     const context = () =>
@@ -129,6 +150,7 @@ it.effect("prepares context epochs for file-backed sessions without SQLite rows"
 
     const prepared = yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent)
     expect(prepared.revision).toBe(0)
+    expect(prepared.baselineSeq).toBe(1)
     expect(
       yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
     ).toBeDefined()
