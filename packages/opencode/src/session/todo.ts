@@ -9,6 +9,7 @@ import { asc } from "drizzle-orm"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
 import { appendSessionJsonl, readSessionStore } from "@/atree/session-store"
@@ -177,6 +178,10 @@ export const layer = Layer.effect(
       )
     })
 
+    function todoLocation(session: FileSession | undefined) {
+      return session ? { location: new Location.Ref({ directory: AbsolutePath.make(session.directory) }) } : undefined
+    }
+
     const update = Effect.fn("Todo.update")(function* (input: {
       sessionID: SessionID
       todos: Info[]
@@ -221,7 +226,7 @@ export const layer = Layer.effect(
       if (fileSession) {
         yield* Effect.promise(() => writeSessionTodoState(fileSession.directory, input.sessionID, input.todos))
       }
-      yield* events.publish(Event.Updated, input)
+      yield* events.publish(Event.Updated, input, todoLocation(fileSession))
     })
 
     const get = Effect.fn("Todo.get")(function* (sessionID: SessionID, options?: { directory?: string }) {

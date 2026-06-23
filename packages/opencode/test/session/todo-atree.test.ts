@@ -12,13 +12,14 @@ import { Effect, Layer } from "effect"
 import { readSessionTodoState, writeSessionTodoState } from "../../src/atree/todo-store"
 import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
 import { writeWorkspaceRoot } from "../../src/atree/state"
+import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Session } from "../../src/session/session"
 import { type SessionID } from "../../src/session/schema"
 import { Todo } from "../../src/session/todo"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
 
-const it = testEffect(Layer.mergeAll(Todo.defaultLayer, Session.defaultLayer, Database.defaultLayer))
+const it = testEffect(Layer.mergeAll(Todo.defaultLayer, Session.defaultLayer, Database.defaultLayer, EventV2Bridge.defaultLayer))
 
 describe("atree todo state", () => {
   it.instance("writes todo updates to directory state", () =>
@@ -585,6 +586,13 @@ describe("atree todo state", () => {
         (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
       )
       const session = yield* sessions.create({ title: "copied-todo" })
+      const events = yield* EventV2Bridge.Service
+      const eventDirectories: string[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type === Todo.Event.Updated.type) eventDirectories.push(event.location?.directory ?? "")
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
 
       yield* Effect.promise(() =>
         writeSessionTodoState(source.directory, session.id, [
@@ -607,6 +615,7 @@ describe("atree todo state", () => {
       expect(yield* Effect.promise(() => readSessionTodoState(source.directory, session.id))).toEqual([
         { content: "source todo", status: "pending", priority: "low" },
       ])
+      expect(eventDirectories).toEqual([target])
     }),
   )
 
