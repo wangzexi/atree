@@ -3205,6 +3205,12 @@ describe("atree file-backed SessionV2 discovery", () => {
       yield* Effect.promise(() =>
         appendSessionJsonl(node, "ses_core_compaction", [
           {
+            type: "session.next.compaction.started",
+            messageID: "msg_core_compaction",
+            reason: "auto",
+            timestamp: 20,
+          },
+          {
             type: "session.next.compaction.ended",
             messageID: "msg_core_compaction",
             reason: "auto",
@@ -3230,7 +3236,7 @@ describe("atree file-backed SessionV2 discovery", () => {
         recent: "Recent turns",
       })
       if (messages[0]?.type === "compaction") {
-        expect(DateTime.toEpochMillis(messages[0].time.created)).toBe(30)
+        expect(DateTime.toEpochMillis(messages[0].time.created)).toBe(20)
       }
     }),
   )

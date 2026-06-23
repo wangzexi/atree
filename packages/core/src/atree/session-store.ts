@@ -1604,12 +1604,13 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       const recent = typeof data.recent === "string" ? data.recent : ""
       const reason = data.reason === "auto" || data.reason === "manual" ? data.reason : "manual"
       if (!messageID || summary === undefined) continue
+      const existing = compactions.get(messageID)
       compactions.set(messageID, {
         messageID,
-        reason,
+        reason: existing?.reason ?? reason,
         summary,
         recent,
-        created: timestampValue(data.timestamp, index),
+        created: existing?.created ?? timestampValue(data.timestamp, index),
       })
     }
   }
