@@ -819,7 +819,7 @@ export const layer: Layer.Layer<
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
         : rootDirectory
           ? yield* Effect.promise(() => readSessionStoresDeep(rootDirectory)).pipe(
-              Effect.catchCause(() => Effect.succeed(undefined)),
+              Effect.catchCause(() => Effect.succeed([] as Info[])),
             )
           : undefined
       const rootScopedFileIndex = !directoryInput && rootDirectory !== undefined && fileSessions !== undefined

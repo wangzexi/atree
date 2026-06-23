@@ -54,6 +54,29 @@ describe("session.listGlobal", () => {
   )
 
   it.instance(
+    "does not fall back to SQLite rows when the persisted atree root cannot be scanned",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const cached = yield* withSession({ title: "cached-before-root-broke" })
+        const missingRoot = path.join(test.directory, "missing-root")
+        yield* Effect.promise(() => fs.mkdir(path.join(Global.Path.data, "atree"), { recursive: true }))
+        yield* Effect.promise(() =>
+          fs.writeFile(
+            path.join(Global.Path.data, "atree", "state.json"),
+            JSON.stringify({ version: 1, rootDirectory: missingRoot, updatedAt: Date.now() }),
+          ),
+        )
+
+        const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200, archived: true }))
+
+        expect(sessions.map((session) => session.id)).not.toContain(cached.id)
+        expect(sessions).toEqual([])
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "excludes archived sessions by default",
     () =>
       Effect.gen(function* () {
