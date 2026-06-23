@@ -27,18 +27,22 @@ const projects = Layer.succeed(
 const projector = SessionProjector.layer.pipe(Layer.provide(events), Layer.provide(database))
 const store = SessionStore.layer.pipe(Layer.provide(database))
 const executionCalls: SessionV2.ID[] = []
+const executionDirectories: Array<string | undefined> = []
 const interruptSeqs: Array<number | undefined> = []
+const interruptDirectories: Array<string | undefined> = []
 const execution = Layer.succeed(
   SessionExecution.Service,
   SessionExecution.Service.of({
-    resume: (sessionID) =>
+    resume: (sessionID, options) =>
       Effect.sync(() => {
         executionCalls.push(sessionID)
+        executionDirectories.push(options?.directory)
       }),
     wake: () => Effect.void,
-    interrupt: (_sessionID, seq) =>
+    interrupt: (_sessionID, seq, options) =>
       Effect.sync(() => {
         interruptSeqs.push(seq)
+        interruptDirectories.push(options?.directory)
       }),
   }),
 )
@@ -89,6 +93,7 @@ it.effect("mirrors interrupt requests into file-backed session jsonl", () =>
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
     )
     interruptSeqs.length = 0
+    interruptDirectories.length = 0
     const session = yield* (yield* SessionV2.Service).create({
       location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
     })
@@ -97,6 +102,7 @@ it.effect("mirrors interrupt requests into file-backed session jsonl", () =>
 
     expect(interruptSeqs).toHaveLength(1)
     expect(interruptSeqs[0]).toBeNumber()
+    expect(interruptDirectories).toEqual([path.resolve(tmp.path)])
     const entries = (
       yield* Effect.promise(() =>
         readFile(path.join(tmp.path, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
@@ -116,12 +122,14 @@ it.effect("records interrupt requests for pure file-backed sessions without SQLi
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
     )
     interruptSeqs.length = 0
+    interruptDirectories.length = 0
     const sessionID = SessionV2.ID.make("ses_file_interrupt_only")
     const sessionRoot = yield* writePureFileSession(tmp.path, sessionID)
 
     yield* (yield* SessionV2.Service).interrupt(sessionID, { directory: AbsolutePath.make(tmp.path) })
 
     expect(interruptSeqs).toEqual([undefined])
+    expect(interruptDirectories).toEqual([path.resolve(tmp.path)])
     const entries = (
       yield* Effect.promise(() => readFile(path.join(sessionRoot, "session.jsonl"), "utf8"))
     )
@@ -144,12 +152,14 @@ it.effect("resumes pure file-backed sessions through an explicit directory", () 
       (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
     )
     executionCalls.length = 0
+    executionDirectories.length = 0
     const sessionID = SessionV2.ID.make("ses_file_resume_only")
     yield* writePureFileSession(tmp.path, sessionID)
 
     yield* (yield* SessionV2.Service).resume(sessionID, { directory: AbsolutePath.make(tmp.path) })
 
     expect(executionCalls).toEqual([sessionID])
+    expect(executionDirectories).toEqual([path.resolve(tmp.path)])
   }),
 )
 

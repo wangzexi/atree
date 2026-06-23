@@ -219,8 +219,8 @@ export const layer = Layer.effect(
     const isDurableSessionEvent = Schema.is(SessionEvent.Durable)
     const scope = yield* Effect.scope
 
-    const enqueueWake = (admitted: SessionInput.Admitted) =>
-      execution.wake(admitted.sessionID, admitted.admittedSeq).pipe(
+    const enqueueWake = (session: SessionSchema.Info, admitted: SessionInput.Admitted) =>
+      execution.wake(admitted.sessionID, admitted.admittedSeq, { directory: session.location.directory }).pipe(
         Effect.tapCause((cause) =>
           Cause.hasInterruptsOnly(cause)
             ? Effect.void
@@ -629,7 +629,7 @@ export const layer = Layer.effect(
               return admitted
             }
             const returnPrompt = Effect.fnUntraced(function* (admitted: SessionInput.Admitted) {
-              if (input.resume !== false) yield* enqueueWake(admitted)
+              if (input.resume !== false) yield* enqueueWake(session, admitted)
               return admitted
             }, Effect.uninterruptible)
             const delivery = input.delivery ?? "steer"
@@ -719,8 +719,8 @@ export const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
       resume: Effect.fn("V2Session.resume")(function* (sessionID, options) {
-        yield* result.get(sessionID, { directory: options?.directory })
-        yield* execution.resume(sessionID)
+        const session = yield* result.get(sessionID, { directory: options?.directory })
+        yield* execution.resume(sessionID, { directory: session.location.directory })
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID, options) =>
         Effect.uninterruptible(
@@ -749,7 +749,7 @@ export const layer = Layer.effect(
                   timestamp,
                 }),
               ).pipe(Effect.orDie)
-              return yield* execution.interrupt(sessionID)
+              return yield* execution.interrupt(sessionID, undefined, { directory: session.location.directory })
             }
             const event = yield* publishSessionEvent(
               events,
@@ -763,7 +763,7 @@ export const layer = Layer.effect(
             )
             if (event.seq === undefined)
               return yield* Effect.die("Interrupt request event is missing aggregate sequence")
-            yield* execution.interrupt(sessionID, event.seq)
+            yield* execution.interrupt(sessionID, event.seq, { directory: session.location.directory })
           }),
         ),
       ),
