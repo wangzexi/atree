@@ -40,7 +40,6 @@ import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 import { buildScheduleCreateInput } from "@/session/schedule-input"
 import { NotFoundError } from "@/storage/storage"
-import path from "path"
 
 const tryParseJson = (text: string) =>
   Effect.try({
