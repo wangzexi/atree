@@ -170,13 +170,13 @@ function mergeFileSession(cached: Info | undefined, file: Info): Info {
     projectID: file.projectID === ProjectV2.ID.global && sameCachedDirectory ? cached.projectID : file.projectID,
     workspaceID: file.workspaceID ?? (sameCachedDirectory ? cached.workspaceID : undefined),
     path: file.path ?? (sameCachedDirectory ? cached.path : undefined),
-    summary: file.summary ?? cached.summary,
-    share: file.share ?? cached.share,
-    revert: file.revert ?? cached.revert,
-    permission: file.permission ?? cached.permission,
+    summary: file.summary ?? (sameCachedDirectory ? cached.summary : undefined),
+    share: file.share ?? (sameCachedDirectory ? cached.share : undefined),
+    revert: file.revert ?? (sameCachedDirectory ? cached.revert : undefined),
+    permission: file.permission ?? (sameCachedDirectory ? cached.permission : undefined),
     time: {
       ...file.time,
-      compacting: file.time.compacting ?? cached.time.compacting,
+      compacting: file.time.compacting ?? (sameCachedDirectory ? cached.time.compacting : undefined),
     },
   }
 }

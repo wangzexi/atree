@@ -547,9 +547,6 @@ describe("Session", () => {
       const source = yield* tmpdirScoped({ git: true })
       const target = yield* tmpdirScoped({ git: true })
       const info = yield* provideInstance(source)(session.create({ title: "source cache owner" }))
-      yield* Effect.promise(() =>
-        fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }),
-      )
       const targetCtx = yield* provideInstance(target)(InstanceState.context)
       yield* Effect.promise(() =>
         writeSessionStore({
@@ -572,6 +569,59 @@ describe("Session", () => {
       expect(copied.directory).toBe(target)
       expect(copied.title).toBe("target copied session")
       expect(row?.directory).toBe(source)
+    }),
+  )
+
+  it.instance("does not merge source cached metadata into a copied explicit directory session", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const source = yield* tmpdirScoped({ git: true })
+      const target = yield* tmpdirScoped({ git: true })
+      const info = yield* provideInstance(source)(
+        session.create({
+          title: "source optional metadata",
+          permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+        }),
+      )
+
+      yield* provideInstance(source)(
+        session.setShare({ sessionID: info.id, share: { url: "https://example.com/source-share" } }),
+      )
+      yield* provideInstance(source)(
+        session.setSummary({
+          sessionID: info.id,
+          summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
+        }),
+      )
+      yield* provideInstance(source)(
+        session.setRevert({
+          sessionID: info.id,
+          revert: { messageID: "msg_source_revert" as MessageID },
+          summary: { additions: 4, deletions: 5, files: 6, diffs: [] },
+        }),
+      )
+      const targetCtx = yield* provideInstance(target)(InstanceState.context)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          ...info,
+          directory: target,
+          projectID: targetCtx.project.id,
+          title: "target copied without optional metadata",
+          summary: undefined,
+          share: undefined,
+          revert: undefined,
+          permission: undefined,
+        } as any),
+      )
+
+      const copied = yield* provideInstance(target)(session.get(info.id, { directory: target }))
+
+      expect(copied.directory).toBe(target)
+      expect(copied.title).toBe("target copied without optional metadata")
+      expect(copied.summary).toBeUndefined()
+      expect(copied.share).toBeUndefined()
+      expect(copied.revert).toBeUndefined()
+      expect(copied.permission).toBeUndefined()
     }),
   )
 
