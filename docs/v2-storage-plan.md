@@ -304,6 +304,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 当会话目录的 `schedule.json` 投影文件缺失，或 `session.jsonl` 中存在更新的 `schedule.created` / `schedule.ran` / `schedule.deleted` 事件时，schedule store 可以重放 JSONL 恢复当前自动化状态，包括最近运行状态和下次执行时间；这些投影读取同时接受扁平事件和 EventV2 风格的 `data` 嵌套事件。
 - todo 投影也可以从扁平或 EventV2 `data` 嵌套的 `todo.updated` 事件恢复，确保工具状态的目录内事实源和事件总线镜像格式保持兼容。
 - question/permission 的 pending 列表可以从当前目录会话的 `session.jsonl` 重放恢复；已经 `replied` / `rejected` 的请求不会重新出现在列表里。恢复出来的 pending 可以继续被用户回复，回复决定会追加回同一份 `session.jsonl`；服务关闭时不会被自动写成拒绝。
+- 复制 `.agents/atree/` 到另一个目录后，question/permission 的 pending 扫描会按“包含目录 + 会话 + request id”隔离；同一个 request id 出现在源目录和目标目录时不会被互相覆盖，且目标目录中的 replied/rejected 只清理目标目录自己的 pending。
 - 当 `meta.yaml` 缺失时，core 和 opencode 都可以从 `session.jsonl` 的 `session.created` 重建会话元数据；该恢复路径同时接受扁平 `info` 和 EventV2 风格的 `data.info`，随后继续重放 `session.updated` 得到最新状态。
 - 会话 diff summary 可以从 `session.jsonl` 的 `session.diff` 事件恢复；即使 SQLite session row 和 `meta.yaml` 都不存在，带目录上下文的 `Session.diff` 仍能返回目录日志里的变更摘要。
 - `session.next.*` 中可重放的 durable 边界事件会经由 EventV2Bridge 镜像进当前目录会话的 `session.jsonl`；text/reasoning/tool input/compaction 的 delta 仍保持 live-only，不写入目录事实源。
