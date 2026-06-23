@@ -1,10 +1,7 @@
 import type { Session as SDKSession, Message, Part } from "@opencode-ai/sdk/v2"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Session } from "@/session/session"
-import { MessageV2 } from "../../session/message-v2"
 import { effectCmd } from "../effect-cmd"
-import { Database } from "@opencode-ai/core/database/database"
-import { SessionTable, MessageTable, PartTable } from "@opencode-ai/core/session/sql"
 import { InstanceRef } from "@/effect/instance-ref"
 import { appendSessionJsonl, writeSessionStore } from "@/atree/session-store"
 import { EOL } from "os"
@@ -37,7 +34,6 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
   exportData: ExportData,
   ctx: Pick<InstanceContext, "project" | "directory" | "worktree">,
 ) {
-  const { db } = yield* Database.Service
   const summary = exportData.info.summary ?? diffSummary(exportData.sessionDiff)
   const info = Schema.decodeUnknownSync(Session.Info)({
     ...exportData.info,
@@ -46,7 +42,6 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
     path: path.relative(path.resolve(ctx.worktree), ctx.directory).replaceAll("\\", "/"),
     ...(summary ? { summary } : {}),
   }) as Session.Info
-  const row = Session.toRow(info)
 
   yield* Effect.promise(() => writeSessionStore(info))
   yield* Effect.promise(() => appendSessionJsonl(info, { type: "session.created", sessionID: info.id, info }))
@@ -56,47 +51,13 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
     )
   }
 
-  yield* db
-    .insert(SessionTable)
-    .values(row)
-    .onConflictDoUpdate({
-      target: SessionTable.id,
-      set: { project_id: row.project_id, directory: row.directory, path: row.path },
-    })
-    .run()
-    .pipe(Effect.catchCause(() => Effect.void))
-
   for (const msg of exportData.messages) {
     const msgInfo = decodeMessageInfo(msg.info) as SessionV1.Info
     yield* Effect.promise(() => appendSessionJsonl(info, { type: "message.updated", message: msgInfo }))
-    const { id, sessionID: _, ...msgData } = msgInfo
-    yield* db
-      .insert(MessageTable)
-      .values({
-        id,
-        session_id: row.id,
-        time_created: msgInfo.time?.created ?? Date.now(),
-        data: msgData as never,
-      })
-      .onConflictDoNothing()
-      .run()
-      .pipe(Effect.catchCause(() => Effect.void))
 
     for (const part of msg.parts) {
       const partInfo = decodePart(part) as SessionV1.Part
       yield* Effect.promise(() => appendSessionJsonl(info, { type: "message.part.updated", part: partInfo }))
-      const { id: partId, sessionID: _s, messageID, ...partData } = partInfo
-      yield* db
-        .insert(PartTable)
-        .values({
-          id: partId,
-          message_id: messageID,
-          session_id: row.id,
-          data: partData,
-        })
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.catchCause(() => Effect.void))
     }
   }
 

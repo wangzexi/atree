@@ -5,7 +5,7 @@ import path from "path"
 import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { Database } from "@opencode-ai/core/database/database"
-import { MessageTable, PartTable } from "@opencode-ai/core/session/sql"
+import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { readSessionJsonlMessages, readSessionStore } from "@/atree/session-store"
 import { persistImportedSession } from "../../src/cli/cmd/import"
@@ -66,8 +66,27 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
     })
 
     const { db } = yield* Database.Service
-    yield* db.delete(PartTable).where(eq(PartTable.session_id, sessionID)).run().pipe(Effect.orDie)
-    yield* db.delete(MessageTable).where(eq(MessageTable.session_id, sessionID)).run().pipe(Effect.orDie)
+    const sessionRow = yield* db
+      .select({ id: SessionTable.id })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    const messageRows = yield* db
+      .select({ id: MessageTable.id })
+      .from(MessageTable)
+      .where(eq(MessageTable.session_id, sessionID))
+      .all()
+      .pipe(Effect.orDie)
+    const partRows = yield* db
+      .select({ id: PartTable.id })
+      .from(PartTable)
+      .where(eq(PartTable.session_id, sessionID))
+      .all()
+      .pipe(Effect.orDie)
+    expect(sessionRow).toBeUndefined()
+    expect(messageRows).toEqual([])
+    expect(partRows).toEqual([])
 
     const messages = yield* Effect.promise(() => readSessionJsonlMessages(imported))
     expect(messages).toHaveLength(1)
