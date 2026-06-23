@@ -139,7 +139,6 @@ export function toRow(info: Info) {
     agent: info.agent ?? null,
     model: info.model ?? null,
     version: info.version,
-    share_url: null,
     summary_additions: info.summary?.additions ?? null,
     summary_deletions: info.summary?.deletions ?? null,
     summary_files: info.summary?.files ?? null,
