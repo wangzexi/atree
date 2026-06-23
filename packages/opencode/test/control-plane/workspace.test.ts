@@ -978,6 +978,59 @@ describe("workspace CRUD", () => {
   )
 
   it.instance(
+    "sessionWarp copies source workspace changes for directory-backed sessions without SQLite rows",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const previousType = unique("warp-filebacked-patch-prev")
+        const targetType = unique("warp-filebacked-patch-target")
+        const previousDir = path.join(dir, "warp-filebacked-patch-prev")
+        const targetDir = path.join(dir, "warp-filebacked-patch-target")
+        yield* Effect.promise(() => initGitRepo(previousDir))
+        yield* Effect.promise(() => initGitRepo(targetDir))
+        yield* Effect.promise(() => fs.writeFile(path.join(previousDir, "tracked.txt"), "file-backed changed\n"))
+        yield* Effect.promise(() => fs.writeFile(path.join(previousDir, "new-file-backed.txt"), "file-backed new\n"))
+
+        const previous = workspaceInfo(instance.project.id, previousType)
+        const target = workspaceInfo(instance.project.id, targetType)
+        const sessionID = "ses_workspace_warp_filebacked_patch" as SessionID
+        yield* insertWorkspace(previous)
+        yield* insertWorkspace(target)
+        yield* Effect.promise(() => writeWorkspaceRoot(dir))
+        registerAdapter(instance.project.id, previousType, localAdapter(previousDir, { createDir: false }).adapter)
+        registerAdapter(instance.project.id, targetType, localAdapter(targetDir, { createDir: false }).adapter)
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "workspace-warp-filebacked-patch",
+            projectID: instance.project.id,
+            directory: dir,
+            workspaceID: previous.id,
+            title: "Workspace warp file-backed patch",
+            version: "test",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 2 },
+          } as SessionNs.Info),
+        )
+
+        yield* workspace.sessionWarp({ workspaceID: target.id, sessionID, copyChanges: true })
+
+        expect(yield* Effect.promise(() => fs.readFile(path.join(targetDir, "tracked.txt"), "utf8"))).toBe(
+          "file-backed changed\n",
+        )
+        expect(yield* Effect.promise(() => fs.readFile(path.join(targetDir, "new-file-backed.txt"), "utf8"))).toBe(
+          "file-backed new\n",
+        )
+        expect((yield* Effect.promise(() => readSessionStore(dir, sessionID)))?.workspaceID).toBe(target.id)
+      })
+    },
+    { git: true },
+  )
+
+  it.instance(
     "sessionWarp detaches a session to the local project and claims project ownership",
     () => {
       return Effect.gen(function* () {

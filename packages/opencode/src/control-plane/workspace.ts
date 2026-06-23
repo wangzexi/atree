@@ -34,6 +34,7 @@ import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
 import { resolveFileSession } from "@/atree/session-resolver"
+import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@/atree/session-store"
 
 export const Info = Schema.Struct({
   ...WorkspaceInfoSchema.fields,
@@ -321,6 +322,45 @@ export const layer = Layer.effect(
         )
       })
 
+    const mirrorReplayEventToDirectory = Effect.fn("Workspace.mirrorReplayEventToDirectory")(function* (event: {
+      type: string
+      data: unknown
+    }) {
+      if (!event.type.startsWith("session.")) return
+      const data = event.data
+      if (!data || typeof data !== "object") return
+      const record = data as Record<string, unknown>
+      const info = record.info && typeof record.info === "object" ? (record.info as Record<string, unknown>) : undefined
+      const sessionID =
+        typeof record.sessionID === "string"
+          ? (record.sessionID as SessionID)
+          : typeof info?.id === "string"
+            ? (info.id as SessionID)
+            : undefined
+      if (!sessionID) return
+
+      const fileSession = yield* resolveFileSession(db, { sessionID }).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+      if (!fileSession) return
+      yield* Effect.promise(async () => {
+        await appendSessionJsonl(fileSession, {
+          type: event.type,
+          data: event.data,
+        })
+        const refreshed = await readSessionStore(fileSession.directory, fileSession.id)
+        if (refreshed) await writeSessionStore(refreshed)
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("failed to mirror replay event to atree session store", {
+            sessionID,
+            eventType: event.type,
+            error: errorData(error),
+          }),
+        ),
+      )
+    })
+
     const syncHistory = Effect.fn("Workspace.syncHistory")(function* (
       space: Info,
       url: URL | string,
@@ -367,19 +407,21 @@ export const layer = Layer.effect(
 
       yield* Effect.forEach(
         history,
-        (event) =>
-          events
-            .replay(
-              {
-                id: EventV2.ID.make(event.id),
-                aggregateID: event.aggregate_id,
-                seq: event.seq,
-                type: event.type,
-                data: event.data,
-              },
-              { publish: true, ownerID: space.id },
+        (event) => {
+          const replayEvent = {
+            id: EventV2.ID.make(event.id),
+            aggregateID: event.aggregate_id,
+            seq: event.seq,
+            type: event.type,
+            data: event.data,
+          }
+          return events
+            .replay(replayEvent, { publish: true, ownerID: space.id })
+            .pipe(
+              Effect.provideService(WorkspaceRef, space.id),
+              Effect.andThen(mirrorReplayEventToDirectory(replayEvent)),
             )
-            .pipe(Effect.provideService(WorkspaceRef, space.id)),
+        },
         { discard: true },
       )
     })
