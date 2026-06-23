@@ -1,5 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { Deferred, Effect, Layer, Schema, Context } from "effect"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
 import { InstanceState } from "@/effect/instance-state"
 import { SessionID, MessageID } from "@/session/schema"
 import { QuestionID } from "./schema"
@@ -121,6 +123,11 @@ function interactionDirectory(info: Request) {
   return (info as Request & DirectoryScopedInteraction).directory
 }
 
+function interactionLocation(info: Request) {
+  const directory = interactionDirectory(info)
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
+
 function findPending(pending: Map<string, PendingEntry>, requestID: QuestionID) {
   const directKey = String(requestID)
   const direct = pending.get(directKey)
@@ -170,10 +177,14 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
               if (item.restored) continue
-              yield* events.publish(Event.Rejected, {
-                sessionID: item.info.sessionID,
-                requestID: item.info.id,
-              })
+              yield* events.publish(
+                Event.Rejected,
+                {
+                  sessionID: item.info.sessionID,
+                  requestID: item.info.id,
+                },
+                interactionLocation(item.info),
+              )
               yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
                 type: "question.rejected",
                 sessionID: item.info.sessionID,
@@ -208,7 +219,7 @@ export const layer = Layer.effect(
       }
       if (input.directory) Object.defineProperty(info, "directory", { value: input.directory, enumerable: false })
       pending.set(pendingKey(info), { info, deferred })
-      yield* events.publish(Event.Asked, info)
+      yield* events.publish(Event.Asked, info, interactionLocation(info))
       yield* appendAtreeSessionEventBestEffort(interactionDirectory(info), info.sessionID, {
         type: "question.asked",
         question: info,
@@ -235,11 +246,15 @@ export const layer = Layer.effect(
       const [key, existing] = found
       pending.delete(key)
       yield* Effect.logInfo("replied", { requestID: input.requestID, answers: input.answers })
-      yield* events.publish(Event.Replied, {
-        sessionID: existing.info.sessionID,
-        requestID: existing.info.id,
-        answers: input.answers.map((a) => [...a]),
-      })
+      yield* events.publish(
+        Event.Replied,
+        {
+          sessionID: existing.info.sessionID,
+          requestID: existing.info.id,
+          answers: input.answers.map((a) => [...a]),
+        },
+        interactionLocation(existing.info),
+      )
       yield* appendAtreeSessionEventBestEffort(interactionDirectory(existing.info), existing.info.sessionID, {
         type: "question.replied",
         sessionID: existing.info.sessionID,
@@ -259,10 +274,14 @@ export const layer = Layer.effect(
       const [key, existing] = found
       pending.delete(key)
       yield* Effect.logInfo("rejected", { requestID })
-      yield* events.publish(Event.Rejected, {
-        sessionID: existing.info.sessionID,
-        requestID: existing.info.id,
-      })
+      yield* events.publish(
+        Event.Rejected,
+        {
+          sessionID: existing.info.sessionID,
+          requestID: existing.info.id,
+        },
+        interactionLocation(existing.info),
+      )
       yield* appendAtreeSessionEventBestEffort(interactionDirectory(existing.info), existing.info.sessionID, {
         type: "question.rejected",
         sessionID: existing.info.sessionID,

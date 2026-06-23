@@ -427,6 +427,20 @@ describe("atree directory self-contained state", () => {
 
       const questions = yield* Question.Service
       const permissions = yield* Permission.Service
+      const events = yield* EventV2Bridge.Service
+      const eventDirectories: string[] = []
+      const off = yield* events.listen((event) => {
+        if (
+          event.type === "question.asked" ||
+          event.type === "question.replied" ||
+          event.type === "permission.asked" ||
+          event.type === "permission.replied"
+        ) {
+          eventDirectories.push(event.location?.directory ?? "")
+        }
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
 
       const questionFiber = yield* questions
         .ask({
@@ -475,6 +489,7 @@ describe("atree directory self-contained state", () => {
       expect(targetRaw).toContain("question.replied")
       expect(targetRaw).toContain("permission.asked")
       expect(targetRaw).toContain("permission.replied")
+      expect(eventDirectories).toEqual([target, target, target, target])
     }),
   )
 

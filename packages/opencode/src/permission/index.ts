@@ -1,5 +1,7 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { ConfigPermissionV1 } from "@opencode-ai/core/v1/config/permission"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
 import { InstanceState } from "@/effect/instance-state"
 import { Wildcard } from "@opencode-ai/core/util/wildcard"
 import { Deferred, Effect, Layer, Context } from "effect"
@@ -50,6 +52,11 @@ function interactionDirectory(info: PermissionV1.Request) {
   return (info as PermissionV1.Request & DirectoryScopedInteraction).directory
 }
 
+function interactionLocation(info: PermissionV1.Request) {
+  const directory = interactionDirectory(info)
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
+
 function sameInteractionScope(left: PermissionV1.Request, right: PermissionV1.Request) {
   return left.sessionID === right.sessionID && interactionDirectory(left) === interactionDirectory(right)
 }
@@ -98,11 +105,15 @@ export const layer = Layer.effect(
           Effect.gen(function* () {
             for (const item of state.pending.values()) {
               if (item.restored) continue
-              yield* events.publish(Event.Replied, {
-                sessionID: item.info.sessionID,
-                requestID: item.info.id,
-                reply: "reject",
-              })
+              yield* events.publish(
+                Event.Replied,
+                {
+                  sessionID: item.info.sessionID,
+                  requestID: item.info.id,
+                  reply: "reject",
+                },
+                interactionLocation(item.info),
+              )
               yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
                 type: "permission.replied",
                 sessionID: item.info.sessionID,
@@ -153,7 +164,7 @@ export const layer = Layer.effect(
 
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
       pending.set(pendingKey(info), { info, deferred })
-      yield* events.publish(Event.Asked, info)
+      yield* events.publish(Event.Asked, info, interactionLocation(info))
       yield* appendAtreeSessionEventBestEffort(interactionDirectory(info), info.sessionID, {
         type: "permission.asked",
         permission: info,
@@ -173,11 +184,15 @@ export const layer = Layer.effect(
 
       const [key, existing] = found
       pending.delete(key)
-      yield* events.publish(Event.Replied, {
-        sessionID: existing.info.sessionID,
-        requestID: existing.info.id,
-        reply: input.reply,
-      })
+      yield* events.publish(
+        Event.Replied,
+        {
+          sessionID: existing.info.sessionID,
+          requestID: existing.info.id,
+          reply: input.reply,
+        },
+        interactionLocation(existing.info),
+      )
       yield* appendAtreeSessionEventBestEffort(interactionDirectory(existing.info), existing.info.sessionID, {
         type: "permission.replied",
         sessionID: existing.info.sessionID,
@@ -196,11 +211,15 @@ export const layer = Layer.effect(
         for (const [id, item] of pending.entries()) {
           if (!sameInteractionScope(item.info, existing.info)) continue
           pending.delete(id)
-          yield* events.publish(Event.Replied, {
-            sessionID: item.info.sessionID,
-            requestID: item.info.id,
-            reply: "reject",
-          })
+          yield* events.publish(
+            Event.Replied,
+            {
+              sessionID: item.info.sessionID,
+              requestID: item.info.id,
+              reply: "reject",
+            },
+            interactionLocation(item.info),
+          )
           yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
             type: "permission.replied",
             sessionID: item.info.sessionID,
@@ -230,11 +249,15 @@ export const layer = Layer.effect(
         )
         if (!ok) continue
         pending.delete(id)
-        yield* events.publish(Event.Replied, {
-          sessionID: item.info.sessionID,
-          requestID: item.info.id,
-          reply: "always",
-        })
+        yield* events.publish(
+          Event.Replied,
+          {
+            sessionID: item.info.sessionID,
+            requestID: item.info.id,
+            reply: "always",
+          },
+          interactionLocation(item.info),
+        )
         yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
           type: "permission.replied",
           sessionID: item.info.sessionID,
