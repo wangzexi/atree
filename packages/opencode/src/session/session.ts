@@ -600,7 +600,6 @@ export const use = serviceUse(Service)
 
 export type Patch = Omit<Partial<Info>, "time" | "share" | "summary" | "revert" | "permission"> & {
   time?: Partial<Omit<Info["time"], "archived">> & { archived?: Info["time"]["archived"] | null }
-  share?: Partial<NonNullable<Info["share"]>> | null
   summary?: Info["summary"] | null
   revert?: Info["revert"] | null
   permission?: Info["permission"] | null
@@ -1157,7 +1156,6 @@ export const layer: Layer.Layer<
           ...current,
           ...info,
           time,
-          share: info.share === null ? undefined : info.share ? { ...current.share, ...info.share } : current.share,
           summary: info.summary === null ? undefined : (info.summary ?? current.summary),
           revert: info.revert === null ? undefined : (info.revert ?? current.revert),
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
