@@ -39,6 +39,8 @@ import {
 import { PermissionNotFoundError, notFound } from "../errors"
 import * as SessionError from "./session-errors"
 import { buildScheduleCreateInput } from "@/session/schedule-input"
+import { NotFoundError } from "@/storage/storage"
+import path from "path"
 
 const tryParseJson = (text: string) =>
   Effect.try({
@@ -108,7 +110,22 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       const context = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed({ directory: undefined } as { directory?: string })),
       )
-      return yield* SessionError.mapStorageNotFound(session.get(sessionID, { directory: context.directory }))
+      const scoped = session.get(sessionID, { directory: context.directory })
+      const found = context.directory
+        ? yield* scoped.pipe(
+            Effect.catchIf(NotFoundError.isInstance, () =>
+              session.get(sessionID).pipe(
+                Effect.flatMap((fallback) =>
+                  path.resolve(fallback.directory) === path.resolve(context.directory!)
+                    ? Effect.fail(new NotFoundError({ message: `Session not found: ${sessionID}` }))
+                    : Effect.succeed(fallback),
+                ),
+              ),
+            ),
+            SessionError.mapStorageNotFound,
+          )
+        : yield* SessionError.mapStorageNotFound(scoped)
+      return found
     })
 
     const get = Effect.fn("SessionHttpApi.get")(function* (ctx: { params: { sessionID: SessionID } }) {

@@ -13,6 +13,7 @@ import { HttpClient, HttpServerRequest, HttpServerResponse } from "effect/unstab
 import { HttpApiMiddleware } from "effect/unstable/httpapi"
 import * as Socket from "effect/unstable/socket/Socket"
 import { InvalidRequestError } from "../errors"
+import path from "path"
 
 // Query fields this middleware reads from the URL. Spread into every
 // endpoint query schema in groups that apply WorkspaceRoutingMiddleware,
@@ -221,8 +222,23 @@ function routeHttpApiWorkspace<E>(
     const request = yield* HttpServerRequest.HttpServerRequest
     const url = requestURL(request)
     const sessionID = getWorkspaceRouteSessionID(url)
+    const fallbackDirectory = defaultDirectory(request, url)
     const session = sessionID
-      ? yield* Session.Service.use((svc) => svc.get(sessionID, { directory: defaultDirectory(request, url) })).pipe(
+      ? yield* Session.Service.use((svc) =>
+          svc.get(sessionID, { directory: fallbackDirectory }).pipe(
+            Effect.catchIf(
+              (error): error is NotFoundError => NotFoundError.isInstance(error),
+              () =>
+                svc.get(sessionID).pipe(
+                  Effect.flatMap((fallback) =>
+                    path.resolve(fallback.directory) === path.resolve(fallbackDirectory)
+                      ? Effect.fail(new NotFoundError({ message: `Session not found: ${sessionID}` }))
+                      : Effect.succeed(fallback),
+                  ),
+                ),
+            ),
+          ),
+        ).pipe(
           Effect.catchIf(
             (error): error is NotFoundError => NotFoundError.isInstance(error),
             () => Effect.succeed(undefined),
