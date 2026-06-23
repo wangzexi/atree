@@ -33,7 +33,6 @@ import { publishSessionEvent } from "./session/publish-session-event"
 import {
   appendSessionJsonl,
   appendPromptJsonl,
-  hasSessionJsonlMessageEvents,
   readSessionJsonlEntries,
   readSessionJsonlMessages,
   readSessionStore,
@@ -504,17 +503,7 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileBacked) {
-          const hasFileMessageEvents = yield* Effect.promise(() => hasSessionJsonlMessageEvents(session)).pipe(
-            Effect.catchCause(() => Effect.succeed(false)),
-          )
-          if (hasFileMessageEvents) return pageFileMessages(fileMessages, input)
-          const sessionRow = yield* db
-            .select({ id: SessionTable.id, directory: SessionTable.directory })
-            .from(SessionTable)
-            .where(eq(SessionTable.id, input.sessionID))
-            .get()
-            .pipe(Effect.orDie)
-          if (!sessionRow || !sameDirectory(sessionRow.directory, session.location.directory)) return []
+          return pageFileMessages(fileMessages, input)
         }
         const direction = input.cursor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
@@ -575,17 +564,7 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileBacked) {
-          const hasFileMessageEvents = yield* Effect.promise(() => hasSessionJsonlMessageEvents(session)).pipe(
-            Effect.catchCause(() => Effect.succeed(false)),
-          )
-          if (hasFileMessageEvents) return fileMessages
-          const sessionRow = yield* db
-            .select({ id: SessionTable.id, directory: SessionTable.directory })
-            .from(SessionTable)
-            .where(eq(SessionTable.id, sessionID))
-            .get()
-            .pipe(Effect.orDie)
-          if (!sessionRow || !sameDirectory(sessionRow.directory, session.location.directory)) return []
+          return fileMessages
         }
         return yield* store.context(sessionID, { directory: options?.directory })
       }),
