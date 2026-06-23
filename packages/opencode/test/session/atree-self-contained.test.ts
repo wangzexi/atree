@@ -515,6 +515,31 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("filters file-backed directory sessions by workspace without SQLite rows", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+      const workspaceA = WorkspaceV2.ID.ascending("wrk_atree_filter_a")
+      const workspaceB = WorkspaceV2.ID.ascending("wrk_atree_filter_b")
+
+      const sessionA = yield* sessions.create({ title: "workspace a", workspaceID: workspaceA })
+      const sessionB = yield* sessions.create({ title: "workspace b", workspaceID: workspaceB })
+
+      yield* db
+        .delete(SessionTable)
+        .where(and(eq(SessionTable.directory, instance.directory)))
+        .run()
+        .pipe(Effect.orDie)
+
+      const listA = yield* sessions.list({ directory: instance.directory, workspaceID: workspaceA, archived: true })
+      const listB = yield* sessions.list({ directory: instance.directory, workspaceID: workspaceB, archived: true })
+
+      expect(listA.map((session) => session.id)).toEqual([sessionA.id])
+      expect(listB.map((session) => session.id)).toEqual([sessionB.id])
+    }),
+  )
+
   it.instance("recovers session diff summary from session.jsonl without SQLite or meta.yaml", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service

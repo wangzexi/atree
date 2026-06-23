@@ -1567,6 +1567,7 @@ function listByProject(
 }
 
 function matchesListInput(item: Info, input: ListInput) {
+  if (input.workspaceID && item.workspaceID !== input.workspaceID) return false
   if (input.path !== undefined && input.path) {
     const pathMatches = item.path === input.path || item.path?.startsWith(`${input.path}/`)
     const legacyDirectoryMatch =

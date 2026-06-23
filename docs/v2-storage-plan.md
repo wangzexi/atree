@@ -245,6 +245,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core `appendSessionJsonl` 会和 opencode 侧一样为追加事件补 `version` 和 `at`，让目录事件流有统一的时间戳外壳。
 - core `SessionV2.create` 在真实可写目录下会先写 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl` 的 `session.created`，再发布 Created 事件刷新 SQLite projector；不可写的虚拟目录仍保留 best-effort 兼容行为。因此新会话的目录事实源不再晚于全局投影。
 - core 读取 file-backed session 时会从 `session.updated` JSONL 重放 `title`、`agent`、`model`、`cost`、`tokens`、`projectID`、`parentID`、`workspaceID`、`subpath/path` 和时间字段；即使 `meta.yaml` 是陈旧投影，core 层也会以目录事件流为准。
+- core `Session.list({ directory, workspaceID })` 合并目录会话时会按 file-backed session 的 `workspaceID` 过滤；即使 SQLite 投影行已经不存在，workspace 视图也能从目录事实源重建，不会把其他 workspace 的同目录会话混入。
 - core/opencode 的会话元数据 replay 同时兼容目录事件的顶层字段形态和原始 EventV2 `data` 嵌套形态；后续把更多 EventV2 原始日志搬进 `session.jsonl` 时，不需要先把字段拍平成专用格式。
 - core/opencode 的消息 replay 也兼容原始 EventV2 `data` 嵌套形态；`message.updated`、`message.part.updated`、`message.part.delta`、`message.removed`、`message.part.removed` 可以直接从目录 `session.jsonl` 恢复为现有消息投影。
 - opencode 侧 `session.jsonl` 投影开始恢复 durable `session.next.*` 消息事件：`prompted/prompt.*` 会恢复用户消息，assistant 的 step/text/reasoning/tool 边界事件会恢复成现有 V1 UI 可读的 message/part；实时 delta 仍然只作为直播事件，不进入持久恢复。
