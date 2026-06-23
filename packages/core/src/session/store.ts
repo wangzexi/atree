@@ -1,7 +1,7 @@
 export * as SessionStore from "./store"
 
 import { eq } from "drizzle-orm"
-import { Context, Effect, Layer, Schema } from "effect"
+import { Context, Effect, Layer } from "effect"
 import { Database } from "../database/database"
 import { MessageDecodeError } from "./error"
 import { SessionMessage } from "./message"
@@ -46,7 +46,6 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const { db } = yield* Database.Service
-    const decodeMessage = Schema.decodeUnknownEffect(SessionMessage.Message)
     const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (
       sessionID: SessionSchema.ID,
       directory?: string,
@@ -172,14 +171,15 @@ export const layer = Layer.effect(
         return (yield* runnerEntries(sessionID, baselineSeq, options)).map((entry) => entry.message)
       }),
       message: Effect.fn("SessionStore.message")(function* (messageID) {
+        const fileMessage = yield* findFileBackedMessage(messageID)
+        if (fileMessage) return fileMessage
+
         const row = yield* db
           .select()
           .from(SessionMessageTable)
           .where(eq(SessionMessageTable.id, messageID))
           .get()
           .pipe(Effect.orDie)
-        const fileMessage = yield* findFileBackedMessage(messageID)
-        if (fileMessage) return fileMessage
         if (!row) return undefined
 
         const cachedSession = yield* db
@@ -189,17 +189,15 @@ export const layer = Layer.effect(
           .get()
           .pipe(Effect.orDie)
         const fileSession = yield* findFileBackedSession(SessionSchema.ID.make(row.session_id), cachedSession?.directory)
-        if (fileSession) {
-          const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
-            Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
-          )
-          if (!messages.some((message) => message.id === messageID)) return undefined
-        }
+        if (!fileSession) return undefined
 
-        return {
-          sessionID: SessionSchema.ID.make(row.session_id),
-          message: yield* decodeMessage({ ...row.data, id: row.id, type: row.type }).pipe(Effect.orDie),
-        }
+        const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+        )
+        const message = messages.find((entry) => entry.id === messageID)
+        if (!message) return undefined
+
+        return { sessionID: fileSession.id, message }
       }),
     })
   }),

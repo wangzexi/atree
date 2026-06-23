@@ -1359,6 +1359,7 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(yield* store.context(sessionID)).toEqual([])
       expect(yield* store.runnerEntries(sessionID, 0)).toEqual([])
       expect(yield* store.runnerContext(sessionID, 0)).toEqual([])
+      expect(yield* store.message(messageID)).toBeUndefined()
     }),
   )
 
