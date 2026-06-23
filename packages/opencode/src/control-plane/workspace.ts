@@ -599,6 +599,8 @@ export const layer = Layer.effect(
       }
 
       yield* WorkspaceAdapterRuntime.create(adapter, config, env)
+      if (!flags.experimentalWorkspaces) return info
+
       yield* Effect.all(
         [
           waitEvent({
