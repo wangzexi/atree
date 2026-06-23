@@ -458,6 +458,49 @@ describe("atree session store", () => {
     expect(sessions[0]?.directory).toBe(target)
   })
 
+  test("keeps copied session diff events scoped to the containing directory", async () => {
+    const source = await tempdir()
+    const target = await tempdir()
+    const session = {
+      id: "ses_copied_diff",
+      slug: "copied-diff",
+      version: "test",
+      projectID: "proj_test",
+      directory: source,
+      path: ".",
+      title: "Copied diff",
+      summary: { additions: 0, deletions: 0, files: 0, diffs: [] },
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "session.diff",
+      sessionID: session.id,
+      diff: [{ file: "source.txt", additions: 1, deletions: 0, status: "added", patch: "+source" }],
+    })
+    await fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true })
+    await appendSessionJsonl({ ...session, directory: target }, {
+      type: "session.diff",
+      sessionID: session.id,
+      diff: [{ file: "target.txt", additions: 2, deletions: 1, status: "modified", patch: "@@ target" }],
+    })
+
+    const sourceCopy = await readSessionStore(source, session.id)
+    const targetCopy = await readSessionStore(target, session.id)
+
+    expect(sourceCopy?.directory).toBe(source)
+    expect(sourceCopy?.summary?.diffs).toEqual([
+      { file: "source.txt", additions: 1, deletions: 0, status: "added", patch: "+source" },
+    ])
+    expect(targetCopy?.directory).toBe(target)
+    expect(targetCopy?.summary?.diffs).toEqual([
+      { file: "target.txt", additions: 2, deletions: 1, status: "modified", patch: "@@ target" },
+    ])
+  })
+
   test("appends raw session events to session.jsonl", async () => {
     const directory = await tempdir()
     const session = {
