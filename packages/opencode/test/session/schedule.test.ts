@@ -14,6 +14,7 @@ import { SessionID } from "../../src/session/schema"
 import { SessionStatus } from "../../src/session/status"
 import { readSessionScheduleState } from "../../src/atree/schedule-store"
 import { readSessionStore, writeSessionStore } from "../../src/atree/session-store"
+import { writeWorkspaceRoot } from "../../src/atree/state"
 import { pollWithTimeout, testEffect } from "../lib/effect"
 
 let promptQueue: Queue.Queue<SessionPrompt.PromptInput> | undefined
@@ -154,6 +155,7 @@ const createFixtureSession = (title: string) =>
         time: { created: now, updated: now },
       } as any),
     )
+    yield* Effect.promise(() => writeWorkspaceRoot("/tmp/atree-schedule-test"))
     return { id: sessionID }
   })
 

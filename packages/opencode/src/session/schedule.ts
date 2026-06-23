@@ -1067,10 +1067,6 @@ export const layer = Layer.effect(
         location.directory,
       )
     }
-    const sessions = yield* db.select({ id: SessionTable.id }).from(SessionTable).all().pipe(Effect.orDie)
-    for (const session of sessions) {
-      yield* restoreStoredSchedules(session.id as SessionID)
-    }
     const rootDirectory = yield* Effect.promise(() => readWorkspaceState()).pipe(
       Effect.map((state) => state.rootDirectory),
       Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
