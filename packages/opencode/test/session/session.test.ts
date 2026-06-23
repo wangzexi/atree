@@ -470,7 +470,7 @@ describe("Session", () => {
     }),
   )
 
-  it.instance("prefers file metadata from the cached session directory when the current instance differs", () =>
+  it.instance("requires an explicit directory when the current instance differs from a file-backed session", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const otherDir = yield* tmpdirScoped({ git: true })
@@ -487,7 +487,10 @@ describe("Session", () => {
         } as any),
       )
 
-      const loaded = yield* provideInstance(otherDir)(session.get(info.id))
+      const missing = yield* provideInstance(otherDir)(session.get(info.id).pipe(Effect.exit))
+      expect(Exit.isFailure(missing)).toBe(true)
+
+      const loaded = yield* provideInstance(otherDir)(session.get(info.id, { directory: info.directory }))
       expect(loaded.directory).toBe(info.directory)
       expect(loaded.title).toBe("authoritative-file-title")
       expect(loaded.metadata).toEqual({ icon: "🧭" })
@@ -1792,8 +1795,14 @@ describe("Session", () => {
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const instance = yield* TestInstance
+      const data = yield* tmpdirScoped()
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
       const nodeDirectory = path.join(instance.directory, "node-fork")
       yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
       const source = yield* session.create({
         title: "File fork source",
         directory: nodeDirectory,
@@ -1932,10 +1941,16 @@ describe("Session", () => {
     }),
   )
 
-  it.live("remove works without an instance", () =>
+  it.live("remove works without an instance when the atree root is persisted", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const dir = yield* tmpdirScoped({ git: true })
+      const data = yield* tmpdirScoped()
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => writeWorkspaceRoot(dir))
+
       const info = yield* provideInstance(dir)(session.create({ title: "remove-without-instance" }))
 
       const removeExit = yield* remove(info.id).pipe(Effect.exit)

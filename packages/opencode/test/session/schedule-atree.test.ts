@@ -105,7 +105,7 @@ describe("atree schedule restore", () => {
         ]),
       )
 
-      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
       expect(schedules).toHaveLength(1)
       expect(schedules[0]).toMatchObject({ id: "sch_restore", sessionID, message: "restore me" })
 
@@ -157,7 +157,9 @@ describe("atree schedule restore", () => {
         ]),
       )
 
-      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const schedules = yield* Schedule.Service.use((schedule) =>
+        schedule.list(sessionID, { directory: instance.directory }),
+      )
       expect(schedules).toHaveLength(1)
       expect(schedules[0]).toMatchObject({ id: "sch_file", sessionID, message: "file-backed schedule" })
     }),
@@ -1288,7 +1290,9 @@ describe("atree schedule restore", () => {
         ]),
       )
 
-      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const schedules = yield* Schedule.Service.use((schedule) =>
+        schedule.list(sessionID, { directory: instance.directory }),
+      )
       const state = yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))
 
       expect(schedules[0]).toMatchObject({
@@ -1986,7 +1990,7 @@ describe("atree schedule restore", () => {
         .run()
         .pipe(Effect.orDie)
 
-      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
 
       expect(schedules).toEqual([])
       const row = yield* db
@@ -2070,7 +2074,7 @@ describe("atree schedule restore", () => {
         .run()
         .pipe(Effect.orDie)
 
-      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
 
       expect(schedules).toEqual([])
       const row = yield* db
@@ -2263,7 +2267,7 @@ describe("atree schedule restore", () => {
         .run()
         .pipe(Effect.orDie)
 
-      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
 
       expect(schedules).toHaveLength(1)
       expect(schedules[0]).toMatchObject({
