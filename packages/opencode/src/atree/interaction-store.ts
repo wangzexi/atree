@@ -41,6 +41,7 @@ export async function readSessionInteractionState(directory: string): Promise<In
   const permissions = new Map<string, PermissionV1.Request>()
 
   for (const session of sessions) {
+    if (session.time.archived !== undefined) continue
     const raw = await fs.readFile(sessionJsonlPath(session.directory, session.id), "utf8").catch((error: unknown) => {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
       throw error

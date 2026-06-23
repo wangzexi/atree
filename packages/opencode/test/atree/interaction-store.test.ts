@@ -205,4 +205,46 @@ describe("atree interaction store", () => {
     expect(state.questions.map((item) => String(item.id))).toEqual(["que_copied_reply"])
     expect(state.permissions.map((item) => String(item.id))).toEqual(["per_copied_reply"])
   })
+
+  test("does not restore pending interactions from archived sessions", async () => {
+    const root = await tempdir()
+    const session = {
+      id: "ses_archived_interaction",
+      slug: "archived-interaction",
+      version: "test",
+      projectID: "proj_archived_interaction",
+      directory: root,
+      path: ".",
+      title: "Archived interaction",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2, archived: 3 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "question.asked",
+      question: {
+        id: "que_archived_pending",
+        sessionID: session.id,
+        questions: [{ header: "Hidden", question: "Should not restore", options: [], custom: true }],
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "permission.asked",
+      permission: {
+        id: "per_archived_pending",
+        sessionID: session.id,
+        permission: "bash",
+        patterns: ["*"],
+        metadata: {},
+        always: ["*"],
+      },
+    })
+
+    const state = await readSessionInteractionState(root)
+
+    expect(state.questions).toEqual([])
+    expect(state.permissions).toEqual([])
+  })
 })
