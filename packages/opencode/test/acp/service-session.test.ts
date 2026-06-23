@@ -377,6 +377,18 @@ describe("ACP service sessions", () => {
     expect(listed.sessions[0]?.cwd).toBe("/workspace")
   })
 
+  it("keeps same-id live ACP sessions scoped to their cwd", async () => {
+    const { service } = makeService()
+    await Effect.runPromise(service.newSession({ cwd: "/workspace", mcpServers: [] }))
+    await Effect.runPromise(service.newSession({ cwd: "/other", mcpServers: [] }))
+
+    const workspace = await Effect.runPromise(service.listSessions({ cwd: "/workspace" }))
+    const other = await Effect.runPromise(service.listSessions({ cwd: "/other" }))
+
+    expect(workspace.sessions[0]).toMatchObject({ sessionId: "ses_new", cwd: "/workspace" })
+    expect(other.sessions[0]).toMatchObject({ sessionId: "ses_new", cwd: "/other" })
+  })
+
   it("lists all sessions with next cursor when the first page is full", async () => {
     const { service } = makeService()
     const first = await Effect.runPromise(service.listSessions({}))

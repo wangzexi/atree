@@ -72,6 +72,33 @@ describe("acp session state", () => {
     }),
   )
 
+  sessionTest.effect("keeps same-id session state separate across directories", () =>
+    Effect.gen(function* () {
+      yield* ACPSession.Service.use((session) =>
+        session.create({
+          id: "ses_same",
+          cwd: "/workspace/one",
+          createdAt: new Date("2026-05-25T00:00:00.000Z"),
+        }),
+      )
+      yield* ACPSession.Service.use((session) =>
+        session.create({
+          id: "ses_same",
+          cwd: "/workspace/two",
+          createdAt: new Date("2026-05-26T00:00:00.000Z"),
+        }),
+      )
+
+      const one = yield* ACPSession.Service.use((session) => session.list("/workspace/one"))
+      const two = yield* ACPSession.Service.use((session) => session.list("/workspace/two"))
+      const all = yield* ACPSession.Service.use((session) => session.list())
+
+      expect(one.map((item) => item.cwd)).toEqual(["/workspace/one"])
+      expect(two.map((item) => item.cwd)).toEqual(["/workspace/two"])
+      expect(all.map((item) => item.cwd).sort()).toEqual(["/workspace/one", "/workspace/two"])
+    }),
+  )
+
   sessionTest.effect("updates selected model while preserving session identity and inputs", () =>
     Effect.gen(function* () {
       yield* ACPSession.Service.use((session) =>

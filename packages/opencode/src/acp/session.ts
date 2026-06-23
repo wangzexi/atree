@@ -93,6 +93,14 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/AC
 
 type State = Map<string, Info>
 
+function sessionKey(input: { cwd: string; id: string }) {
+  return `${input.cwd}\u0000${input.id}`
+}
+
+function findByID(state: State, sessionId: string) {
+  return [...state.values()].find((session) => session.id === sessionId)
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -100,12 +108,12 @@ export const layer = Layer.effect(
 
     const store = Effect.fn("ACP.Session.store")(function* (input: StoreInput) {
       const session = makeSession(input)
-      yield* Ref.update(sessions, (state) => new Map(state).set(session.id, session))
+      yield* Ref.update(sessions, (state) => new Map(state).set(sessionKey(session), session))
       return snapshot(session)
     })
 
     const tryGet = Effect.fn("ACP.Session.tryGet")(function* (sessionId: string) {
-      const session = (yield* Ref.get(sessions)).get(sessionId)
+      const session = findByID(yield* Ref.get(sessions), sessionId)
       if (!session) return
       return snapshot(session)
     })
@@ -118,10 +126,10 @@ export const layer = Layer.effect(
 
     const update = Effect.fn("ACP.Session.update")(function* (sessionId: string, fn: (session: Info) => Info) {
       const result = yield* Ref.modify(sessions, (state) => {
-        const session = state.get(sessionId)
+        const session = findByID(state, sessionId)
         if (!session) return [undefined, state] as const
         const next = fn(session)
-        return [snapshot(next), new Map(state).set(sessionId, next)] as const
+        return [snapshot(next), new Map(state).set(sessionKey(next), next)] as const
       })
       if (result) return result
       return yield* new ACPError.SessionNotFoundError({ sessionId })
@@ -129,10 +137,10 @@ export const layer = Layer.effect(
 
     const remove = Effect.fn("ACP.Session.remove")(function* (sessionId: string) {
       return yield* Ref.modify(sessions, (state) => {
-        const session = state.get(sessionId)
+        const session = findByID(state, sessionId)
         if (!session) return [undefined, state] as const
         const next = new Map(state)
-        next.delete(sessionId)
+        next.delete(sessionKey(session))
         return [snapshot(session), next] as const
       })
     })
