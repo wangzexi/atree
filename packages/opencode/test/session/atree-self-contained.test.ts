@@ -159,6 +159,52 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("does not restore pending question and permission lists from archived sessions", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+
+      const session = yield* sessions.create({ title: "archived interactions" })
+      const pendingQuestionID = QuestionID.ascending("que_atree_archived_pending")
+      const pendingPermissionID = PermissionV1.ID.ascending("per_atree_archived_pending")
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "question.asked",
+          question: {
+            id: pendingQuestionID,
+            sessionID: session.id,
+            questions: [
+              {
+                question: "Restore from archived?",
+                header: "Archived",
+                options: [{ label: "No", description: "Archived sessions are inactive" }],
+              },
+            ],
+          },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "permission.asked",
+          permission: {
+            id: pendingPermissionID,
+            sessionID: session.id,
+            permission: "bash",
+            patterns: ["echo archived"],
+            metadata: {},
+            always: [],
+          },
+        }),
+      )
+      yield* sessions.setArchived({ sessionID: session.id, time: 1234 })
+
+      expect(yield* questions.list()).toEqual([])
+      expect(yield* permissions.list()).toEqual([])
+    }),
+  )
+
   it.instance("replies to restored pending question and permission from session.jsonl", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
