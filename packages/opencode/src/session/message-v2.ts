@@ -141,6 +141,11 @@ async function isWithinDirectory(parent: string | undefined, child: string | und
   return target === root || target.startsWith(root + path.sep)
 }
 
+async function sameDirectory(a: string | undefined, b: string | undefined) {
+  if (!a || !b) return false
+  return (await realpathOrResolve(a)) === (await realpathOrResolve(b))
+}
+
 const missingPersistedRootSession = Effect.fn("MessageV2.missingPersistedRootSession")(function* (
   db: Database.Interface["db"],
   sessionID: SessionID,
@@ -506,7 +511,20 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   const fileSession = yield* resolveFileSession(db, { directory: input.directory, sessionID: input.sessionID })
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
-    return pageFileMessages(projection.messages, { limit: input.limit, before })
+    if (projection.hasMessageEvents) return pageFileMessages(projection.messages, { limit: input.limit, before })
+    const row = yield* db
+      .select({ directory: SessionTable.directory })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, input.sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    if (!row || !(yield* Effect.promise(() => sameDirectory(row.directory, fileSession.directory)))) {
+      return {
+        items: [] as WithParts[],
+        more: false,
+        cursor: undefined,
+      }
+    }
   }
   if (input.directory) {
     return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })

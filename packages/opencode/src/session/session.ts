@@ -1027,7 +1027,6 @@ export const layer: Layer.Layer<
           .find((message) => message.info.id === input.messageID)
           ?.parts.find((part) => part.id === input.partID)
         if (filePart) return filePart
-        if (!projection.hasEvents && (yield* hasDirectorySessionStore(session))) return
       }
 
       if (session && !(yield* canUseMessageProjectionCache(session))) return
@@ -1306,10 +1305,9 @@ export const layer: Layer.Layer<
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
       const session = yield* getWithDirectory(input.sessionID, input.directory)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-      if (fileProjection.messages.length > 0) {
+      if (fileProjection.hasMessageEvents) {
         return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
       }
-      if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) return []
 
       if (!(yield* canUseMessageProjectionCache(session))) return []
 
@@ -1419,9 +1417,6 @@ export const layer: Layer.Layer<
         if (!sessionID) return Option.none<SessionV1.WithParts>()
         const session = yield* getWithDirectory(sessionID, options?.directory)
         const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-        if (!fileProjection.hasEvents && (yield* hasDirectorySessionStore(session))) {
-          return Option.none<SessionV1.WithParts>()
-        }
         const canUseCache = yield* canUseMessageProjectionCache(session)
         const size = 50
         let before: string | undefined

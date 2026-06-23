@@ -430,6 +430,24 @@ function findToolPart(message: SessionV1.WithParts, callID: string) {
   return message.parts.find((part): part is SessionV1.ToolPart => part.type === "tool" && part.callID === callID)
 }
 
+function isMessageProjectionEvent(type: string | undefined) {
+  if (!type) return false
+  return (
+    type.startsWith("message.") ||
+    type === "session.next.prompted" ||
+    type === "session.next.prompt.admitted" ||
+    type === "session.next.prompt.promoted" ||
+    type === "session.next.context.updated" ||
+    type === "session.next.synthetic" ||
+    type.startsWith("session.next.step.") ||
+    type.startsWith("session.next.text.") ||
+    type.startsWith("session.next.reasoning.") ||
+    type.startsWith("session.next.tool.") ||
+    type.startsWith("session.next.shell.") ||
+    type.startsWith("session.next.compaction.")
+  )
+}
+
 export async function readSessionJsonlProjection(info: SessionInfo) {
   const target = path.join(sessionRoot(info), "session.jsonl")
   const raw = await fs.readFile(target, "utf8").catch((error: unknown) => {
@@ -437,6 +455,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     throw error
   })
   let hasEvents = false
+  let hasMessageEvents = false
   const removedMessageIDs = new Set<string>()
   const removedPartIDs = new Set<string>()
   const messages = new Map<string, SessionV1.WithParts>()
@@ -456,6 +475,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
     const type = baseEventType(entry.type)
     const data = eventData(entry)
     const eventAt = timestampValue(data.timestamp, typeof entry.at === "number" ? entry.at : 0)
+    if (isMessageProjectionEvent(type)) hasMessageEvents = true
 
     if (
       (type === "session.next.prompted" ||
@@ -1091,6 +1111,7 @@ export async function readSessionJsonlProjection(info: SessionInfo) {
 
   return {
     hasEvents,
+    hasMessageEvents,
     removedMessageIDs,
     removedPartIDs,
     messages: [...messages.values()].sort(

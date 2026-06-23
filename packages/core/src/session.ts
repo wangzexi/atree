@@ -33,6 +33,7 @@ import { publishSessionEvent } from "./session/publish-session-event"
 import {
   appendSessionJsonl,
   appendPromptJsonl,
+  hasSessionJsonlMessageEvents,
   readSessionJsonlEntries,
   readSessionJsonlMessages,
   readSessionStore,
@@ -500,7 +501,19 @@ export const layer = Layer.effect(
         const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
-        if (fileBacked) return pageFileMessages(fileMessages, input)
+        if (fileBacked) {
+          const hasFileMessageEvents = yield* Effect.promise(() => hasSessionJsonlMessageEvents(session)).pipe(
+            Effect.catchCause(() => Effect.succeed(false)),
+          )
+          if (hasFileMessageEvents) return pageFileMessages(fileMessages, input)
+          const sessionRow = yield* db
+            .select({ id: SessionTable.id, directory: SessionTable.directory })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, input.sessionID))
+            .get()
+            .pipe(Effect.orDie)
+          if (!sessionRow || !sameDirectory(sessionRow.directory, session.location.directory)) return []
+        }
         const direction = input.cursor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
         const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
@@ -559,7 +572,19 @@ export const layer = Layer.effect(
         const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
-        if (fileBacked) return fileMessages
+        if (fileBacked) {
+          const hasFileMessageEvents = yield* Effect.promise(() => hasSessionJsonlMessageEvents(session)).pipe(
+            Effect.catchCause(() => Effect.succeed(false)),
+          )
+          if (hasFileMessageEvents) return fileMessages
+          const sessionRow = yield* db
+            .select({ id: SessionTable.id, directory: SessionTable.directory })
+            .from(SessionTable)
+            .where(eq(SessionTable.id, sessionID))
+            .get()
+            .pipe(Effect.orDie)
+          if (!sessionRow || !sameDirectory(sessionRow.directory, session.location.directory)) return []
+        }
         return yield* store.context(sessionID, { directory: options?.directory })
       }),
       events: (input) =>
@@ -604,9 +629,9 @@ export const layer = Layer.effect(
             const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
-            if (existingFileMessage && (!matchingSessionRow || fileBacked)) {
-              if (existingFileMessage.type !== "user" || !promptsMatch(input.prompt, existingFileMessage))
-                return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+            if (existingFileMessage && (existingFileMessage.type !== "user" || !promptsMatch(input.prompt, existingFileMessage)))
+              return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
+            if (existingFileMessage && !matchingSessionRow) {
               return new SessionInput.Admitted({
                 admittedSeq: 0,
                 id: messageID,
@@ -648,15 +673,17 @@ export const layer = Layer.effect(
             )
             if (!SessionInput.equivalent(admitted, expected))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("failed to mirror prompt into atree session store", {
-                  sessionID: input.sessionID,
-                  messageID,
-                  cause,
-                }),
-              ),
-            )
+            if (!existingFileMessage) {
+              yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("failed to mirror prompt into atree session store", {
+                    sessionID: input.sessionID,
+                    messageID,
+                    cause,
+                  }),
+                ),
+              )
+            }
             return yield* returnPrompt(admitted)
           }),
         ),

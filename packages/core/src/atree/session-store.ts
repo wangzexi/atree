@@ -53,6 +53,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
+function isSessionMessageEvent(type: string | undefined) {
+  if (!type) return false
+  return (
+    type.startsWith("message.") ||
+    type === "session.next.prompted" ||
+    type === "session.next.prompt.admitted" ||
+    type === "session.next.prompt.promoted" ||
+    type === "session.next.context.updated" ||
+    type === "session.next.synthetic" ||
+    type.startsWith("session.next.step.") ||
+    type.startsWith("session.next.text.") ||
+    type.startsWith("session.next.reasoning.") ||
+    type.startsWith("session.next.tool.") ||
+    type.startsWith("session.next.shell.") ||
+    type.startsWith("session.next.compaction.")
+  )
+}
+
 function parseMeta(raw: string, fallbackDirectory: string): SessionSchema.Info | undefined {
   const data: Record<string, unknown> = {}
   for (const line of raw.split(/\r?\n/)) {
@@ -290,6 +308,23 @@ export async function readWorkspaceRoot() {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return
     throw error
   }
+}
+
+export async function hasSessionJsonlMessageEvents(info: SessionSchema.Info) {
+  const raw = await fs.readFile(sessionJsonl(info), "utf8").catch((error: unknown) => {
+    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
+    throw error
+  })
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    try {
+      const entry = JSON.parse(line) as Record<string, unknown>
+      if (isSessionMessageEvent(baseEventType(entry.type))) return true
+    } catch {
+      continue
+    }
+  }
+  return false
 }
 
 export async function readSessionStore(directory: string, sessionID: SessionSchema.ID) {
