@@ -316,7 +316,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - workspace sessionWarp 在 `copyChanges` 时会从目录 `meta.yaml` 读取源 `workspaceID`；只有目录事实源、没有 SQLite session row 的会话也能把源 workspace 的改动复制到目标 workspace。
 - CLI `export` 的核心读取路径会显式带上当前目录上下文；只有目录 `meta.yaml` / `session.jsonl`、没有 SQLite session/message row 的会话也能导出完整会话和消息。
 - CLI `import` 写入目录事实源时会把导入的 file part 物化到当前会话目录的 `assets/`，`session.jsonl` 中只保留相对资产路径；读取时再按需要恢复为可消费的 file part 内容。
-- snapshot 的 bare gitdir 已从全局 data dir 迁到当前目录的 `.agents/atree/runtime/snapshot/` 下，并会把该 runtime 路径写入 snapshot repo exclude，避免 snapshot 拍到自己的运行文件。
+- snapshot 的 bare gitdir 已从全局 data dir 迁到当前目录的 `.agents/atree/runtime/snapshot/` 下，并会把该 runtime 路径写入 snapshot repo exclude；即使 runtime 目录存在，snapshot patch/diff 也不会把自己的运行文件当作业务变更。
 
 仍未完成的部分：
 
