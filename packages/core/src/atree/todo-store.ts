@@ -123,12 +123,31 @@ function isStoredTodo(value: unknown): value is StoredTodo {
   )
 }
 
+function sameTodos(left: ReadonlyArray<StoredTodo>, right: ReadonlyArray<StoredTodo>) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 export async function writeSessionTodoState(directory: string, sessionID: string, todos: ReadonlyArray<StoredTodo>) {
   await ensureSessionPayloadFilesByID(directory, sessionID)
+  const now = Date.now()
+  const jsonlState = await readSessionJsonlProjection(directory, sessionID)
+  const state = [...todos]
+  if (!jsonlState.hasState || !sameTodos(jsonlState.todos, state)) {
+    await fs.appendFile(
+      sessionJsonlPath(directory, sessionID),
+      `${JSON.stringify({
+        version: 1,
+        at: now,
+        type: "todo.updated",
+        sessionID,
+        todos: state,
+      })}\n`,
+    )
+  }
   await writeAtomic(sessionStatePath(directory, sessionID), {
     version: 1,
-    updatedAt: Date.now(),
-    todos: [...todos],
+    updatedAt: now,
+    todos: state,
   })
   await touchSessionStore(directory, sessionID as SessionSchema.ID)
   await removeLegacySessionTodo(directory, sessionID)
@@ -144,32 +163,27 @@ async function removeLegacySessionTodo(directory: string, sessionID: string) {
 }
 
 export async function readSessionTodoProjection(directory: string, sessionID: string) {
+  const jsonlState = await readSessionJsonlProjection(directory, sessionID)
+  if (jsonlState.hasState) return publicTodoProjection(jsonlState)
+
   try {
     const raw = await fs.readFile(sessionStatePath(directory, sessionID), "utf8")
     const parsed = JSON.parse(raw) as Partial<SessionTodoState>
-    const sessionState = {
+    return publicTodoProjection({
       hasState: true,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
       todos: Array.isArray(parsed.todos) ? parsed.todos.filter(isStoredTodo) : [],
-    }
-    const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return publicTodoProjection(jsonlState)
-    return publicTodoProjection(sessionState)
+    })
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
       const state = await readLegacyState(legacyStatePath(directory))
       if (!Object.hasOwn(state.sessions, sessionID)) {
-        return publicTodoProjection(await readSessionJsonlProjection(directory, sessionID))
+        return publicTodoProjection(jsonlState)
       }
       const todos = state.sessions[sessionID]
-      const legacyState = {
+      return publicTodoProjection({
         hasState: true,
-        updatedAt: state.updatedAt,
         todos: Array.isArray(todos) ? todos.filter(isStoredTodo) : [],
-      }
-      const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-      if (jsonlState.hasState && jsonlState.updatedAt > legacyState.updatedAt) return publicTodoProjection(jsonlState)
-      return publicTodoProjection(legacyState)
+      })
     }
     throw error
   }
