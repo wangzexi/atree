@@ -30,6 +30,7 @@ import { useNotification } from "@/context/notification"
 import {
   closeHomeProject,
   displayName,
+  errorMessage,
   getProjectAvatarSource,
   homeProjectDirectories,
   homeProjectNavigation,
@@ -47,6 +48,8 @@ import { useSettings } from "@/context/settings"
 import { ServerRowMenu } from "@/components/server/server-row-menu"
 import { ServerHealthIndicator } from "@/components/server/server-row"
 import { type ServerHealth } from "@/utils/server-health"
+import { setAtreeWorkspaceRoot } from "@/utils/atree-workspace"
+import { showToast } from "@/utils/toast"
 
 const HOME_SESSION_LIMIT = 64
 const HOME_ROW_LAYOUT =
@@ -146,6 +149,7 @@ function HomeDesign() {
       if (pathKey(project.worktree) !== pathKey(directory)) layout.projects.close(project.worktree)
     }
     layout.projects.open(directory)
+    server.projects.touch(directory)
     if (shouldNavigate) navigate(`/${base64Encode(directory)}/session`)
   }
 
@@ -153,9 +157,19 @@ function HomeDesign() {
     const currentServer = server.current
     if (!currentServer) return
 
-    function resolve(result: string | string[] | null) {
+    async function resolve(result: string | string[] | null) {
       const directory = Array.isArray(result) ? result[0] : result
-      if (directory) openProject(directory)
+      if (!directory) return
+      try {
+        const workspace = await setAtreeWorkspaceRoot(currentServer, directory)
+        openProject(workspace.rootDirectory ?? directory)
+      } catch (error) {
+        showToast({
+          variant: "error",
+          title: "根目录设置失败",
+          description: errorMessage(error, directory),
+        })
+      }
     }
 
     pickDirectory({
