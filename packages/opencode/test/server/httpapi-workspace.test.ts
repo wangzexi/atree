@@ -5,14 +5,18 @@ import { Effect, Layer, Stream } from "effect"
 import { Flag } from "@opencode-ai/core/flag/flag"
 import { registerAdapter } from "../../src/control-plane/adapters"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import { WorkspaceTable } from "@opencode-ai/core/control-plane/workspace.sql"
 import type { WorkspaceAdapter } from "../../src/control-plane/types"
 import { Workspace } from "../../src/control-plane/workspace"
 import { WorkspacePaths } from "../../src/server/routes/instance/httpapi/groups/workspace"
 import { EventPaths } from "../../src/server/routes/instance/httpapi/groups/event"
 import { Session } from "@/session/session"
 import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { Ripgrep } from "@opencode-ai/core/ripgrep"
 import { Server } from "../../src/server/server"
+import { readSessionStore } from "@/atree/session-store"
+import { writeWorkspaceRoot } from "@/atree/state"
 import { resetDatabase } from "../fixture/db"
 import { disposeAllInstances, provideInstance, tmpdirScoped } from "../fixture/fixture"
 import { InstanceBootstrap } from "../../src/project/bootstrap"
@@ -21,6 +25,7 @@ import { Project } from "../../src/project/project"
 import { InstancePaths } from "../../src/server/routes/instance/httpapi/groups/instance"
 import { testEffect } from "../lib/effect"
 import { httpApiLayer, requestInDirectory } from "./httpapi-layer"
+import { eq } from "drizzle-orm"
 
 const originalWorkspaces = Flag.OPENCODE_EXPERIMENTAL_WORKSPACES
 const workspaceLayer = Workspace.defaultLayer.pipe(
@@ -238,6 +243,43 @@ describe("workspace HttpApi", () => {
       const listed = yield* request(WorkspacePaths.list, dir)
       expect(listed.status).toBe(200)
       expect(yield* listed.json).toEqual([])
+    }),
+  )
+
+  it.live("removes workspace sessions that only exist in the directory store", () =>
+    Effect.gen(function* () {
+      Flag.OPENCODE_EXPERIMENTAL_WORKSPACES = true
+      const dir = yield* tmpdirScoped({ git: true })
+      const project = yield* Project.use.fromDirectory(dir)
+      const database = yield* Database.Service
+      const type = `local-delete-${Math.random().toString(36).slice(2)}`
+      const workspaceID = WorkspaceV2.ID.ascending("wrk_atree_delete")
+      registerAdapter(project.project.id, type, localAdapter(path.join(dir, ".workspace")))
+      yield* Effect.promise(() => writeWorkspaceRoot(dir))
+
+      yield* database.db
+        .insert(WorkspaceTable)
+        .values({
+          id: workspaceID,
+          type,
+          branch: null,
+          name: "directory-only-delete",
+          directory: path.join(dir, ".workspace"),
+          extra: null,
+          project_id: project.project.id,
+          time_used: Date.now(),
+        })
+        .run()
+        .pipe(Effect.orDie)
+      const session = yield* Session.use.create({}).pipe(provideInstance(dir))
+      yield* Session.use.setWorkspace({ sessionID: session.id, workspaceID }).pipe(provideInstance(dir))
+      expect(yield* Effect.promise(() => readSessionStore(dir, session.id))).toBeDefined()
+
+      yield* database.db.delete(SessionTable).where(eq(SessionTable.id, session.id)).run().pipe(Effect.orDie)
+
+      const removed = yield* request(WorkspacePaths.remove.replace(":id", workspaceID), dir, { method: "DELETE" })
+      expect(removed.status).toBe(200)
+      expect(yield* Effect.promise(() => readSessionStore(dir, session.id))).toBeUndefined()
     }),
   )
 

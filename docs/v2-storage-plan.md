@@ -311,7 +311,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - `session.next.*` 中可重放的 durable 边界事件会经由 EventV2Bridge 镜像进当前目录会话的 `session.jsonl`；text/reasoning/tool input/compaction 的 delta 仍保持 live-only，不写入目录事实源。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
-- 删除 workspace 时会通过 session service 查找当前 workspace 的会话；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。
+- 删除 workspace 时会通过 session service 查找当前 workspace 的会话，并把会话目录继续传给 `session.remove`；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。
 - workspace sync history 发送本地 sequence fence 时会合并 SQLite workspace row 和目录事实源中的 workspace 会话；只有目录 `meta.yaml`、没有 `SessionTable` row 的会话也会被纳入同步状态。
 - workspace sessionWarp 写入目标 workspace 后会更新目录会话的 `meta.yaml`/`session.jsonl`，并 claim 对应 EventSequence owner；只有目录事实源、没有 SQLite session row 的会话也能被移动到本地 workspace。
 - workspace sessionWarp 在 `copyChanges` 时会从目录 `meta.yaml` 读取源 `workspaceID`；只有目录事实源、没有 SQLite session row 的会话也能把源 workspace 的改动复制到目标 workspace。

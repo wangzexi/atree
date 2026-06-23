@@ -831,12 +831,18 @@ export const layer = Layer.effect(
     const remove = Effect.fn("Workspace.remove")(function* (id: WorkspaceV2.ID) {
       const sessions = (yield* session.listGlobal({ archived: true, limit: 1_000_000 }))
         .filter((sessionInfo) => sessionInfo.workspaceID === id)
-        .map((sessionInfo) => ({ id: sessionInfo.id, parentID: sessionInfo.parentID }))
+        .map((sessionInfo) => ({
+          id: sessionInfo.id,
+          parentID: sessionInfo.parentID,
+          directory: sessionInfo.directory,
+        }))
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
       yield* Effect.forEach(
         sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),
         (sessionInfo) =>
-          session.remove(sessionInfo.id).pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.void)),
+          session
+            .remove(sessionInfo.id, { directory: sessionInfo.directory })
+            .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.void)),
         { discard: true },
       )
 
