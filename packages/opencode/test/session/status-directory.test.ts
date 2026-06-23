@@ -1,12 +1,13 @@
 import { describe, expect } from "bun:test"
 import { Deferred, Effect, Exit, Fiber, Layer } from "effect"
 import { BackgroundJob } from "../../src/background/job"
+import { EventV2Bridge } from "@/event-v2-bridge"
 import { SessionID } from "../../src/session/schema"
 import { SessionRunState } from "../../src/session/run-state"
 import { SessionStatus } from "../../src/session/status"
 import { testEffect } from "../lib/effect"
 
-const status = SessionStatus.defaultLayer
+const status = SessionStatus.layer.pipe(Layer.provideMerge(EventV2Bridge.defaultLayer))
 const runState = SessionRunState.layer.pipe(Layer.provide(BackgroundJob.defaultLayer), Layer.provide(status))
 const it = testEffect(Layer.mergeAll(status, runState))
 
@@ -24,6 +25,30 @@ describe("directory-scoped session status", () => {
       expect(yield* status.get(sessionID, { directory: source })).toEqual({ type: "busy" })
       expect(yield* status.get(sessionID, { directory: target })).toEqual({ type: "idle" })
       expect(yield* status.get(sessionID)).toEqual({ type: "busy" })
+    }),
+  )
+
+  it.effect("publishes status events in the session directory", () =>
+    Effect.gen(function* () {
+      const status = yield* SessionStatus.Service
+      const events = yield* EventV2Bridge.Service
+      const seen: Array<{ type: string; directory?: string }> = []
+      const off = yield* events.listen((event) => {
+        if (event.type === SessionStatus.Event.Status.type || event.type === SessionStatus.Event.Idle.type) {
+          seen.push({ type: event.type, directory: event.location?.directory })
+        }
+        return Effect.void
+      })
+
+      yield* status.set(sessionID, { type: "busy" }, { directory: source })
+      yield* status.set(sessionID, { type: "idle" }, { directory: source })
+      yield* off
+
+      expect(seen).toEqual([
+        { type: SessionStatus.Event.Status.type, directory: source },
+        { type: SessionStatus.Event.Status.type, directory: source },
+        { type: SessionStatus.Event.Idle.type, directory: source },
+      ])
     }),
   )
 

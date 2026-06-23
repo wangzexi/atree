@@ -1,10 +1,11 @@
 import { LayerNode } from "@opencode-ai/core/effect/layer-node"
 import { InstanceState } from "@/effect/instance-state"
 import { SessionID } from "./schema"
-import { NonNegativeInt } from "@opencode-ai/core/schema"
+import { AbsolutePath, NonNegativeInt } from "@opencode-ai/core/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import { Location } from "@opencode-ai/core/location"
 import path from "path"
 
 export const Info = Schema.Union([
@@ -58,6 +59,10 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionStatus") {}
 
+function statusLocation(directory?: string) {
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
+
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
@@ -97,9 +102,9 @@ export const layer = Layer.effect(
       options?: { directory?: string },
     ) {
       const data = yield* currentState
-      yield* events.publish(Event.Status, { sessionID, status })
+      yield* events.publish(Event.Status, { sessionID, status }, statusLocation(options?.directory))
       if (status.type === "idle") {
-        yield* events.publish(Event.Idle, { sessionID })
+        yield* events.publish(Event.Idle, { sessionID }, statusLocation(options?.directory))
         data.delete(key(sessionID, options?.directory))
         return
       }
