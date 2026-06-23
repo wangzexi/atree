@@ -1031,7 +1031,7 @@ export const layer: Layer.Layer<
       const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(
         Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
       )
-      if (input.directory && !session) return
+      if (!session) return
       let projection: Awaited<ReturnType<typeof readSessionJsonlProjection>> | undefined
       if (session) {
         projection = yield* Effect.promise(() => readSessionJsonlProjection(session))

@@ -952,6 +952,51 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not read persisted-root parts when the session store was removed", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-part-missing-root-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      const info = yield* session.create({ title: "root-part-cached-only" })
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: partID,
+        messageID,
+        sessionID: info.id,
+        type: "text",
+        text: "stale persisted root part",
+      })
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", info.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const part = yield* session.getPart({ sessionID: info.id, messageID, partID })
+      expect(part).toBeUndefined()
+    }),
+  )
+
   it.instance("replays moved events without trusting stale absolute directories", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
