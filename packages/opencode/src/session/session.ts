@@ -586,7 +586,7 @@ export interface Interface {
     partID: PartID
     field: string
     delta: string
-  }) => Effect.Effect<void>
+  } & DirectoryOption) => Effect.Effect<void>
   /** Finds the first message matching the predicate, searching newest-first. */
   readonly findMessage: (
     sessionID: SessionID,
@@ -1430,13 +1430,15 @@ export const layer: Layer.Layer<
       partID: PartID
       field: string
       delta: string
+      directory?: string
     }) {
       // Deltas are streaming-only: the accumulated part text is always persisted
       // as a full `message.part.updated` event at text-end/reasoning-end/cleanup,
       // so the authoritative part state lands in the directory event log without
       // a synchronous file append on every token. The bus event still drives the
       // live UI + DB projection.
-      yield* events.publish(MessageV2.Event.PartDelta, input)
+      const { directory, ...data } = input
+      yield* events.publish(MessageV2.Event.PartDelta, data, sessionEventLocation(directory))
     })
 
     /** Finds the first message matching the predicate, searching newest-first. */

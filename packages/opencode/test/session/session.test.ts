@@ -283,6 +283,37 @@ describe("step-finish token propagation via event", () => {
       }),
     { timeout: 30000 },
   )
+
+  it.instance(
+    "part delta events publish in the explicit directory scope",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* SessionNs.Service
+        const events = yield* EventV2Bridge.Service
+        const instance = yield* TestInstance
+        const info = yield* session.create({ title: "delta event location" })
+        const received = yield* Deferred.make<string | undefined>()
+        const unsub = yield* events.listen((event) => {
+          if (event.type === MessageV2.Event.PartDelta.type)
+            Deferred.doneUnsafe(received, Effect.succeed(event.location?.directory))
+          return Effect.void
+        })
+        yield* Effect.addFinalizer(() => unsub)
+
+        yield* session.updatePartDelta({
+          sessionID: info.id,
+          messageID: MessageID.ascending(),
+          partID: PartID.ascending(),
+          field: "text",
+          delta: "hello",
+          directory: instance.directory,
+        })
+
+        expect(yield* awaitDeferred(received, "timed out waiting for message.part.delta")).toBe(instance.directory)
+        yield* session.remove(info.id)
+      }),
+    { timeout: 30000 },
+  )
 })
 
 describe("Session", () => {

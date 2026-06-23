@@ -427,6 +427,7 @@ export const layer = Layer.effect(
               partID: ctx.reasoningMap[value.id].id,
               field: "text",
               delta: value.text,
+              directory: currentSession.directory,
             })
             return
 
@@ -825,6 +826,7 @@ export const layer = Layer.effect(
               partID: ctx.currentText.id,
               field: "text",
               delta: value.text,
+              directory: currentSession.directory,
             })
             return
 
