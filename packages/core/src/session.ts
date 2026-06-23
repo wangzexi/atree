@@ -192,7 +192,10 @@ export interface Interface {
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
-  readonly interrupt: (sessionID: SessionSchema.ID) => Effect.Effect<void>
+  readonly interrupt: (
+    sessionID: SessionSchema.ID,
+    options?: { directory?: AbsolutePath },
+  ) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Session") {}
@@ -712,18 +715,42 @@ export const layer = Layer.effect(
         yield* result.get(sessionID)
         yield* execution.resume(sessionID)
       }),
-      interrupt: Effect.fn("V2Session.interrupt")((sessionID) =>
+      interrupt: Effect.fn("V2Session.interrupt")((sessionID, options) =>
         Effect.uninterruptible(
           Effect.gen(function* () {
-            const session = yield* store.get(sessionID)
+            const session = yield* result
+              .get(sessionID, { directory: options?.directory })
+              .pipe(Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined)))
             if (!session) return yield* execution.interrupt(sessionID)
+            const sessionRow = yield* db
+              .select({ id: SessionTable.id, directory: SessionTable.directory })
+              .from(SessionTable)
+              .where(eq(SessionTable.id, sessionID))
+              .get()
+              .pipe(Effect.orDie)
+            const matchingSessionRow =
+              sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
+            const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+            const timestamp = yield* DateTime.now
+            if (fileBacked && !matchingSessionRow) {
+              yield* Effect.promise(() =>
+                appendSessionJsonl(session, {
+                  type: SessionEvent.InterruptRequested.type,
+                  sessionID,
+                  timestamp,
+                }),
+              ).pipe(Effect.orDie)
+              return yield* execution.interrupt(sessionID)
+            }
             const event = yield* publishSessionEvent(
               events,
               { sessionID, session },
               SessionEvent.InterruptRequested,
               {
                 sessionID,
-                timestamp: yield* DateTime.now,
+                timestamp,
               },
               "interrupt request event",
             )

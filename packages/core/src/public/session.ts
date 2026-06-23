@@ -117,7 +117,7 @@ export interface Interface {
     input: SwitchModelInput,
   ) => Effect.Effect<void, NotFoundError | ModelUnavailableError | VariantUnavailableError>
   /** Interrupt the active V2 execution chain for one Session on this process. Interrupting an idle or missing Session is a no-op. */
-  readonly interrupt: (sessionID: ID) => Effect.Effect<void>
+  readonly interrupt: (sessionID: ID, options?: { readonly directory?: AbsolutePath }) => Effect.Effect<void>
   readonly messages: (input: MessagesInput) => Effect.Effect<Message[], NotFoundError | MessageDecodeError>
   readonly message: (input: MessageInput) => Effect.Effect<Message | undefined>
   readonly context: (
