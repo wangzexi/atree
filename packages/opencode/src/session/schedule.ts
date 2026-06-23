@@ -306,18 +306,6 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.session_id, sessionID))
         .all()
         .pipe(Effect.orDie)
-      const sessionRow = directory
-        ? yield* db
-            .select({ directory: SessionTable.directory })
-            .from(SessionTable)
-            .where(eq(SessionTable.id, sessionID))
-            .get()
-            .pipe(Effect.orDie)
-        : undefined
-      const cacheBelongsToDirectory =
-        directory !== undefined &&
-        sessionRow?.directory !== undefined &&
-        path.resolve(sessionRow.directory) === path.resolve(directory)
       const alternateFileSession =
         directory !== undefined
           ? yield* Effect.promise(() => readWorkspaceState())
@@ -340,7 +328,7 @@ export const layer = Layer.effect(
           if (!directory) return true
           const timer = timers.get(id)
           if (timer) return timerBelongsToDirectory(timer, directory)
-          return cacheBelongsToDirectory && !hasAlternateFileSession
+          return !hasAlternateFileSession
         })
       if (ids.length === 0) return
       yield* db.delete(ScheduleRunTable).where(inArray(ScheduleRunTable.schedule_id, ids)).run().pipe(Effect.orDie)
@@ -671,26 +659,11 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.id, scheduleID))
         .get()
         .pipe(Effect.orDie)
-      const existingSessionDirectory =
-        existing && directoryHint
-          ? yield* db
-              .select({ directory: SessionTable.directory })
-              .from(SessionTable)
-              .where(eq(SessionTable.id, existing.sessionID))
-              .get()
-              .pipe(Effect.orDie)
-          : undefined
       const directory = yield* sessionDirectory(sessionID, directoryHint)
       if (existing) {
         if (!directoryHint) return true
         if (!directory) return false
-        if (
-          timerBelongsToDirectory(timers.get(scheduleID), directory) ||
-          (existingSessionDirectory?.directory !== undefined &&
-            path.resolve(existingSessionDirectory.directory) === path.resolve(directory))
-        ) {
-          return true
-        }
+        if (timerBelongsToDirectory(timers.get(scheduleID), directory)) return true
         const timer = timers.get(scheduleID)
         if (timer) {
           stopTimer(timer)
@@ -1017,14 +990,6 @@ export const layer = Layer.effect(
       schedules: ReadonlyArray<Info>,
     ) {
       const wantedIDs = new Set(schedules.filter(canRestoreStoredSchedule).map((schedule) => schedule.id))
-      const sessionRow = yield* db
-        .select({ directory: SessionTable.directory })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      const cacheBelongsToDirectory =
-        sessionRow?.directory !== undefined && path.resolve(sessionRow.directory) === path.resolve(directory)
       const rows = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
@@ -1033,9 +998,11 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
       const staleIDs = rows
         .map((row) => row.id as ID)
-        .filter(
-          (id) => !wantedIDs.has(id) && (cacheBelongsToDirectory || timerBelongsToDirectory(timers.get(id), directory)),
-        )
+        .filter((id) => {
+          if (wantedIDs.has(id)) return false
+          const timer = timers.get(id)
+          return timer ? timerBelongsToDirectory(timer, directory) : true
+        })
       if (staleIDs.length > 0) {
         for (const id of staleIDs) {
           const timer = timers.get(id)
