@@ -756,6 +756,62 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("continues mutating directory-backed messages after SQLite projection is removed", () =>
+    Effect.gen(function* () {
+      const sessions = yield* Session.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+
+      const session = yield* sessions.create({ title: "file message mutations" })
+      yield* db
+        .delete(SessionTable)
+        .where(and(eq(SessionTable.id, session.id), eq(SessionTable.directory, instance.directory)))
+        .run()
+        .pipe(Effect.orDie)
+
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+      yield* sessions.updateMessage(
+        {
+          id: messageID,
+          sessionID: session.id,
+          role: "user",
+          time: { created: Date.now() },
+          agent: "user",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as SessionV1.Info,
+        { directory: instance.directory },
+      )
+      yield* sessions.updatePart(
+        {
+          id: partID,
+          messageID,
+          sessionID: session.id,
+          type: "text",
+          text: "message appended after SQLite projection removal",
+        },
+        { directory: instance.directory },
+      )
+
+      const messages = yield* sessions.messages({ sessionID: session.id, directory: instance.directory })
+      expect(messages.find((message) => message.info.id === messageID)?.parts[0]).toMatchObject({
+        id: partID,
+        type: "text",
+        text: "message appended after SQLite projection removal",
+      })
+
+      yield* sessions.removePart({ sessionID: session.id, messageID, partID, directory: instance.directory })
+      const withoutPart = yield* sessions.messages({ sessionID: session.id, directory: instance.directory })
+      expect(withoutPart.find((message) => message.info.id === messageID)?.parts).toEqual([])
+
+      yield* sessions.removeMessage({ sessionID: session.id, messageID, directory: instance.directory })
+      const withoutMessage = yield* sessions.messages({ sessionID: session.id, directory: instance.directory })
+      expect(withoutMessage.find((message) => message.info.id === messageID)).toBeUndefined()
+    }),
+  )
+
   it.instance("removing a scheduled session clears its directory store and schedule runtime cache", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
