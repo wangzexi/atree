@@ -191,7 +191,10 @@ export interface Interface {
   }) => Effect.Effect<void, OperationUnavailableError>
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
-  readonly resume: (sessionID: SessionSchema.ID) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
+  readonly resume: (
+    sessionID: SessionSchema.ID,
+    options?: { directory?: AbsolutePath },
+  ) => Effect.Effect<void, NotFoundError | SessionRunner.RunError>
   readonly interrupt: (
     sessionID: SessionSchema.ID,
     options?: { directory?: AbsolutePath },
@@ -711,8 +714,8 @@ export const layer = Layer.effect(
         yield* result.get(sessionID)
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
-      resume: Effect.fn("V2Session.resume")(function* (sessionID) {
-        yield* result.get(sessionID)
+      resume: Effect.fn("V2Session.resume")(function* (sessionID, options) {
+        yield* result.get(sessionID, { directory: options?.directory })
         yield* execution.resume(sessionID)
       }),
       interrupt: Effect.fn("V2Session.interrupt")((sessionID, options) =>
