@@ -1325,6 +1325,18 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         error: unknownError(data.error),
       })
     }
+    if (type === "session.next.text.started") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const textID = typeof data.textID === "string" ? data.textID : undefined
+      if (!assistantMessageID || !textID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      const content = assistant.content.filter((part) => !(part.type === "text" && part.id === textID))
+      content.push(new SessionMessage.AssistantText({ type: "text", id: textID, text: "" }))
+      assistantEvents.set(assistantMessageID, { ...assistant, content })
+    }
     if (type === "session.next.text.ended") {
       const data = eventData(entry)
       const assistantMessageID =
@@ -1336,6 +1348,28 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
       if (!assistant) continue
       const content = assistant.content.filter((part) => !(part.type === "text" && part.id === textID))
       content.push(new SessionMessage.AssistantText({ type: "text", id: textID, text }))
+      assistantEvents.set(assistantMessageID, { ...assistant, content })
+    }
+    if (type === "session.next.reasoning.started") {
+      const data = eventData(entry)
+      const assistantMessageID =
+        typeof data.assistantMessageID === "string" ? data.assistantMessageID : undefined
+      const reasoningID = typeof data.reasoningID === "string" ? data.reasoningID : undefined
+      if (!assistantMessageID || !reasoningID) continue
+      const assistant = assistantEvents.get(assistantMessageID)
+      if (!assistant) continue
+      const content = assistant.content.filter((part) => !(part.type === "reasoning" && part.id === reasoningID))
+      content.push(
+        new SessionMessage.AssistantReasoning({
+          type: "reasoning",
+          id: reasoningID,
+          text: "",
+          providerMetadata:
+            data.providerMetadata && typeof data.providerMetadata === "object"
+              ? (data.providerMetadata as Record<string, Record<string, unknown>>)
+              : undefined,
+        }),
+      )
       assistantEvents.set(assistantMessageID, { ...assistant, content })
     }
     if (type === "session.next.reasoning.ended") {

@@ -2490,6 +2490,73 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("restores started event-backed assistant content before it finishes", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_event_assistant_started",
+          title: "Core event assistant started",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_event_assistant_started", [
+          {
+            type: "session.next.step.started",
+            assistantMessageID: "msg_core_event_assistant_started",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 30,
+          },
+          {
+            type: "session.next.reasoning.started",
+            assistantMessageID: "msg_core_event_assistant_started",
+            reasoningID: "reasoning_core_started",
+            providerMetadata: { anthropic: { signature: "sig_started" } },
+            timestamp: 31,
+          },
+          {
+            type: "session.next.text.started",
+            assistantMessageID: "msg_core_event_assistant_started",
+            textID: "text_core_started",
+            timestamp: 32,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const messages = yield* sessions.messages({
+        sessionID: SessionV2.ID.make("ses_core_event_assistant_started"),
+        order: "asc",
+      })
+
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({
+        id: "msg_core_event_assistant_started",
+        type: "assistant",
+        content: [
+          { type: "reasoning", id: "reasoning_core_started", text: "" },
+          { type: "text", id: "text_core_started", text: "" },
+        ],
+      })
+      if (messages[0]?.type === "assistant") {
+        expect(messages[0].content[0]).toMatchObject({
+          providerMetadata: { anthropic: { signature: "sig_started" } },
+        })
+      }
+    }),
+  )
+
   it.effect("restores failed event-backed assistant steps from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
