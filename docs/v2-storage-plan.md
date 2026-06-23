@@ -219,6 +219,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - Share/unshare 写入 share 元数据时也接受目录上下文；HTTP share/unshare 会把当前 session 目录传给 metadata 写入链路。
 - ShareNext 创建分享后的 full sync 也会继续使用显式目录上下文；复制 `.agents/atree/` 到目标目录后，首次分享同步出去的 session/messages/diffs 会来自目标目录事实源，而不是源目录或全局 SQLite 缓存。
 - CLI `import` 导入分享或 JSON 文件时，会先写入当前目录的 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl`，再刷新 SQLite 兼容投影；导入来的会话不再只是全局数据库里的会话。
+- CLI `import` 的 SQLite session/message/part 回填只是兼容投影；目录事实源写入成功后，即使兼容投影因为缺少旧 project row 或外键状态失败，也不会阻断导入。
 - CLI `stats` 聚合会话时会通过 `Session.listGlobal()` 和带目录上下文的 `Session.messages()` 读取；只有目录事实源、没有 SQLite session row 的会话也会被统计。
 - Project 识别从 global 或旧 root project 升级为真实 git/remote project 时，会同步迁移当前目录下 file-backed sessions 的 `projectID`，并把 `session.updated` 写入各自 `session.jsonl`；即使没有 SQLite session row，目录会话也不会停留在旧 project 归属。
 - opencode session 模块已删除旧的顶层 `listGlobal` 生成器；全局会话列表只保留 `Session.Service.listGlobal()` 这一条会合并目录事实源的路径，避免出现纯 SQLite 列表旁路。

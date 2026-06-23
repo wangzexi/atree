@@ -129,7 +129,7 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
       set: { project_id: row.project_id, directory: row.directory, path: row.path },
     })
     .run()
-    .pipe(Effect.orDie)
+    .pipe(Effect.catchCause(() => Effect.void))
 
   for (const msg of exportData.messages) {
     const msgInfo = decodeMessageInfo(msg.info) as SessionV1.Info
@@ -145,7 +145,7 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
       })
       .onConflictDoNothing()
       .run()
-      .pipe(Effect.orDie)
+      .pipe(Effect.catchCause(() => Effect.void))
 
     for (const part of msg.parts) {
       const partInfo = decodePart(part) as SessionV1.Part
@@ -161,7 +161,7 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
         })
         .onConflictDoNothing()
         .run()
-        .pipe(Effect.orDie)
+        .pipe(Effect.catchCause(() => Effect.void))
     }
   }
 
