@@ -83,10 +83,6 @@ export const dict = {
   "command.session.compact.description": "Sažmi sesiju kako bi se smanjio kontekst",
   "command.session.fork": "Fork iz poruke",
   "command.session.fork.description": "Kreiraj novu sesiju iz prethodne poruke",
-  "command.session.share": "Podijeli sesiju",
-  "command.session.share.description": "Podijeli ovu sesiju i kopiraj URL u međuspremnik",
-  "command.session.unshare": "Ukini dijeljenje sesije",
-  "command.session.unshare.description": "Zaustavi dijeljenje ove sesije",
 
   "palette.search.placeholder": "Pretraži datoteke, komande i sesije",
   "palette.empty": "Nema rezultata",
@@ -219,6 +215,7 @@ export const dict = {
   "common.loading": "Učitavanje",
   "common.loading.ellipsis": "...",
   "common.cancel": "Otkaži",
+  "common.copied": "Copied",
   "common.connect": "Poveži",
   "common.disconnect": "Prekini vezu",
   "common.continue": "Pošalji",
@@ -428,16 +425,7 @@ export const dict = {
   "toast.context.noLineSelection.title": "Nema odabranih linija",
   "toast.context.noLineSelection.description": "Prvo odaberi raspon linija u kartici datoteke.",
 
-  "toast.session.share.copyFailed.title": "Neuspjelo kopiranje URL-a u međuspremnik",
-  "toast.session.share.success.title": "Sesija podijeljena",
-  "toast.session.share.success.description": "URL za dijeljenje je kopiran u međuspremnik!",
-  "toast.session.share.failed.title": "Neuspjelo dijeljenje sesije",
-  "toast.session.share.failed.description": "Došlo je do greške prilikom dijeljenja sesije",
 
-  "toast.session.unshare.success.title": "Dijeljenje sesije ukinuto",
-  "toast.session.unshare.success.description": "Dijeljenje sesije je uspješno ukinuto!",
-  "toast.session.unshare.failed.title": "Neuspjelo ukidanje dijeljenja",
-  "toast.session.unshare.failed.description": "Došlo je do greške prilikom ukidanja dijeljenja",
 
   "toast.session.listFailed.title": "Neuspjelo učitavanje sesija za {{project}}",
 
@@ -562,18 +550,6 @@ export const dict = {
   "status.popover.tab.lsp": "LSP",
   "status.popover.tab.plugins": "Plugini",
   "status.popover.action.manageServers": "Upravljaj serverima",
-
-  "session.share.popover.title": "Objavi na webu",
-  "session.share.popover.description.shared": "Ova sesija je javna na webu. Dostupna je svima koji imaju link.",
-  "session.share.popover.description.unshared": "Podijeli sesiju javno na webu. Biće dostupna svima koji imaju link.",
-  "session.share.action.share": "Podijeli",
-  "session.share.action.publish": "Objavi",
-  "session.share.action.publishing": "Objavljivanje...",
-  "session.share.action.unpublish": "Poništi objavu",
-  "session.share.action.unpublishing": "Poništavanje objave...",
-  "session.share.action.view": "Prikaži",
-  "session.share.copy.copied": "Kopirano",
-  "session.share.copy.copyLink": "Kopiraj link",
 
   "lsp.tooltip.none": "Nema LSP servera",
   "lsp.label.connected": "{{count}} LSP",

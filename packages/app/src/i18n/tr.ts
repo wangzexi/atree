@@ -87,10 +87,6 @@ export const dict = {
   "command.session.compact.description": "Bağlam boyutunu azaltmak için oturumu özetle",
   "command.session.fork": "Mesajdan dallandır",
   "command.session.fork.description": "Önceki bir mesajdan yeni oturum oluştur",
-  "command.session.share": "Oturumu paylaş",
-  "command.session.share.description": "Bu oturumu paylaş ve URL'yi panoya kopyala",
-  "command.session.unshare": "Paylaşımı kaldır",
-  "command.session.unshare.description": "Bu oturumun paylaşımını durdur",
 
   "palette.search.placeholder": "Dosya, komut ve oturum ara",
   "palette.empty": "Sonuç bulunamadı",
@@ -223,6 +219,7 @@ export const dict = {
   "common.loading": "Yükleniyor",
   "common.loading.ellipsis": "...",
   "common.cancel": "İptal",
+  "common.copied": "Copied",
   "common.connect": "Bağlan",
   "common.disconnect": "Bağlantı Kes",
   "common.continue": "Gönder",
@@ -431,16 +428,7 @@ export const dict = {
   "toast.context.noLineSelection.title": "Satır seçimi yok",
   "toast.context.noLineSelection.description": "Önce bir dosya sekmesinde satır aralığı seçin.",
 
-  "toast.session.share.copyFailed.title": "URL panoya kopyalanamadı",
-  "toast.session.share.success.title": "Oturum paylaşıldı",
-  "toast.session.share.success.description": "Paylaşım URL'si panoya kopyalandı!",
-  "toast.session.share.failed.title": "Oturum paylaşılamadı",
-  "toast.session.share.failed.description": "Oturum paylaşılırken bir hata oluştu",
 
-  "toast.session.unshare.success.title": "Oturum paylaşımı kaldırıldı",
-  "toast.session.unshare.success.description": "Oturum paylaşımı başarıyla kaldırıldı!",
-  "toast.session.unshare.failed.title": "Oturum paylaşımı kaldırılamadı",
-  "toast.session.unshare.failed.description": "Oturum paylaşımı kaldırılırken bir hata oluştu",
 
   "toast.session.listFailed.title": "{{project}} için oturumlar yüklenemedi",
 
@@ -567,19 +555,6 @@ export const dict = {
   "status.popover.tab.lsp": "LSP",
   "status.popover.tab.plugins": "Eklentiler",
   "status.popover.action.manageServers": "Sunucuları yönet",
-
-  "session.share.popover.title": "Web'de yayınla",
-  "session.share.popover.description.shared": "Bu oturum web'de herkese açıktır. Bağlantıya sahip herkes erişebilir.",
-  "session.share.popover.description.unshared":
-    "Oturumu web'de herkese açık olarak paylaşın. Bağlantıya sahip herkes erişebilecek.",
-  "session.share.action.share": "Paylaş",
-  "session.share.action.publish": "Yayınla",
-  "session.share.action.publishing": "Yayınlanıyor...",
-  "session.share.action.unpublish": "Yayından kaldır",
-  "session.share.action.unpublishing": "Yayından kaldırılıyor...",
-  "session.share.action.view": "Görüntüle",
-  "session.share.copy.copied": "Kopyalandı",
-  "session.share.copy.copyLink": "Bağlantı kopyala",
 
   "lsp.tooltip.none": "LSP sunucusu yok",
   "lsp.label.connected": "{{count}} LSP",

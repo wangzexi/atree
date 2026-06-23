@@ -1390,7 +1390,7 @@ describe("session HttpApi", () => {
           }),
         ).toBe(true)
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1428,7 +1428,7 @@ describe("session HttpApi", () => {
         ).toEqual([])
         expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, created.id))).toEqual([])
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1480,7 +1480,7 @@ describe("session HttpApi", () => {
         expect(archived.time.archived).toBe(1)
         expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual([])
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1528,7 +1528,7 @@ describe("session HttpApi", () => {
         })
         expect(restored.map((item) => item.id)).toContain(schedule.id)
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1570,7 +1570,7 @@ describe("session HttpApi", () => {
           sourceBeforeRemove,
         )
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1612,7 +1612,7 @@ describe("session HttpApi", () => {
         expect(stored).toHaveLength(1)
         expect(stored[0]).toMatchObject({ id: schedule.id, message: "api creates directory schedule" })
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1663,7 +1663,7 @@ describe("session HttpApi", () => {
         ).toBe(true)
         expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual([])
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
@@ -1695,7 +1695,7 @@ describe("session HttpApi", () => {
         expect(messages.status).toBe(200)
         expect(yield* getWorkspaceID(created.id)).toEqual({ workspaceID: workspace.id })
       }),
-    { git: true, config: { formatter: false, lsp: false, share: "disabled" } },
+    { git: true, config: { formatter: false, lsp: false } },
   )
 
   it.instance(
