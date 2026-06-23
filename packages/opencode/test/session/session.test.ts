@@ -1504,6 +1504,25 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not load a current-directory session that only exists in the stale SQLite cache", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const cachedOnly = yield* session.create({ title: "cached-only-current-directory-session" })
+
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", cachedOnly.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const error = yield* Effect.flip(session.get(cachedOnly.id))
+      expect(error).toBeInstanceOf(NotFoundError)
+      expect(error.message).toBe(`Session not found: ${cachedOnly.id}`)
+    }),
+  )
+
   it.instance("does not resolve explicit directory sessions from the persisted root", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

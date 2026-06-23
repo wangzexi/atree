@@ -727,6 +727,9 @@ export const layer: Layer.Layer<
           yield* syncFileSessionCache(merged)
           return merged
         }
+        if (ctx?.directory && sameDirectory(ctx.directory, cached.directory)) {
+          return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+        }
         const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
           Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
         )
