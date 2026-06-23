@@ -680,16 +680,6 @@ export const layer: Layer.Layer<
 
     const syncFileSessionCache = Effect.fn("Session.syncFileSessionCache")(function* (fileSession: Info) {
       yield* ensureFileSessionProject(fileSession)
-      const existing = yield* db
-        .select({ directory: SessionTable.directory })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, fileSession.id))
-        .get()
-        .pipe(Effect.orDie)
-      if (existing?.directory && !sameDirectory(existing.directory, fileSession.directory)) {
-        const existingFileSession = yield* Effect.promise(() => readSessionStore(existing.directory, fileSession.id))
-        if (existingFileSession) return
-      }
       const row = toRow(fileSession)
       yield* db
         .insert(SessionTable)

@@ -544,7 +544,7 @@ describe("Session", () => {
     }),
   )
 
-  it.instance("does not rewrite a valid cached directory when reading a copied session explicitly", () =>
+  it.instance("updates the runtime cache to the explicit file-backed session directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const source = yield* tmpdirScoped({ git: true })
@@ -571,7 +571,7 @@ describe("Session", () => {
 
       expect(copied.directory).toBe(target)
       expect(copied.title).toBe("target copied session")
-      expect(row?.directory).toBe(source)
+      expect(row?.directory).toBe(target)
     }),
   )
 
