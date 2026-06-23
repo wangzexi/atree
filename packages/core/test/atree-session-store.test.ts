@@ -2099,6 +2099,77 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("records file-backed prompts without writing SQLite input projections even when the DB row matches", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-prompt-no-db-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-prompt-no-db-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_no_db_projection")
+      const messageID = SessionMessage.ID.make("msg_core_prompt_no_db_projection")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core prompt no db projection",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "prompt-no-db-projection",
+          directory: AbsolutePath.make(node),
+          title: "Core prompt no db projection",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sessions = yield* SessionV2.Service
+      const admitted = yield* sessions.prompt({
+        sessionID,
+        id: messageID,
+        prompt: new Prompt({ text: "record only in file" }),
+        resume: false,
+      })
+      const inputRow = yield* db
+        .select({ id: SessionInputTable.id })
+        .from(SessionInputTable)
+        .where(eq(SessionInputTable.id, messageID))
+        .get()
+        .pipe(Effect.orDie)
+      const messageRow = yield* db
+        .select({ id: SessionMessageTable.id })
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.id, messageID))
+        .get()
+        .pipe(Effect.orDie)
+      const messages = yield* sessions.messages({ sessionID, order: "asc" })
+
+      expect(admitted).toMatchObject({ id: messageID, admittedSeq: 0 })
+      expect(inputRow).toBeUndefined()
+      expect(messageRow).toBeUndefined()
+      expect(messages).toHaveLength(1)
+      expect(messages[0]).toMatchObject({ id: messageID, type: "user", text: "record only in file" })
+    }),
+  )
+
   it.effect("does not append duplicate prompt entries when retrying an existing file-backed prompt", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

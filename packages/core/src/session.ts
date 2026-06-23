@@ -612,14 +612,26 @@ export const layer = Layer.effect(
             )
             if (existingFileMessage && (existingFileMessage.type !== "user" || !promptsMatch(input.prompt, existingFileMessage)))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
-            if (existingFileMessage && !matchingSessionRow) {
+            if (fileBacked) {
+              if (!existingFileMessage) {
+                const admitted = new SessionInput.Admitted({
+                  admittedSeq: 0,
+                  id: messageID,
+                  sessionID: input.sessionID,
+                  prompt: input.prompt,
+                  delivery: input.delivery ?? "steer",
+                  timeCreated: yield* DateTime.now,
+                })
+                yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
+                return admitted
+              }
               return new SessionInput.Admitted({
                 admittedSeq: 0,
                 id: messageID,
                 sessionID: input.sessionID,
                 prompt: input.prompt,
                 delivery: input.delivery ?? "steer",
-                timeCreated: existingFileMessage.time.created,
+                timeCreated: existingFileMessage?.time.created ?? (yield* DateTime.now),
               })
             }
             if (!matchingSessionRow) {
