@@ -458,6 +458,18 @@ describe("MessageV2.parts", () => {
       }),
     ),
   )
+
+  it.instance("does not read global parts when an explicit directory lacks session id", () =>
+    withSession(({ sessionID }) =>
+      Effect.gen(function* () {
+        const instance = yield* TestInstance
+        const [id] = yield* fill(sessionID, 1)
+
+        const result = yield* MessageV2.parts(id, { directory: instance.directory })
+        expect(result).toEqual([])
+      }),
+    ),
+  )
 })
 
 describe("MessageV2.get", () => {
