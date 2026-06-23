@@ -83,7 +83,56 @@ describe("SessionTodo", () => {
     }),
   )
 
-  it.effect("mirrors todo state into a file-backed session directory", () =>
+  it.effect("does not locate a file-backed todo through a SQLite directory row", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-no-sqlite-fallback-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const todos = yield* SessionTodo.Service
+      const fileSessionID = SessionV2.ID.make("ses_core_file_todo_no_sqlite_fallback")
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(directory), sandboxes: [] })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: fileSessionID,
+          project_id: Project.ID.global,
+          slug: "file-todo-no-sqlite-fallback",
+          directory,
+          title: "file todo no sqlite fallback",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: fileSessionID,
+          projectID: Project.ID.global,
+          title: "file todo no sqlite fallback",
+          location: { directory: AbsolutePath.make(directory) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+
+      const state = [{ content: "should require explicit directory", status: "pending", priority: "high" }]
+      yield* todos.update({ sessionID: fileSessionID, todos: state })
+
+      expect(yield* todos.get(fileSessionID)).toEqual([])
+      expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
+        hasState: false,
+        todos: [],
+      })
+    }),
+  )
+
+  it.effect("mirrors todo state into an explicit file-backed session directory", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
         Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-"))),
@@ -122,7 +171,7 @@ describe("SessionTodo", () => {
       )
 
       const state = [{ content: "directory todo", status: "pending", priority: "high" }]
-      yield* todos.update({ sessionID: fileSessionID, todos: state })
+      yield* todos.update({ sessionID: fileSessionID, directory, todos: state })
       expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
         hasState: true,
         todos: state,
@@ -139,7 +188,7 @@ describe("SessionTodo", () => {
         hasState: true,
         todos: state,
       })
-      expect(yield* todos.get(fileSessionID)).toEqual(state)
+      expect(yield* todos.get(fileSessionID, { directory })).toEqual(state)
     }),
   )
 
@@ -232,7 +281,7 @@ describe("SessionTodo", () => {
       )
 
       const state = [{ content: "directory-only todo", status: "pending", priority: "high" }]
-      yield* todos.update({ sessionID: fileSessionID, todos: state })
+      yield* todos.update({ sessionID: fileSessionID, directory, todos: state })
 
       expect(yield* todos.get(fileSessionID)).toEqual(state)
       expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
@@ -572,7 +621,7 @@ describe("SessionTodo", () => {
       )
 
       const state = [{ content: "core event before projection", status: "pending", priority: "medium" }]
-      yield* todos.update({ sessionID: fileSessionID, todos: state })
+      yield* todos.update({ sessionID: fileSessionID, directory, todos: state })
 
       const raw = yield* Effect.promise(() =>
         readFile(path.join(directory, ".agents", "atree", "sessions", fileSessionID, "session.jsonl"), "utf8"),
@@ -639,7 +688,7 @@ describe("SessionTodo", () => {
 
       expect(yield* todos.get(fileSessionID)).toEqual([])
 
-      yield* todos.update({ sessionID: fileSessionID, todos: [] })
+      yield* todos.update({ sessionID: fileSessionID, directory, todos: [] })
       expect(yield* Effect.promise(() => readSessionTodoProjection(directory, fileSessionID))).toEqual({
         hasState: true,
         todos: [],

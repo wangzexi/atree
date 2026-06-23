@@ -1,13 +1,11 @@
 export * as SessionTodo from "./todo"
 
-import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { appendSessionJsonl, findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "../atree/todo-store"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
-import { SessionTable } from "./sql"
 
 export const Info = Schema.Struct({
   content: Schema.String.annotate({ description: "Brief description of the task" }),
@@ -45,7 +43,6 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const { db } = yield* Database.Service
     const events = yield* EventV2.Service
     type FileSessionResolution =
       | { type: "found"; session: NonNullable<Awaited<ReturnType<typeof readSessionStore>>> }
@@ -66,18 +63,6 @@ export const layer = Layer.effect(
       )
       if (root) {
         const session = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
-          Effect.catchCause(() => Effect.succeed(undefined)),
-        )
-        if (session) return { type: "found", session }
-      }
-      const row = yield* db
-        .select({ directory: SessionTable.directory })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      if (row?.directory) {
-        const session = yield* Effect.promise(() => readSessionStore(row.directory, sessionID)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (session) return { type: "found", session }
