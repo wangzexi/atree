@@ -13,6 +13,8 @@ import { NotFoundError } from "@/storage/storage"
 import { EOL } from "os"
 import path from "path"
 import { which } from "@opencode-ai/core/util/which"
+import { InstanceRef } from "@/effect/instance-ref"
+import type { InstanceContext } from "@/project/instance-context"
 
 function pagerCmd(): string[] {
   const lessOptions = ["-R", "-S"]
@@ -48,6 +50,10 @@ export const SessionCommand = cmd({
   async handler() {},
 })
 
+export function scopedSessionOptions(ctx: InstanceContext | undefined) {
+  return ctx?.directory ? { directory: ctx.directory } : {}
+}
+
 export const SessionDeleteCommand = effectCmd({
   command: "delete <sessionID>",
   describe: "delete a session",
@@ -59,9 +65,10 @@ export const SessionDeleteCommand = effectCmd({
     }),
   handler: Effect.fn("Cli.session.delete")(function* (args) {
     const svc = yield* Session.Service
+    const ctx = yield* InstanceRef
     const sessionID = SessionID.make(args.sessionID)
     yield* svc
-      .remove(sessionID)
+      .remove(sessionID, scopedSessionOptions(ctx))
       .pipe(Effect.catchIf(NotFoundError.isInstance, () => fail(`Session not found: ${args.sessionID}`)))
     UI.println(UI.Style.TEXT_SUCCESS_BOLD + `Session ${args.sessionID} deleted` + UI.Style.TEXT_NORMAL)
   }),
@@ -84,7 +91,10 @@ export const SessionListCommand = effectCmd({
         default: "table",
       }),
   handler: Effect.fn("Cli.session.list")(function* (args) {
-    const sessions = yield* Session.Service.use((svc) => svc.list({ roots: true, limit: args.maxCount }))
+    const ctx = yield* InstanceRef
+    const sessions = yield* Session.Service.use((svc) =>
+      svc.list({ roots: true, limit: args.maxCount, ...scopedSessionOptions(ctx) }),
+    )
 
     if (sessions.length === 0) return
 
