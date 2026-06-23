@@ -1,26 +1,13 @@
 export * as SessionTodo from "./todo"
 
-import path from "path"
-import fs from "fs/promises"
-import { asc, eq } from "drizzle-orm"
+import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { appendSessionJsonl, findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "../atree/todo-store"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
-import { SessionTable, TodoTable } from "./sql"
-
-async function realpathOrResolve(input: string) {
-  return fs.realpath(input).catch(() => path.resolve(input))
-}
-
-async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
-  if (!parent || !child) return false
-  const root = await realpathOrResolve(parent)
-  const target = await realpathOrResolve(child)
-  return target === root || target.startsWith(root + path.sep)
-}
+import { SessionTable } from "./sql"
 
 export const Info = Schema.Struct({
   content: Schema.String.annotate({ description: "Brief description of the task" }),
@@ -62,7 +49,6 @@ export const layer = Layer.effect(
     const events = yield* EventV2.Service
     type FileSessionResolution =
       | { type: "found"; session: NonNullable<Awaited<ReturnType<typeof readSessionStore>>> }
-      | { type: "missing" }
       | { type: "none" }
 
     const fileSession = Effect.fn("SessionTodo.fileSession")(function* (
@@ -73,18 +59,16 @@ export const layer = Layer.effect(
         const session = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
-        return session ? { type: "found", session } : { type: "missing" }
+        return session ? { type: "found", session } : { type: "none" }
       }
       const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
       )
-      let rootSessionMissing = false
       if (root) {
         const session = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (session) return { type: "found", session }
-        rootSessionMissing = true
       }
       const row = yield* db
         .select({ directory: SessionTable.directory })
@@ -97,8 +81,6 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (session) return { type: "found", session }
-        if (rootSessionMissing && (yield* Effect.promise(() => isWithinDirectory(root, row.directory))))
-          return { type: "missing" }
       }
       return { type: "none" }
     })
@@ -110,7 +92,7 @@ export const layer = Layer.effect(
     }) {
       const resolved = yield* fileSession(input.sessionID, input.directory)
       const session = resolved.type === "found" ? resolved.session : undefined
-      if (resolved.type === "missing") return
+      if (!session) return
       if (session) {
         yield* Effect.promise(() =>
           appendSessionJsonl(session, {
@@ -127,28 +109,6 @@ export const layer = Layer.effect(
           ),
         )
       }
-      if (!session) {
-        yield* db
-          .transaction((tx) =>
-            Effect.gen(function* () {
-              yield* tx.delete(TodoTable).where(eq(TodoTable.session_id, input.sessionID)).run()
-              if (input.todos.length === 0) return
-              yield* tx
-                .insert(TodoTable)
-                .values(
-                  input.todos.map((todo, position) => ({
-                    session_id: input.sessionID,
-                    content: todo.content,
-                    status: todo.status,
-                    priority: todo.priority,
-                    position,
-                  })),
-                )
-                .run()
-            }),
-          )
-          .pipe(Effect.orDie)
-      }
       if (session) {
         yield* Effect.promise(() => writeSessionTodoState(session.location.directory, input.sessionID, input.todos))
       }
@@ -160,25 +120,13 @@ export const layer = Layer.effect(
       options?: { readonly directory?: string },
     ) {
       const resolved = yield* fileSession(sessionID, options?.directory)
-      if (resolved.type === "missing") return []
       const session = resolved.type === "found" ? resolved.session : undefined
       if (session) {
         const projection = yield* Effect.promise(() => readSessionTodoProjection(session.location.directory, sessionID))
         if (projection.hasState) return projection.todos
         return []
       }
-      const rows = yield* db
-        .select()
-        .from(TodoTable)
-        .where(eq(TodoTable.session_id, sessionID))
-        .orderBy(asc(TodoTable.position))
-        .all()
-        .pipe(Effect.orDie)
-      return rows.map((row) => ({
-        content: row.content,
-        status: row.status,
-        priority: row.priority,
-      }))
+      return []
     })
 
     return Service.of({ update, get })

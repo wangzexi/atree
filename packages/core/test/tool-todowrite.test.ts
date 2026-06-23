@@ -73,7 +73,7 @@ const call = (todos: ReadonlyArray<SessionTodo.Info>, id = "call-todowrite", dir
 })
 
 describe("TodoWriteTool", () => {
-  it.effect("registers, approves the wildcard resource, persists todos, and returns typed output", () =>
+  it.effect("registers, approves the wildcard resource, and returns typed output without a file-backed session", () =>
     Effect.gen(function* () {
       yield* setup
       const registry = yield* ToolRegistry.Service
@@ -89,11 +89,11 @@ describe("TodoWriteTool", () => {
         },
       })
       expect(assertions).toMatchObject([{ sessionID, action: "todowrite", resources: ["*"], save: ["*"] }])
-      expect(yield* service.get(sessionID)).toEqual(todoList)
+      expect(yield* service.get(sessionID)).toEqual([])
     }),
   )
 
-  it.effect("does not update persisted todos when permission is denied", () =>
+  it.effect("does not persist todos without a file-backed session when permission is denied", () =>
     Effect.gen(function* () {
       yield* setup
       const registry = yield* ToolRegistry.Service
@@ -107,7 +107,7 @@ describe("TodoWriteTool", () => {
         type: "error",
         value: "Unable to update todos",
       })
-      expect(yield* service.get(sessionID)).toEqual([{ content: "keep", status: "pending", priority: "low" }])
+      expect(yield* service.get(sessionID)).toEqual([])
       expect(assertions).toMatchObject([{ sessionID, action: "todowrite", resources: ["*"], save: ["*"] }])
     }),
   )
