@@ -463,10 +463,6 @@ export const RunCommand = effectCmd({
         }
       }
 
-      async function share(_sdk: OpencodeClient, _sessionID: string) {
-        return
-      }
-
       async function createFreshSession(
         sdk: OpencodeClient,
         input: { agent: string | undefined; model: ModelInput | undefined; variant: string | undefined },
@@ -488,7 +484,6 @@ export const RunCommand = effectCmd({
           throw new Error("Failed to create session")
         }
 
-        void share(sdk, id).catch(() => {})
         return {
           id,
           title: result.data?.title,
@@ -743,8 +738,6 @@ export const RunCommand = effectCmd({
         // Validate agent if specified
         const agent = await pickAgent(client)
 
-        await share(client, sessionID)
-
         if (!args.interactive) {
           const events = await client.event.subscribe()
           const completed = loop(client, events).catch((e) => {
@@ -834,7 +827,6 @@ export const RunCommand = effectCmd({
             fetch: fetchFn,
             resolveAgent: localAgent,
             session,
-            share,
             createSession: createFreshSession,
             agent: args.agent,
             model,
