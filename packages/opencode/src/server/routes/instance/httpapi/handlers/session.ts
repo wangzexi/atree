@@ -320,10 +320,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const abort = Effect.fn("SessionHttpApi.abort")(function* (ctx: { params: { sessionID: SessionID } }) {
-      const context = yield* InstanceState.context.pipe(
-        Effect.catchCause(() => Effect.succeed({ directory: undefined } as { directory?: string })),
+      const current = yield* requireSession(ctx.params.sessionID).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
       )
-      yield* promptSvc.cancel(ctx.params.sessionID, { directory: context.directory })
+      yield* promptSvc.cancel(ctx.params.sessionID, { directory: current?.directory })
       return true
     })
 

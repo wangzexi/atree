@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, mock } from "bun:test"
 import { Effect, Layer } from "effect"
+import fs from "fs/promises"
+import path from "path"
 import { Session as SessionNs } from "@/session/session"
 import { disposeAllInstances, TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -84,6 +86,16 @@ describe("session action routes", () => {
 
         expect(res.status).toBe(200)
         expect(yield* res.json).toBe(true)
+
+        const childDirectory = path.join(test.directory, "child")
+        yield* Effect.promise(() => fs.mkdir(childDirectory, { recursive: true }))
+        const child = yield* Effect.acquireRelease(SessionNs.use.create({ directory: childDirectory }), (created) =>
+          SessionNs.use.remove(created.id, { directory: childDirectory }).pipe(Effect.ignore),
+        )
+        const childAbort = yield* requestInDirectory(`/session/${child.id}/abort`, test.directory, { method: "POST" })
+
+        expect(childAbort.status).toBe(200)
+        expect(yield* childAbort.json).toBe(true)
       }),
     { git: true },
   )
