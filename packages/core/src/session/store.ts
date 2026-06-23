@@ -23,13 +23,6 @@ async function realpathOrResolve(input: string) {
   return fs.realpath(input).catch(() => path.resolve(input))
 }
 
-async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
-  if (!parent || !child) return false
-  const root = await realpathOrResolve(parent)
-  const target = await realpathOrResolve(child)
-  return target === root || target.startsWith(root + path.sep)
-}
-
 async function isSameDirectory(left: string | undefined, right: string | undefined) {
   if (!left || !right) return false
   return (await realpathOrResolve(left)) === (await realpathOrResolve(right))
@@ -95,9 +88,8 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileSession) return fileSession
-        if (yield* Effect.promise(() => isWithinDirectory(root, cached.location.directory))) return undefined
       }
-      return cached
+      return undefined
     })
 
     const findFileBackedMessage = Effect.fn("SessionStore.findFileBackedMessage")(function* (
