@@ -933,7 +933,24 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.id, scheduleID))
         .get()
         .pipe(Effect.orDie)
-      if (!row) return
+      if (!row) {
+        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+        )
+        const found = state.rootDirectory
+          ? yield* Effect.promise(() => findSessionScheduleState(state.rootDirectory!, scheduleID)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+          : undefined
+        if (!found) return
+        const restored = yield* ensureScheduleRowFromDirectory(
+          scheduleID,
+          found.sessionID as SessionID,
+          found.directory,
+        )
+        if (restored) yield* process(scheduleID)
+        return
+      }
       const sessionID = row.session_id as SessionID
       const location = yield* resolveSessionLocation(sessionID)
       if (location.type === "missing") return
