@@ -526,7 +526,7 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
       }
     }
   }
-  if (input.directory) {
+  if (!fileSession && input.directory) {
     return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
   }
   if (yield* missingPersistedRootSession(db, input.sessionID)) {
