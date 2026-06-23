@@ -42,7 +42,7 @@ const session = (input: Partial<Session> & Pick<Session, "id" | "directory">) =>
     version: "v2",
     parentID: undefined,
     messageCount: 0,
-    permissions: { session: {}, share: {} },
+    permissions: { session: {} },
     time: { created: 0, updated: 0, archived: undefined },
     ...input,
   }) as Session
