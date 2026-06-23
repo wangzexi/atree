@@ -1446,6 +1446,70 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "clears a completed once schedule from directory state after it fires",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_once_schedule_completed" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "once-schedule-completed",
+          version: "test",
+          projectID: "proj_once_schedule_completed",
+          directory,
+          path: ".",
+          title: "Once schedule completed",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          directory,
+          kind: "once",
+          runAt: now + 60_000,
+          message: "run once and disappear",
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toHaveLength(1)
+
+      yield* Schedule.Service.use((schedule) => schedule.tick(created.id))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, created.id as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row).toBeUndefined()
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+      expect(entries.map((entry) => entry.type)).toContain("schedule.ran")
+      expect(entries.at(-1)).toMatchObject({
+        type: "schedule.deleted",
+        scheduleID: created.id,
+        sessionID,
+        reason: "completed",
+      })
+    }),
+  )
+
   it.instance(
     "creates a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {
