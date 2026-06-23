@@ -2212,6 +2212,59 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("replays file-backed durable event versions from their current definitions", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_file_event_versions",
+          title: "Core file event versions",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_file_event_versions", [
+          {
+            type: "session.next.step.started",
+            sessionID: "ses_core_file_event_versions",
+            assistantMessageID: "msg_core_file_versioned_assistant",
+            agent: "build",
+            model: { providerID: "test", id: "model-a", variant: "default" },
+            timestamp: 30,
+          },
+          {
+            type: "session.next.step.ended.2",
+            sessionID: "ses_core_file_event_versions",
+            assistantMessageID: "msg_core_file_versioned_assistant",
+            finish: "stop",
+            cost: 0,
+            tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
+            timestamp: 31,
+          },
+        ]),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const events = Array.from(
+        yield* sessions.events({ sessionID: SessionV2.ID.make("ses_core_file_event_versions") }).pipe(Stream.runCollect),
+      )
+
+      expect(events.map((item) => [item.event.type, item.event.version])).toEqual([
+        ["session.next.step.started", 1],
+        ["session.next.step.ended", 2],
+      ])
+    }),
+  )
+
   it.effect("replays durable events from the hinted directory when session ids overlap", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

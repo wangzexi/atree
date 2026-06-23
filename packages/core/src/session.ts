@@ -320,7 +320,7 @@ export const layer = Layer.effect(
         const event = {
           id: EventV2.ID.make(`evt_atree_${session.id}_${index}`),
           type,
-          version: 1,
+          ...(definition.sync === undefined ? {} : { version: definition.sync.version }),
           seq: index,
           data: decoded.value,
           location: session.location,
