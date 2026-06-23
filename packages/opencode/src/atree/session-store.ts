@@ -49,7 +49,6 @@ function metaYaml(info: SessionInfo) {
     `cost: ${yamlValue(info.cost)}`,
     `tokens: ${yamlValue(info.tokens)}`,
     `permission: ${yamlValue(info.permission)}`,
-    `share: ${yamlValue(info.share)}`,
     `summary: ${yamlValue(info.summary)}`,
     `revert: ${yamlValue(info.revert)}`,
     yamlMetadata(info.metadata).trimEnd(),
