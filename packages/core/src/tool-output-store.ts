@@ -172,7 +172,8 @@ export const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       directoryHint?: string,
     ) {
-      const directory = (yield* sessionDirectory(sessionID, directoryHint)) ?? globalDirectory
+      const directory = yield* sessionDirectory(sessionID, directoryHint)
+      if (!directory) return
       const file = path.join(directory, `tool_${Identifier.ascending()}`)
       yield* fs.ensureDir(directory).pipe(Effect.mapError((cause) => new StorageError({ operation: "write", cause })))
       yield* fs
@@ -202,7 +203,9 @@ export const layer = Layer.effect(
         }
 
       const outputPath = yield* write(contextual, input.sessionID, input.directory)
-      const marker = `... output truncated; full content saved to ${outputPath} ...`
+      const marker = outputPath
+        ? `... output truncated; full content saved to ${outputPath} ...`
+        : "... output truncated; no session asset store available ..."
 
       return {
         output: {
@@ -215,7 +218,7 @@ export const layer = Layer.effect(
             ...media,
           ],
         },
-        outputPaths: [outputPath],
+        outputPaths: outputPath ? [outputPath] : [],
       }
     })
 

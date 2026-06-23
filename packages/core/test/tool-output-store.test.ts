@@ -1,6 +1,6 @@
 import { describe, expect } from "bun:test"
 import path from "path"
-import { Cause, DateTime, Effect, Exit, Fiber, Layer, Option } from "effect"
+import { Cause, DateTime, Effect, Exit, Fiber, Layer } from "effect"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Global } from "@opencode-ai/core/global"
 import { Config } from "@opencode-ai/core/config"
@@ -51,8 +51,8 @@ const withStore = <A, E, R>(
 const it = testEffect(Layer.empty)
 
 describe("ToolOutputStore", () => {
-  it.live("bounds the provider-facing text channel with one managed file", () =>
-    withStore(({ store, fs }) =>
+  it.live("bounds the provider-facing text channel without global retention when no file-backed session exists", () =>
+    withStore(({ root, store, fs }) =>
       Effect.gen(function* () {
         const first = "HEAD-" + "x".repeat(30_000)
         const second = "y".repeat(30_000) + "-TAIL"
@@ -68,22 +68,23 @@ describe("ToolOutputStore", () => {
           },
         })
         expect(result.output.structured).toEqual({ kind: "report" })
-        expect(result.outputPaths).toHaveLength(1)
-        expect(yield* fs.readFileString(result.outputPaths[0])).toBe(first + second)
+        expect(result.outputPaths).toEqual([])
+        expect(yield* fs.exists(path.join(root, "tool-output"))).toBe(false)
         if (result.output.content[0]?.type !== "text") throw new Error("expected text preview")
+        expect(result.output.content[0].text).toContain("no session asset store available")
         expect(Buffer.byteLength(result.output.content[0].text)).toBeLessThanOrEqual(ToolOutputStore.MAX_BYTES)
       }),
     ),
   )
 
-  it.live("uses bounded text for oversized structured-only output", () =>
-    withStore(({ store, fs }) =>
+  it.live("uses bounded text for oversized structured-only output without global retention", () =>
+    withStore(({ root, store, fs }) =>
       Effect.gen(function* () {
         const structured = { text: "x".repeat(ToolOutputStore.MAX_BYTES) }
         const result = yield* store.bound({ sessionID, toolCallID: "call-json", output: { structured, content: [] } })
         expect(result.output.structured).toEqual(structured)
-        expect(result.outputPaths).toHaveLength(1)
-        expect(JSON.parse(yield* fs.readFileString(result.outputPaths[0]))).toEqual(structured)
+        expect(result.outputPaths).toEqual([])
+        expect(yield* fs.exists(path.join(root, "tool-output"))).toBe(false)
         expect(result.output.content).toHaveLength(1)
       }),
     ),
@@ -408,8 +409,8 @@ describe("ToolOutputStore", () => {
     ),
   )
 
-  it.live("preserves structured metadata and native media when bounding text", () =>
-    withStore(({ store, fs }) =>
+  it.live("preserves structured metadata and native media when bounding text without global retention", () =>
+    withStore(({ store }) =>
       Effect.gen(function* () {
         const text = "x".repeat(ToolOutputStore.MAX_BYTES + 1)
         const media = {
@@ -426,7 +427,7 @@ describe("ToolOutputStore", () => {
 
         expect(result.output.structured).toEqual({ caption: "pixel" })
         expect(result.output.content[1]).toEqual(media)
-        expect(yield* fs.readFileString(result.outputPaths[0])).toBe(text)
+        expect(result.outputPaths).toEqual([])
       }),
     ),
   )
@@ -444,20 +445,16 @@ describe("ToolOutputStore", () => {
     ),
   )
 
-  it.live("fails oversized settlement when complete retention cannot be written", () =>
+  it.live("does not write oversized output to global storage when complete retention is unavailable", () =>
     withStore(({ root, store, fs }) =>
       Effect.gen(function* () {
         yield* fs.writeFileString(path.join(root, "tool-output"), "not a directory")
-        const exit = yield* store
-          .bound({
-            sessionID,
-            toolCallID: "call-lossy",
-            output: { structured: {}, content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
-          })
-          .pipe(Effect.exit)
-        expect(Exit.isFailure(exit)).toBe(true)
-        if (Exit.isFailure(exit))
-          expect(Option.getOrUndefined(Cause.findErrorOption(exit.cause))?._tag).toBe("ToolOutputStore.StorageError")
+        const result = yield* store.bound({
+          sessionID,
+          toolCallID: "call-lossy",
+          output: { structured: {}, content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
+        })
+        expect(result.outputPaths).toEqual([])
       }),
     ),
   )
@@ -477,6 +474,18 @@ describe("ToolOutputStore", () => {
   it.live("preserves interruption while retaining complete output", () =>
     Effect.gen(function* () {
       const root = yield* Effect.promise(() => tmpdir())
+      const directory = yield* Effect.promise(() => tmpdir())
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          projectID: Project.ID.global,
+          title: "Interrupted tool output",
+          location: { directory: AbsolutePath.make(directory.path) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
       const blockedFilesystem = Layer.effect(
         FSUtil.Service,
         Effect.gen(function* () {
@@ -497,6 +506,7 @@ describe("ToolOutputStore", () => {
         const fiber = yield* service
           .bound({
             sessionID,
+            directory: directory.path,
             toolCallID: "call-interrupted",
             output: { structured: {}, content: [{ type: "text", text: "x".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
           })
@@ -506,6 +516,7 @@ describe("ToolOutputStore", () => {
       }).pipe(Effect.provide(store))
       expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true)
       yield* Effect.promise(() => root[Symbol.asyncDispose]())
+      yield* Effect.promise(() => directory[Symbol.asyncDispose]())
     }),
   )
 
@@ -519,7 +530,7 @@ describe("ToolOutputStore", () => {
             toolCallID: "call-config",
             output: { structured: {}, content: [{ type: "text", text: "one\ntwo\nthree" }] },
           })
-          expect(result.outputPaths).toHaveLength(1)
+          expect(result.outputPaths).toEqual([])
         }),
       new Config.Info({ tool_output: new ConfigToolOutput.Info({ max_lines: 2, max_bytes: 1_000 }) }),
     ),
