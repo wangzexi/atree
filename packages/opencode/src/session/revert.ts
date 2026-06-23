@@ -37,8 +37,8 @@ export const layer = Layer.effect(
     const state = yield* SessionRunState.Service
 
     const revert = Effect.fn("SessionRevert.revert")(function* (input: RevertInput) {
-      yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
+      yield* state.assertNotBusy(input.sessionID, { directory: session.directory })
       const all = yield* sessions
         .messages({ sessionID: input.sessionID, directory: session.directory })
         .pipe(Effect.orDie)
@@ -93,8 +93,8 @@ export const layer = Layer.effect(
 
     const unrevert = Effect.fn("SessionRevert.unrevert")(function* (input: { sessionID: SessionID; directory?: string }) {
       yield* Effect.logInfo("unreverting", { sessionID: input.sessionID })
-      yield* state.assertNotBusy(input.sessionID)
       const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
+      yield* state.assertNotBusy(input.sessionID, { directory: session.directory })
       if (!session.revert) return session
       if (session.revert.snapshot) yield* snap.restore(session.revert.snapshot)
       yield* sessions.clearRevert(input.sessionID, { directory: session.directory })

@@ -5,6 +5,7 @@ import { NonNegativeInt } from "@opencode-ai/core/schema"
 import { Effect, Layer, Context, Schema } from "effect"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
+import path from "path"
 
 export const Info = Schema.Union([
   Schema.Struct({
@@ -50,9 +51,9 @@ export const Event = {
 }
 
 export interface Interface {
-  readonly get: (sessionID: SessionID) => Effect.Effect<Info>
+  readonly get: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<Info>
   readonly list: () => Effect.Effect<Map<SessionID, Info>>
-  readonly set: (sessionID: SessionID, status: Info) => Effect.Effect<void>
+  readonly set: (sessionID: SessionID, status: Info, options?: { directory?: string }) => Effect.Effect<void>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/SessionStatus") {}
@@ -63,29 +64,46 @@ export const layer = Layer.effect(
     const events = yield* EventV2Bridge.Service
 
     const state = yield* InstanceState.make(
-      Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<SessionID, Info>())),
+      Effect.fn("SessionStatus.state")(() => Effect.succeed(new Map<string, { sessionID: SessionID; status: Info }>())),
     )
-    const fallbackState = new Map<SessionID, Info>()
+    const fallbackState = new Map<string, { sessionID: SessionID; status: Info }>()
     const currentState = InstanceState.get(state).pipe(Effect.catchCause(() => Effect.succeed(fallbackState)))
 
-    const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID) {
+    const key = (sessionID: SessionID, directory?: string) =>
+      `${directory ? path.resolve(directory) : ""}\0${sessionID}`
+
+    const get = Effect.fn("SessionStatus.get")(function* (sessionID: SessionID, options?: { directory?: string }) {
       const data = yield* currentState
-      return data.get(sessionID) ?? { type: "idle" as const }
+      if (options?.directory !== undefined) {
+        return data.get(key(sessionID, options.directory))?.status ?? { type: "idle" as const }
+      }
+      for (const current of data.values()) {
+        if (current.sessionID === sessionID) return current.status
+      }
+      return { type: "idle" as const }
     })
 
     const list = Effect.fn("SessionStatus.list")(function* () {
-      return new Map(yield* currentState)
+      const result = new Map<SessionID, Info>()
+      for (const { sessionID, status } of (yield* currentState).values()) {
+        result.set(sessionID, status)
+      }
+      return result
     })
 
-    const set = Effect.fn("SessionStatus.set")(function* (sessionID: SessionID, status: Info) {
+    const set = Effect.fn("SessionStatus.set")(function* (
+      sessionID: SessionID,
+      status: Info,
+      options?: { directory?: string },
+    ) {
       const data = yield* currentState
       yield* events.publish(Event.Status, { sessionID, status })
       if (status.type === "idle") {
         yield* events.publish(Event.Idle, { sessionID })
-        data.delete(sessionID)
+        data.delete(key(sessionID, options?.directory))
         return
       }
-      data.set(sessionID, status)
+      data.set(key(sessionID, options?.directory), { sessionID, status })
     })
 
     return Service.of({ get, list, set })

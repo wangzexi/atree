@@ -4,23 +4,26 @@ import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Runner } from "@/effect/runner"
 import { BackgroundJob } from "@/background/job"
 import { Effect, Latch, Layer, Scope, Context } from "effect"
+import path from "path"
 import { Session } from "./session"
 import { SessionID } from "./schema"
 import { SessionStatus } from "./status"
 
 export interface Interface {
-  readonly assertNotBusy: (sessionID: SessionID) => Effect.Effect<void, Session.BusyError>
-  readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly assertNotBusy: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void, Session.BusyError>
+  readonly cancel: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void>
   readonly ensureRunning: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
     work: Effect.Effect<SessionV1.WithParts>,
+    options?: { directory?: string },
   ) => Effect.Effect<SessionV1.WithParts>
   readonly startShell: (
     sessionID: SessionID,
     onInterrupt: Effect.Effect<SessionV1.WithParts>,
     work: Effect.Effect<SessionV1.WithParts>,
     ready?: Latch.Latch,
+    options?: { directory?: string },
   ) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
 }
 
@@ -35,7 +38,7 @@ export const layer = Layer.effect(
     const state = yield* InstanceState.make(
       Effect.fn("SessionRunState.state")(function* () {
         const scope = yield* Scope.Scope
-        const runners = new Map<SessionID, Runner.Runner<SessionV1.WithParts>>()
+        const runners = new Map<string, Runner.Runner<SessionV1.WithParts>>()
         yield* Effect.addFinalizer(
           Effect.fnUntraced(function* () {
             yield* Effect.forEach(runners.values(), (runner) => runner.cancel, {
@@ -49,48 +52,67 @@ export const layer = Layer.effect(
       }),
     )
 
+    const key = (sessionID: SessionID, directory?: string) => `${directory ? path.resolve(directory) : ""}\0${sessionID}`
+    const keyMatchesSession = (runnerKey: string, sessionID: SessionID) => runnerKey.endsWith(`\0${sessionID}`)
+
     const runner = Effect.fn("SessionRunState.runner")(function* (
       sessionID: SessionID,
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
+      options?: { directory?: string },
     ) {
       const data = yield* InstanceState.get(state)
-      const existing = data.runners.get(sessionID)
+      const runnerKey = key(sessionID, options?.directory)
+      const existing = data.runners.get(runnerKey)
       if (existing) return existing
       const next = Runner.make<SessionV1.WithParts>(data.scope, {
         onIdle: Effect.gen(function* () {
-          data.runners.delete(sessionID)
-          yield* status.set(sessionID, { type: "idle" })
+          data.runners.delete(runnerKey)
+          yield* status.set(sessionID, { type: "idle" }, { directory: options?.directory })
         }),
-        onBusy: status.set(sessionID, { type: "busy" }),
+        onBusy: status.set(sessionID, { type: "busy" }, { directory: options?.directory }),
         onInterrupt,
       })
-      data.runners.set(sessionID, next)
+      data.runners.set(runnerKey, next)
       return next
     })
 
-    const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (sessionID: SessionID) {
+    const assertNotBusy = Effect.fn("SessionRunState.assertNotBusy")(function* (
+      sessionID: SessionID,
+      options?: { directory?: string },
+    ) {
       const data = yield* InstanceState.get(state)
-      const existing = data.runners.get(sessionID)
+      const existing =
+        options?.directory !== undefined
+          ? data.runners.get(key(sessionID, options.directory))
+          : [...data.runners].find(([runnerKey]) => keyMatchesSession(runnerKey, sessionID))?.[1]
       if (existing?.busy) yield* busyError(sessionID)
     })
 
-    const cancel = Effect.fn("SessionRunState.cancel")(function* (sessionID: SessionID) {
+    const cancel = Effect.fn("SessionRunState.cancel")(function* (
+      sessionID: SessionID,
+      options?: { directory?: string },
+    ) {
       yield* cancelBackgroundJobs(background, sessionID)
       const data = yield* InstanceState.get(state)
-      const existing = data.runners.get(sessionID)
+      const matching =
+        options?.directory !== undefined
+          ? [data.runners.get(key(sessionID, options.directory))].filter((runner) => runner !== undefined)
+          : [...data.runners].flatMap(([runnerKey, runner]) => (keyMatchesSession(runnerKey, sessionID) ? [runner] : []))
+      const existing = matching[0]
       if (!existing) {
-        yield* status.set(sessionID, { type: "idle" })
+        yield* status.set(sessionID, { type: "idle" }, { directory: options?.directory })
         return
       }
-      yield* existing.cancel
+      yield* Effect.forEach(matching, (runner) => runner.cancel, { discard: true })
     })
 
     const ensureRunning = Effect.fn("SessionRunState.ensureRunning")(function* (
       sessionID: SessionID,
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
+      options?: { directory?: string },
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt)).ensureRunning(work)
+      return yield* (yield* runner(sessionID, onInterrupt, options)).ensureRunning(work)
     })
 
     const startShell = Effect.fn("SessionRunState.startShell")(function* (
@@ -98,8 +120,9 @@ export const layer = Layer.effect(
       onInterrupt: Effect.Effect<SessionV1.WithParts>,
       work: Effect.Effect<SessionV1.WithParts>,
       ready?: Latch.Latch,
+      options?: { directory?: string },
     ) {
-      return yield* (yield* runner(sessionID, onInterrupt))
+      return yield* (yield* runner(sessionID, onInterrupt, options))
         .startShell(work, ready)
         .pipe(Effect.catchTag("RunnerBusy", () => Effect.fail(busyError(sessionID))))
     })

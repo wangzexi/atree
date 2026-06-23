@@ -320,7 +320,10 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     })
 
     const abort = Effect.fn("SessionHttpApi.abort")(function* (ctx: { params: { sessionID: SessionID } }) {
-      yield* promptSvc.cancel(ctx.params.sessionID)
+      const context = yield* InstanceState.context.pipe(
+        Effect.catchCause(() => Effect.succeed({ directory: undefined } as { directory?: string })),
+      )
+      yield* promptSvc.cancel(ctx.params.sessionID, { directory: context.directory })
       return true
     })
 
@@ -481,7 +484,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
-      yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID))
+      yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID, { directory: info.directory }))
       yield* session.removeMessage({ ...ctx.params, directory: info.directory })
       return true
     })

@@ -961,7 +961,7 @@ export const layer = Layer.effect(
             ctx.assistantMessage.error = error
             ctx.assistantMessage.finish = "error"
             yield* events.publish(Session.Event.Error, { sessionID: ctx.sessionID, error })
-            yield* status.set(ctx.sessionID, { type: "idle" })
+            yield* status.set(ctx.sessionID, { type: "idle" }, { directory: currentSession.directory })
             return
           }
           ctx.needsCompaction = true
@@ -987,7 +987,7 @@ export const layer = Layer.effect(
           sessionID: ctx.assistantMessage.sessionID,
           error: ctx.assistantMessage.error,
         })
-        yield* status.set(ctx.sessionID, { type: "idle" })
+        yield* status.set(ctx.sessionID, { type: "idle" }, { directory: currentSession.directory })
       })
 
       const process = Effect.fn("SessionProcessor.process")(function* (streamInput: LLM.StreamInput) {
@@ -1003,7 +1003,7 @@ export const layer = Layer.effect(
             ctx.currentText = undefined
             ctx.currentTextID = undefined
             ctx.reasoningMap = {}
-            yield* status.set(ctx.sessionID, { type: "busy" })
+            yield* status.set(ctx.sessionID, { type: "busy" }, { directory: currentSession.directory })
             const stream = llm.stream(streamInput)
 
             yield* stream.pipe(
@@ -1050,7 +1050,7 @@ export const layer = Layer.effect(
                         message: info.message,
                         action: info.action,
                         next: info.next,
-                      }),
+                      }, { directory: currentSession.directory }),
                     ),
                   )
                 },

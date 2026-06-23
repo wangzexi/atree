@@ -819,7 +819,11 @@ export const layer = Layer.effect(
       })
       const statusService = yield* Effect.serviceOption(SessionStatus.Service)
       const sessionStatus = Option.isSome(statusService)
-        ? yield* statusService.value.get(sessionID)
+        ? yield* Effect.gen(function* () {
+            const exact = yield* statusService.value.get(sessionID, { directory: directoryHint })
+            if (exact.type !== "idle") return exact
+            return yield* statusService.value.get(sessionID)
+          })
         : { type: "idle" as const }
       const ranAt = Date.now()
       if (sessionStatus.type === "busy") {

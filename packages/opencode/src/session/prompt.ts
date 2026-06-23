@@ -89,7 +89,7 @@ function sameDirectory(left: string, right: string) {
 }
 
 export interface Interface {
-  readonly cancel: (sessionID: SessionID) => Effect.Effect<void>
+  readonly cancel: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void>
   readonly prompt: (input: PromptInput) => Effect.Effect<SessionV1.WithParts, Image.Error>
   readonly loop: (input: LoopInput) => Effect.Effect<SessionV1.WithParts>
   readonly shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError>
@@ -138,9 +138,9 @@ export const layer = Layer.effect(
       } satisfies TaskPromptOps
     })
 
-    const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID) {
+    const cancel = Effect.fn("SessionPrompt.cancel")(function* (sessionID: SessionID, options?: { directory?: string }) {
       yield* Effect.logInfo("cancel", { "session.id": sessionID })
-      yield* state.cancel(sessionID)
+      yield* state.cancel(sessionID, { directory: options?.directory })
     })
 
     const resolvePromptParts = Effect.fn("SessionPrompt.resolvePromptParts")(function* (template: string) {
@@ -1205,7 +1205,7 @@ export const layer = Layer.effect(
         let step = 0
 
         while (true) {
-          yield* status.set(sessionID, { type: "busy" })
+          yield* status.set(sessionID, { type: "busy" }, { directory: session.directory })
           yield* Effect.logInfo("loop", { "session.id": sessionID, step })
 
           let msgs = MessageV2.filterCompacted(
@@ -1481,7 +1481,9 @@ export const layer = Layer.effect(
       input: LoopInput,
     ) {
       const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
-      return yield* state.ensureRunning(input.sessionID, lastAssistant(session), runLoop(session))
+      return yield* state.ensureRunning(input.sessionID, lastAssistant(session), runLoop(session), {
+        directory: session.directory,
+      })
     })
 
     const shell: (input: ShellInput) => Effect.Effect<SessionV1.WithParts, Session.BusyError> = Effect.fn(
@@ -1489,7 +1491,9 @@ export const layer = Layer.effect(
     )(function* (input: ShellInput) {
       const ready = yield* Latch.make()
       const session = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
-      return yield* state.startShell(input.sessionID, lastAssistant(session), shellImpl(input, ready), ready)
+      return yield* state.startShell(input.sessionID, lastAssistant(session), shellImpl(input, ready), ready, {
+        directory: session.directory,
+      })
     })
 
     const command = Effect.fn("SessionPrompt.command")(function* (input: CommandInput) {
