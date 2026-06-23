@@ -5,7 +5,7 @@ import { SessionID, MessageID } from "@/session/schema"
 import { QuestionID } from "./schema"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
+import { appendAtreeSessionEventBestEffort } from "@/atree/session-event"
 import { readSessionInteractionState, type DirectoryScopedInteraction } from "@/atree/interaction-store"
 
 // Schemas — these are pure data; nothing checks class identity (see PR
@@ -117,6 +117,10 @@ function pendingKey(info: Request) {
   return directory ? `${directory}\0${info.sessionID}\0${info.id}` : String(info.id)
 }
 
+function interactionDirectory(info: Request) {
+  return (info as Request & DirectoryScopedInteraction).directory
+}
+
 function findPending(pending: Map<string, PendingEntry>, requestID: QuestionID) {
   const directKey = String(requestID)
   const direct = pending.get(directKey)
@@ -169,7 +173,7 @@ export const layer = Layer.effect(
                 sessionID: item.info.sessionID,
                 requestID: item.info.id,
               })
-              yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+              yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
                 type: "question.rejected",
                 sessionID: item.info.sessionID,
                 requestID: item.info.id,
@@ -202,7 +206,7 @@ export const layer = Layer.effect(
       }
       pending.set(pendingKey(info), { info, deferred })
       yield* events.publish(Event.Asked, info)
-      yield* appendAtreeSessionEventByIDBestEffort(info.sessionID, {
+      yield* appendAtreeSessionEventBestEffort(interactionDirectory(info), info.sessionID, {
         type: "question.asked",
         question: info,
       })
@@ -233,7 +237,7 @@ export const layer = Layer.effect(
         requestID: existing.info.id,
         answers: input.answers.map((a) => [...a]),
       })
-      yield* appendAtreeSessionEventByIDBestEffort(existing.info.sessionID, {
+      yield* appendAtreeSessionEventBestEffort(interactionDirectory(existing.info), existing.info.sessionID, {
         type: "question.replied",
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
@@ -256,7 +260,7 @@ export const layer = Layer.effect(
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
       })
-      yield* appendAtreeSessionEventByIDBestEffort(existing.info.sessionID, {
+      yield* appendAtreeSessionEventBestEffort(interactionDirectory(existing.info), existing.info.sessionID, {
         type: "question.rejected",
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,

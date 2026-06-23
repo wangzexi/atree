@@ -7,7 +7,7 @@ import os from "os"
 import { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { appendAtreeSessionEventByIDBestEffort } from "@/atree/session-event"
+import { appendAtreeSessionEventBestEffort } from "@/atree/session-event"
 import { readSessionInteractionState, type DirectoryScopedInteraction } from "@/atree/interaction-store"
 
 export const Event = {
@@ -101,7 +101,7 @@ export const layer = Layer.effect(
                 requestID: item.info.id,
                 reply: "reject",
               })
-              yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+              yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
                 type: "permission.replied",
                 sessionID: item.info.sessionID,
                 requestID: item.info.id,
@@ -151,7 +151,7 @@ export const layer = Layer.effect(
       const deferred = yield* Deferred.make<void, PermissionV1.RejectedError | PermissionV1.CorrectedError>()
       pending.set(pendingKey(info), { info, deferred })
       yield* events.publish(Event.Asked, info)
-      yield* appendAtreeSessionEventByIDBestEffort(info.sessionID, {
+      yield* appendAtreeSessionEventBestEffort(interactionDirectory(info), info.sessionID, {
         type: "permission.asked",
         permission: info,
       })
@@ -175,7 +175,7 @@ export const layer = Layer.effect(
         requestID: existing.info.id,
         reply: input.reply,
       })
-      yield* appendAtreeSessionEventByIDBestEffort(existing.info.sessionID, {
+      yield* appendAtreeSessionEventBestEffort(interactionDirectory(existing.info), existing.info.sessionID, {
         type: "permission.replied",
         sessionID: existing.info.sessionID,
         requestID: existing.info.id,
@@ -198,7 +198,7 @@ export const layer = Layer.effect(
             requestID: item.info.id,
             reply: "reject",
           })
-          yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+          yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
             type: "permission.replied",
             sessionID: item.info.sessionID,
             requestID: item.info.id,
@@ -232,7 +232,7 @@ export const layer = Layer.effect(
           requestID: item.info.id,
           reply: "always",
         })
-        yield* appendAtreeSessionEventByIDBestEffort(item.info.sessionID, {
+        yield* appendAtreeSessionEventBestEffort(interactionDirectory(item.info), item.info.sessionID, {
           type: "permission.replied",
           sessionID: item.info.sessionID,
           requestID: item.info.id,

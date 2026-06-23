@@ -311,6 +311,96 @@ describe("atree directory self-contained state", () => {
     }),
   )
 
+  it.instance("writes restored pending replies back to their containing directory", () =>
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const source = path.join(instance.directory, "source-writeback")
+      const target = path.join(instance.directory, "target-writeback")
+      const sessionID = "ses_copied_pending_writeback" as SessionID
+      const questionID = QuestionID.ascending("que_copied_writeback")
+      const permissionID = PermissionV1.ID.ascending("per_copied_writeback")
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "copied-pending-writeback",
+          version: "test",
+          projectID: "proj_copied_writeback",
+          directory: source,
+          path: "source-writeback",
+          title: "Copied pending writeback",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 2 },
+        } as any),
+      )
+      yield* Effect.promise(() => fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          {
+            id: sessionID,
+            directory: target,
+          } as any,
+          {
+            type: "question.asked",
+            question: {
+              id: questionID,
+              sessionID,
+              questions: [
+                {
+                  question: "Write reply to target?",
+                  header: "Target",
+                  options: [{ label: "Yes", description: "Append the reply to target" }],
+                },
+              ],
+            },
+          },
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          {
+            id: sessionID,
+            directory: target,
+          } as any,
+          {
+            type: "permission.asked",
+            permission: {
+              id: permissionID,
+              sessionID,
+              permission: "bash",
+              patterns: ["echo target"],
+              metadata: {},
+              always: [],
+            },
+          },
+        ),
+      )
+
+      const questions = yield* Question.Service
+      const permissions = yield* Permission.Service
+
+      expect((yield* questions.list()).map((item) => item.id)).toEqual([questionID])
+      expect((yield* permissions.list()).map((item) => item.id)).toEqual([permissionID])
+
+      yield* questions.reply({ requestID: questionID, answers: [["Yes"]] })
+      yield* permissions.reply({ requestID: permissionID, reply: "once" })
+
+      const sourceRaw = yield* Effect.promise(() =>
+        fs.readFile(path.join(source, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const targetRaw = yield* Effect.promise(() =>
+        fs.readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+
+      expect(sourceRaw).not.toContain("question.replied")
+      expect(sourceRaw).not.toContain("permission.replied")
+      expect(targetRaw).toContain("question.replied")
+      expect(targetRaw).toContain("permission.replied")
+    }),
+  )
+
   it.instance("records pending question and permission decisions in session.jsonl", () =>
     Effect.gen(function* () {
       const sessions = yield* Session.Service
