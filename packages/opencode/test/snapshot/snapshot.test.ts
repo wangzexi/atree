@@ -218,6 +218,19 @@ it.instance(
 )
 
 it.instance(
+  "directory-local snapshot runtime is excluded from snapshots",
+  withTrackedSnapshot(({ tmp, snapshot, before }) =>
+    Effect.gen(function* () {
+      const runtimeDir = `${tmp.path}/.agents/atree/runtime/snapshot`
+      expect(yield* exists(runtimeDir)).toBe(true)
+      expect((yield* snapshot.patch(before)).files).toEqual([])
+      expect(yield* snapshot.diff(before)).toBe("")
+    }),
+  ),
+  { git: true },
+)
+
+it.instance(
   "nested directory revert",
   withTrackedSnapshot(({ tmp, snapshot, before }) =>
     Effect.gen(function* () {
