@@ -326,30 +326,6 @@ export const SessionApi = HttpApi.make("session")
               "Analyze the current application and create an AGENTS.md file with project-specific agent configurations.",
           }),
         ),
-        HttpApiEndpoint.post("share", SessionPaths.share, {
-          params: { sessionID: SessionID },
-          query: WorkspaceRoutingQuery,
-          success: described(Session.Info, "Successfully shared session"),
-          error: [HttpApiError.InternalServerError, ApiNotFoundError],
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "session.share",
-            summary: "Share session",
-            description: "Create a shareable link for a session, allowing others to view the conversation.",
-          }),
-        ),
-        HttpApiEndpoint.delete("unshare", SessionPaths.share, {
-          params: { sessionID: SessionID },
-          query: WorkspaceRoutingQuery,
-          success: described(Session.Info, "Successfully unshared session"),
-          error: [HttpApiError.InternalServerError, ApiNotFoundError],
-        }).annotateMerge(
-          OpenApi.annotations({
-            identifier: "session.unshare",
-            summary: "Unshare session",
-            description: "Remove the shareable link for a session, making it private again.",
-          }),
-        ),
         HttpApiEndpoint.post("summarize", SessionPaths.summarize, {
           params: { sessionID: SessionID },
           query: WorkspaceRoutingQuery,

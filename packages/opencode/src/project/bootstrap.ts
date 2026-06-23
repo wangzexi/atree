@@ -6,7 +6,6 @@ import { Snapshot } from "../snapshot"
 import * as Project from "./project"
 import * as Vcs from "./vcs"
 import { InstanceState } from "@/effect/instance-state"
-import { ShareNext } from "@/share/share-next"
 import { Schedule } from "@/session/schedule"
 import { Effect, Layer } from "effect"
 import { Config } from "@/config/config"
@@ -27,7 +26,6 @@ export const layer = Layer.effect(
     const plugin = yield* Plugin.Service
     const project = yield* Project.Service
     const schedule = yield* Schedule.Service
-    const shareNext = yield* ShareNext.Service
     const snapshot = yield* Snapshot.Service
     const vcs = yield* Vcs.Service
 
@@ -41,7 +39,7 @@ export const layer = Layer.effect(
       // Each service self-manages its own slow work via Effect.forkScoped against
       // its per-instance state scope. We just await materialization here.
       yield* Effect.forEach(
-        [lsp, shareNext, format, vcs, snapshot, project],
+        [lsp, format, vcs, snapshot, project],
         (s) => s.init().pipe(Effect.catchCause((cause) => Effect.logWarning("init failed", { cause }))),
         { concurrency: "unbounded", discard: true },
       ).pipe(Effect.withSpan("InstanceBootstrap.init"))
@@ -63,7 +61,6 @@ export const defaultLayer = layer.pipe(
     Plugin.defaultLayer,
     Project.defaultLayer,
     Schedule.defaultLayer,
-    ShareNext.defaultLayer,
     Snapshot.defaultLayer,
     Vcs.defaultLayer,
   ]),
@@ -76,7 +73,6 @@ export const node = LayerNode.make(layer, [
   Plugin.node,
   Project.node,
   Schedule.node,
-  ShareNext.node,
   Snapshot.node,
   Vcs.node,
 ])

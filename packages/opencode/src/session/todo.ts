@@ -107,7 +107,7 @@ export const layer = Layer.effect(
         agent: session.agent ?? null,
         model: session.model ?? null,
         version: session.version,
-        share_url: session.share?.url ?? null,
+        share_url: null,
         summary_additions: session.summary?.additions ?? null,
         summary_deletions: session.summary?.deletions ?? null,
         summary_files: session.summary?.files ?? null,
