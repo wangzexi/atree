@@ -1946,6 +1946,25 @@ describe("Session", () => {
     }),
   )
 
+  it.live("does not load a SQLite-only session without an instance", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const dir = yield* tmpdirScoped({ git: true })
+      const info = yield* provideInstance(dir)(session.create({ title: "sqlite-only-without-instance" }))
+
+      yield* Effect.promise(() =>
+        fs.rm(path.join(dir, ".agents", "atree", "sessions", info.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const error = yield* Effect.flip(session.get(info.id))
+      expect(error).toBeInstanceOf(NotFoundError)
+      expect(error.message).toBe(`Session not found: ${info.id}`)
+    }),
+  )
+
   it.instance("persists metadata and copies it on fork by default", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
