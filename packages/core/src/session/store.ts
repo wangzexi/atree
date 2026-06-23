@@ -3,7 +3,6 @@ export * as SessionStore from "./store"
 import { eq } from "drizzle-orm"
 import { Context, Effect, Layer, Schema } from "effect"
 import { Database } from "../database/database"
-import { SessionHistory } from "./history"
 import { MessageDecodeError } from "./error"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
@@ -122,19 +121,6 @@ export const layer = Layer.effect(
       return undefined
     })
 
-    const persistedRootOwnsSession = Effect.fn("SessionStore.persistedRootOwnsSession")(function* (
-      sessionID: SessionSchema.ID,
-    ) {
-      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
-      if (!root) return false
-      const fileSession = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
-        Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
-      )
-      return fileSession !== undefined
-    })
-
     const runnerEntries = Effect.fn("SessionStore.runnerEntries")(function* (
       sessionID: SessionSchema.ID,
       baselineSeq: number,
@@ -145,8 +131,6 @@ export const layer = Layer.effect(
         const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
-        if (messages.length === 0 && !options?.directory && !(yield* persistedRootOwnsSession(sessionID)))
-          return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
         const inputRows = yield* db
           .select({
             id: SessionInputTable.id,
@@ -166,7 +150,7 @@ export const layer = Layer.effect(
           })
           .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
       }
-      return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
+      return []
     })
 
     return Service.of({
@@ -179,13 +163,9 @@ export const layer = Layer.effect(
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
             Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
           )
-          if (messages.length === 0 && !options?.directory && !(yield* persistedRootOwnsSession(sessionID)))
-            return yield* SessionHistory.load(db, sessionID)
           return messages
         }
-        if (options?.directory) return []
-        const stored = yield* SessionHistory.load(db, sessionID)
-        return stored
+        return []
       }),
       runnerEntries,
       runnerContext: Effect.fn("SessionStore.runnerContext")(function* (sessionID, baselineSeq, options) {

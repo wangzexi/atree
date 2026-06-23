@@ -1313,6 +1313,55 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("does not read unscoped context from SQLite-only session rows", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-sqlite-only-")))
+      const sessionID = SessionV2.ID.make("ses_core_store_sqlite_only_context")
+      const messageID = SessionMessage.ID.make("msg_core_store_sqlite_only_context")
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(directory), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "sqlite-only-context",
+          directory,
+          title: "SQLite-only context",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionMessageTable)
+        .values({
+          id: messageID,
+          session_id: sessionID,
+          type: "user",
+          seq: 1,
+          time_created: 5,
+          data: {
+            time: { created: 5 },
+            text: "sqlite-only context should stay hidden",
+            files: [],
+            agents: [],
+          },
+        } as typeof SessionMessageTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      expect(yield* store.context(sessionID)).toEqual([])
+      expect(yield* store.runnerEntries(sessionID, 0)).toEqual([])
+      expect(yield* store.runnerContext(sessionID, 0)).toEqual([])
+    }),
+  )
+
   storeIt.effect("does not revive stale SQLite context when a file-backed session has no messages", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
