@@ -1495,20 +1495,27 @@ describe("atree schedule restore", () => {
         } as any),
       )
       yield* Effect.promise(() =>
-        writeSessionScheduleState(directory, sessionID, [
-          {
-            id: "sch_old_projection",
-            sessionID,
-            kind: "once",
-            expression: "",
-            runAt: now + 60_000,
-            message: "old projection schedule",
-            createdAt: now,
-            lastRanAt: null,
-            lastRunStatus: null,
-            nextRun: now + 60_000,
-          },
-        ]),
+        fs.writeFile(
+          path.join(directory, ".agents", "atree", "sessions", sessionID, "schedule.json"),
+          JSON.stringify({
+            version: 1,
+            updatedAt: now + 20_000,
+            schedules: [
+              {
+                id: "sch_old_projection",
+                sessionID,
+                kind: "once",
+                expression: "",
+                runAt: now + 60_000,
+                message: "old projection schedule",
+                createdAt: now,
+                lastRanAt: null,
+                lastRunStatus: null,
+                nextRun: now + 60_000,
+              },
+            ],
+          }),
+        ),
       )
       yield* Effect.promise(() =>
         fs.appendFile(

@@ -82,6 +82,10 @@ function isStoredSchedule(value: unknown): value is StoredSchedule {
   )
 }
 
+function sameSchedule(left: StoredSchedule | undefined, right: StoredSchedule | undefined) {
+  return JSON.stringify(left) === JSON.stringify(right)
+}
+
 async function readState(target: string): Promise<ScheduleState> {
   try {
     const raw = await fs.readFile(target, "utf8")
@@ -196,9 +200,40 @@ async function removeLegacySessionSchedule(directory: string, sessionID: string)
 export async function writeSessionScheduleState(directory: string, sessionID: string, schedules: StoredSchedule[]) {
   await ensureAtreeDirectoryStore(directory)
   await ensureSessionPayloadFilesByID(directory, sessionID)
+  const now = Date.now()
+  const jsonlState = await readSessionJsonlProjection(directory, sessionID)
+  const current = new Map(jsonlState.schedules.map((schedule) => [schedule.id, schedule]))
+  const next = new Map(schedules.map((schedule) => [schedule.id, schedule]))
+  const events: Record<string, unknown>[] = []
+  for (const schedule of current.values()) {
+    if (next.has(schedule.id)) continue
+    events.push({
+      version: 1,
+      at: now,
+      type: "schedule.deleted",
+      scheduleID: schedule.id,
+      sessionID,
+      reason: "state-rewrite",
+    })
+  }
+  for (const schedule of schedules) {
+    if (sameSchedule(current.get(schedule.id), schedule)) continue
+    events.push({
+      version: 1,
+      at: now,
+      type: "schedule.created",
+      schedule,
+    })
+  }
+  if (events.length > 0) {
+    await fs.appendFile(
+      sessionJsonlPath(directory, sessionID),
+      events.map((event) => JSON.stringify(event)).join("\n") + "\n",
+    )
+  }
   await writeAtomic(sessionStatePath(directory, sessionID), {
     version: 1,
-    updatedAt: Date.now(),
+    updatedAt: now,
     schedules,
   })
   await touchSessionStore(directory, sessionID as SessionID)
@@ -206,18 +241,15 @@ export async function writeSessionScheduleState(directory: string, sessionID: st
 }
 
 export async function readSessionScheduleProjection(directory: string, sessionID: string) {
+  const jsonlState = await readSessionJsonlProjection(directory, sessionID)
+  if (jsonlState.hasState) return publicScheduleProjection(jsonlState)
+
   const sessionState = await readSessionState(sessionStatePath(directory, sessionID))
-  if (sessionState.hasState) {
-    const jsonlState = await readSessionJsonlProjection(directory, sessionID)
-    if (jsonlState.hasState && jsonlState.updatedAt > sessionState.updatedAt) return publicScheduleProjection(jsonlState)
-    return publicScheduleProjection(sessionState)
-  }
+  if (sessionState.hasState) return publicScheduleProjection(sessionState)
 
   const state = await readState(legacyStatePath(directory))
-  const jsonlState = await readSessionJsonlProjection(directory, sessionID)
   const schedules = state.sessions[sessionID]
   if (Array.isArray(schedules)) {
-    if (jsonlState.hasState && jsonlState.updatedAt > state.updatedAt) return publicScheduleProjection(jsonlState)
     return publicScheduleProjection({
       hasState: true,
       schedules: schedules.filter(isStoredSchedule),

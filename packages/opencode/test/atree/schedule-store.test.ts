@@ -210,6 +210,45 @@ describe("atree schedule store", () => {
     })
   })
 
+  test("prefers session jsonl schedule state over a newer projection file", async () => {
+    const directory = await tempdir()
+    const sessionID = "ses_jsonl_authoritative"
+    const projected = {
+      id: "sch_projected",
+      sessionID,
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "projection schedule",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    const jsonl = {
+      ...projected,
+      message: "jsonl schedule",
+      runAt: 3,
+      nextRun: 3,
+    }
+    await writeSessionStore({
+      id: sessionID as never,
+      slug: "jsonl-authoritative",
+      version: "test",
+      projectID: "proj_jsonl_authoritative" as never,
+      directory,
+      title: "JSONL authoritative",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    await writeSessionScheduleState(directory, sessionID, [projected])
+    const session = (await readSessionStore(directory, sessionID as never))!
+    await appendSessionJsonl(session, { type: "schedule.created", at: 1, schedule: jsonl })
+
+    expect(await readSessionScheduleState(directory, sessionID)).toEqual([jsonl])
+  })
+
   test("does not find orphan schedules without a session metadata store", async () => {
     const directory = await tempdir()
     const schedule = {

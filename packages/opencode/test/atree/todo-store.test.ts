@@ -69,7 +69,7 @@ describe("atree todo store", () => {
     await writeSessionTodoState(directory, "ses_skeleton", [])
 
     const root = path.join(directory, ".agents", "atree", "sessions", "ses_skeleton")
-    expect(await fs.readFile(path.join(root, "session.jsonl"), "utf8")).toBe("")
+    expect((await fs.readFile(path.join(root, "session.jsonl"), "utf8")).trim()).toContain('"type":"todo.updated"')
     expect((await fs.stat(path.join(root, "assets"))).isDirectory()).toBe(true)
     expect(JSON.parse(await fs.readFile(path.join(root, "todo.json"), "utf8"))).toMatchObject({
       version: 1,
@@ -143,6 +143,36 @@ describe("atree todo store", () => {
     })
     expect(await readSessionTodoState(directory, "ses_jsonl")).toEqual([
       { content: "restored todo", status: "in_progress", priority: "high" },
+    ])
+  })
+
+  test("prefers session jsonl todo state over a newer projection file", async () => {
+    const directory = await tempdir()
+    const sessionID = "ses_jsonl_authoritative"
+    await writeSessionStore({
+      id: sessionID as never,
+      slug: "jsonl-authoritative",
+      version: "test",
+      projectID: "proj_jsonl_authoritative" as never,
+      directory,
+      title: "JSONL authoritative",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    await writeSessionTodoState(directory, sessionID, [
+      { content: "projection todo", status: "pending", priority: "low" },
+    ])
+    const session = (await readSessionStore(directory, sessionID as never))!
+    await appendSessionJsonl(session, {
+      type: "todo.updated",
+      at: 1,
+      sessionID,
+      todos: [{ content: "jsonl todo", status: "in_progress", priority: "high" }],
+    })
+
+    expect(await readSessionTodoState(directory, sessionID)).toEqual([
+      { content: "jsonl todo", status: "in_progress", priority: "high" },
     ])
   })
 
