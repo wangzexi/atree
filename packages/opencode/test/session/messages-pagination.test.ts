@@ -1098,6 +1098,32 @@ describe("MessageV2 consistency", () => {
     }),
   )
 
+  it.instance("does not read unscoped messages from stale SQLite projections", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const created = yield* session.create({ title: "message-v2 unscoped cached only" })
+      const messageID = yield* addUser(created.id, "unscoped stale SQLite only")
+
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", created.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const pageError = yield* Effect.flip(MessageV2.page({ sessionID: created.id, limit: 10 }))
+      const getError = yield* Effect.flip(MessageV2.get({ sessionID: created.id, messageID }))
+      const parts = yield* MessageV2.parts(messageID, { sessionID: created.id })
+
+      for (const error of [pageError, getError]) {
+        expect(error).toBeInstanceOf(NotFoundError)
+        expect(error.message).toBe(`Session not found: ${created.id}`)
+      }
+      expect(parts).toEqual([])
+    }),
+  )
+
   it.instance("does not read explicit empty file-backed sessions from stale SQLite projections", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

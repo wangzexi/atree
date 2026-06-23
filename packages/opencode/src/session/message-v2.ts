@@ -2,8 +2,6 @@ import { EventV2 } from "@opencode-ai/core/event"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { ProviderV2 } from "@opencode-ai/core/provider"
-import fs from "fs/promises"
-import path from "path"
 import {
   APIError,
   AbortedError,
@@ -11,7 +9,6 @@ import {
   AuthError,
   CompactionPart,
   ContextOverflowError,
-  Info,
   OutputLengthError,
   Part,
   StructuredOutputError,
@@ -25,13 +22,8 @@ import { NamedError } from "@opencode-ai/core/util/error"
 import { APICallError, convertToModelMessages, LoadAPIKeyError, type ModelMessage, type UIMessage } from "ai"
 import { Database } from "@opencode-ai/core/database/database"
 import { NotFoundError } from "@/storage/storage"
-import { and } from "drizzle-orm"
-import { desc } from "drizzle-orm"
 import { eq } from "drizzle-orm"
-import { inArray } from "drizzle-orm"
-import { lt } from "drizzle-orm"
-import { or } from "drizzle-orm"
-import { MessageTable, PartTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { PartTable } from "@opencode-ai/core/session/sql"
 import { ProviderError } from "@/provider/error"
 import { iife } from "@/util/iife"
 import { errorMessage } from "@/util/error"
@@ -39,9 +31,8 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
-import { readSessionJsonlProjection, readSessionStore } from "@/atree/session-store"
+import { readSessionJsonlProjection } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
-import { readWorkspaceState } from "@/atree/state"
 import type { Session } from "./session"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
@@ -94,13 +85,6 @@ export const cursor = {
   },
 }
 
-const info = (row: typeof MessageTable.$inferSelect) =>
-  ({
-    ...row.data,
-    id: row.id,
-    sessionID: row.session_id,
-  }) as Info
-
 const part = (row: typeof PartTable.$inferSelect) =>
   ({
     ...row.data,
@@ -108,9 +92,6 @@ const part = (row: typeof PartTable.$inferSelect) =>
     sessionID: row.session_id,
     messageID: row.message_id,
   }) as Part
-
-const older = (row: Cursor) =>
-  or(lt(MessageTable.time_created, row.time), and(eq(MessageTable.time_created, row.time), lt(MessageTable.id, row.id)))
 
 function olderMessage(item: WithParts, before: Cursor) {
   const created = item.info.time.created
@@ -130,74 +111,10 @@ function pageFileMessages(messages: WithParts[], input: { limit: number; before?
   }
 }
 
-async function realpathOrResolve(input: string) {
-  return fs.realpath(input).catch(() => path.resolve(input))
-}
-
-async function isWithinDirectory(parent: string | undefined, child: string | undefined) {
-  if (!parent || !child) return false
-  const root = await realpathOrResolve(parent)
-  const target = await realpathOrResolve(child)
-  return target === root || target.startsWith(root + path.sep)
-}
-
-async function sameDirectory(a: string | undefined, b: string | undefined) {
-  if (!a || !b) return false
-  return (await realpathOrResolve(a)) === (await realpathOrResolve(b))
-}
-
-const missingPersistedRootSession = Effect.fn("MessageV2.missingPersistedRootSession")(function* (
-  db: Database.Interface["db"],
-  sessionID: SessionID,
-) {
-  const row = yield* db
-    .select({ directory: SessionTable.directory })
-    .from(SessionTable)
-    .where(eq(SessionTable.id, sessionID))
-    .get()
-    .pipe(Effect.orDie)
-  if (!row?.directory) return false
-  const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-    Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-  )
-  if (!(yield* Effect.promise(() => isWithinDirectory(state.rootDirectory ?? undefined, row.directory)))) return false
-  const stored = yield* Effect.promise(() => readSessionStore(row.directory, sessionID)).pipe(
-    Effect.catchCause(() => Effect.succeed(undefined)),
-  )
-  return stored === undefined
-})
-
 type PageResult = {
   items: WithParts[]
   more: boolean
   cursor: string | undefined
-}
-
-function hydrate(db: Database.Interface["db"], rows: (typeof MessageTable.$inferSelect)[]) {
-  const ids = rows.map((row) => row.id)
-  const partByMessage = new Map<string, Part[]>()
-  return Effect.gen(function* () {
-    if (ids.length > 0) {
-      const partRows = yield* db
-        .select()
-        .from(PartTable)
-        .where(inArray(PartTable.message_id, ids))
-        .orderBy(PartTable.message_id, PartTable.id)
-        .all()
-        .pipe(Effect.orDie)
-      for (const row of partRows) {
-        const next = part(row)
-        const list = partByMessage.get(row.message_id)
-        if (list) list.push(next)
-        else partByMessage.set(row.message_id, [next])
-      }
-    }
-
-    return rows.map((row) => ({
-      info: info(row),
-      parts: partByMessage.get(row.id) ?? [],
-    }))
-  })
 }
 
 function providerMeta(metadata: Record<string, any> | undefined) {
@@ -512,70 +429,13 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     if (projection.hasMessageEvents) return pageFileMessages(projection.messages, { limit: input.limit, before })
-    if (input.directory) {
-      return {
-        items: [] as WithParts[],
-        more: false,
-        cursor: undefined,
-      }
-    }
-    const row = yield* db
-      .select({ directory: SessionTable.directory })
-      .from(SessionTable)
-      .where(eq(SessionTable.id, input.sessionID))
-      .get()
-      .pipe(Effect.orDie)
-    if (!row || !(yield* Effect.promise(() => sameDirectory(row.directory, fileSession.directory)))) {
-      return {
-        items: [] as WithParts[],
-        more: false,
-        cursor: undefined,
-      }
-    }
-  }
-  if (!fileSession && input.directory) {
-    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
-  }
-  if (yield* missingPersistedRootSession(db, input.sessionID)) {
-    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
-  }
-
-  const where = before
-    ? and(eq(MessageTable.session_id, input.sessionID), older(before))
-    : eq(MessageTable.session_id, input.sessionID)
-  const rows = yield* db
-    .select()
-    .from(MessageTable)
-    .where(where)
-    .orderBy(desc(MessageTable.time_created), desc(MessageTable.id))
-    .limit(input.limit + 1)
-    .all()
-    .pipe(Effect.orDie)
-  if (rows.length === 0) {
-    const row = yield* db
-      .select({ id: SessionTable.id })
-      .from(SessionTable)
-      .where(eq(SessionTable.id, input.sessionID))
-      .get()
-      .pipe(Effect.orDie)
-    if (!row) return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
     return {
       items: [] as WithParts[],
       more: false,
       cursor: undefined,
     }
   }
-
-  const more = rows.length > input.limit
-  const slice = more ? rows.slice(0, input.limit) : rows
-  const items = yield* hydrate(db, slice)
-  items.reverse()
-  const tail = slice.at(-1)
-  return {
-    items,
-    more,
-    cursor: more && tail ? cursor.encode({ id: tail.id, time: tail.time_created }) : undefined,
-  }
+  return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
 })
 
 export function stream(sessionID: SessionID, options?: { directory?: string }) {
@@ -613,12 +473,7 @@ export function parts(messageID: MessageID, options?: { sessionID?: SessionID; d
         const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
         return projection.messages.find((message) => message.info.id === messageID)?.parts ?? []
       }
-      if (options.directory) {
-        return []
-      }
-      if (yield* missingPersistedRootSession(db, options.sessionID)) {
-        return []
-      }
+      return []
     }
 
     const rows = yield* db
@@ -645,24 +500,7 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
     if (!message) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
     return message
   }
-  if (input.directory) {
-    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
-  }
-  if (yield* missingPersistedRootSession(db, input.sessionID)) {
-    return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
-  }
-
-  const row = yield* db
-    .select()
-    .from(MessageTable)
-    .where(and(eq(MessageTable.id, input.messageID), eq(MessageTable.session_id, input.sessionID)))
-    .get()
-    .pipe(Effect.orDie)
-  if (!row) return yield* new NotFoundError({ message: `Message not found: ${input.messageID}` })
-  return {
-    info: info(row),
-    parts: yield* parts(input.messageID, { sessionID: input.sessionID, directory: input.directory }),
-  }
+  return yield* new NotFoundError({ message: `Session not found: ${input.sessionID}` })
 })
 
 export function filterCompacted(msgs: Iterable<WithParts>) {
