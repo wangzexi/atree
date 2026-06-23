@@ -1,5 +1,7 @@
 import { describe, expect } from "bun:test"
-import { Effect, Layer } from "effect"
+import { DateTime, Effect, Layer } from "effect"
+import { readSessionTodoProjection } from "@opencode-ai/core/atree/todo-store"
+import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { PermissionV2 } from "@opencode-ai/core/permission"
@@ -13,6 +15,7 @@ import { TodoWriteTool } from "@opencode-ai/core/tool/todowrite"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { testEffect } from "./lib/effect"
 import { toolIdentity, executeTool, settleTool, toolDefinitions } from "./lib/tool"
+import { tmpdir } from "./fixture/tmpdir"
 
 const sessionID = SessionV2.ID.make("ses_todowrite_tool_test")
 const assertions: PermissionV2.AssertInput[] = []
@@ -62,8 +65,9 @@ const setup = Effect.gen(function* () {
     .pipe(Effect.orDie)
 })
 
-const call = (todos: ReadonlyArray<SessionTodo.Info>, id = "call-todowrite") => ({
+const call = (todos: ReadonlyArray<SessionTodo.Info>, id = "call-todowrite", directory?: string) => ({
   sessionID,
+  ...(directory === undefined ? {} : { directory }),
   ...toolIdentity,
   call: { type: "tool-call" as const, id, name: TodoWriteTool.name, input: { todos } },
 })
@@ -106,5 +110,46 @@ describe("TodoWriteTool", () => {
       expect(yield* service.get(sessionID)).toEqual([{ content: "keep", status: "pending", priority: "low" }])
       expect(assertions).toMatchObject([{ sessionID, action: "todowrite", resources: ["*"], save: ["*"] }])
     }),
+  )
+
+  it.effect("persists todos into a directory-backed session when the tool context has a directory", () =>
+    Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (dir) => Effect.promise(() => dir[Symbol.asyncDispose]()),
+    ).pipe(
+      Effect.flatMap((directory) =>
+        Effect.gen(function* () {
+          yield* setup
+          const registry = yield* ToolRegistry.Service
+          const service = yield* SessionTodo.Service
+          const todoList = [{ content: "Persist locally", status: "pending", priority: "medium" }]
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              projectID: Project.ID.global,
+              title: "file-backed todowrite",
+              location: { directory: AbsolutePath.make(directory.path) },
+              time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+          )
+
+          expect(yield* settleTool(registry, call(todoList, "call-todowrite-directory", directory.path))).toMatchObject(
+            {
+              result: { type: "text", value: JSON.stringify(todoList, null, 2) },
+            },
+          )
+          expect(assertions).toMatchObject([
+            { sessionID, directory: directory.path, action: "todowrite", resources: ["*"], save: ["*"] },
+          ])
+          expect(yield* service.get(sessionID, { directory: directory.path })).toEqual(todoList)
+          expect(yield* Effect.promise(() => readSessionTodoProjection(directory.path, sessionID))).toEqual({
+            hasState: true,
+            todos: todoList,
+          })
+        }),
+      ),
+    ),
   )
 })

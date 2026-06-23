@@ -45,7 +45,7 @@ export const layer = Layer.effectDiscard(
                 directory: context.directory,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
-              yield* todos.update({ sessionID: context.sessionID, todos: input.todos })
+              yield* todos.update({ sessionID: context.sessionID, directory: context.directory, todos: input.todos })
               return { todos: input.todos }
             }).pipe(Effect.mapError(() => new ToolFailure({ message: "Unable to update todos" }))),
         }),
