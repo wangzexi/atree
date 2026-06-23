@@ -2377,6 +2377,15 @@ describe("atree file-backed SessionV2 discovery", () => {
             delivery: "steer",
             timestamp: 30,
           },
+          {
+            type: "session.next.prompt.promoted",
+            messageID: "msg_core_event_promoted",
+            prompt: {
+              text: "Promoted prompt",
+            },
+            timeCreated: 25,
+            timestamp: 50,
+          },
         ]),
       )
 
@@ -2386,15 +2395,21 @@ describe("atree file-backed SessionV2 discovery", () => {
         order: "asc",
       })
 
-      expect(messages).toHaveLength(1)
+      expect(messages).toHaveLength(2)
       expect(messages[0]).toMatchObject({
+        id: "msg_core_event_promoted",
+        type: "user",
+        text: "Promoted prompt",
+      })
+      expect(messages[1]).toMatchObject({
         id: "msg_core_event_prompted",
         type: "user",
         text: "Prompt text",
         files: [{ uri: "data:text/plain;base64,cHJvbXB0IGFzc2V0", mime: "text/plain", name: "prompt.txt" }],
         agents: [{ name: "build" }],
       })
-      expect(DateTime.toEpochMillis(messages[0]!.time.created)).toBe(30)
+      expect(DateTime.toEpochMillis(messages[0]!.time.created)).toBe(25)
+      expect(DateTime.toEpochMillis(messages[1]!.time.created)).toBe(30)
     }),
   )
 

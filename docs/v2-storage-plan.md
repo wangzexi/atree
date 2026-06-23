@@ -313,6 +313,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - core 的 `session.jsonl` reader 会恢复 `session.next.text.started` / `session.next.reasoning.started`，即使模型输出尚未产生 ended 边界，目录事实源也能保留运行中的 assistant 内容骨架。
 - core 的 `session.jsonl` reader 会恢复 `session.next.compaction.started`，即使压缩请求尚未产生 `compaction.ended` 摘要，目录事实源也能保留这次未完成的压缩动作。
 - core `SessionV2.events()` 从目录 `session.jsonl` 重放 durable event 时会使用 EventV2 定义里的 sync version；例如 `session.next.step.ended` 会以 version 2 暴露，不再把所有目录事件硬编码成 v1。
+- core 从 `session.jsonl` 恢复 prompt promoted/admitted 用户消息时会优先使用事件里的 `timeCreated`，避免排队消息被恢复成 promoted 发生时的时间。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 - 删除 workspace 时会通过 session service 查找当前 workspace 的会话，并把会话目录继续传给 `session.remove`；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。

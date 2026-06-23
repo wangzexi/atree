@@ -1225,7 +1225,7 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         text,
         files: files && files.length > 0 ? files : undefined,
         agents: agents && agents.length > 0 ? agents : undefined,
-        created: timestampValue(data.timestamp, index),
+        created: timestampValue(data.timeCreated, timestampValue(data.timestamp, index)),
       })
       removed.delete(messageID)
     }
