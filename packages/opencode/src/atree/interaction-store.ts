@@ -27,6 +27,10 @@ function sessionJsonlPath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
 }
 
+function pendingKey(directory: string, sessionID: string, requestID: string) {
+  return `${path.resolve(directory)}\0${sessionID}\0${requestID}`
+}
+
 export async function readSessionInteractionState(directory: string): Promise<InteractionState> {
   const sessions = await readSessionStoresDeep(directory)
   const questions = new Map<string, QuestionRequest>()
@@ -52,21 +56,27 @@ export async function readSessionInteractionState(directory: string): Promise<In
 
       if (type === "question.asked") {
         const question = isRecord(data.question) ? data.question : data
-        if (typeof question.id === "string") questions.set(question.id, question as QuestionRequest)
+        if (typeof question.id === "string") {
+          questions.set(pendingKey(session.directory, session.id, question.id), question as QuestionRequest)
+        }
         continue
       }
       if (type === "question.replied" || type === "question.rejected") {
-        if (typeof data.requestID === "string") questions.delete(data.requestID)
+        if (typeof data.requestID === "string") questions.delete(pendingKey(session.directory, session.id, data.requestID))
         continue
       }
 
       if (type === "permission.asked") {
         const permission = isRecord(data.permission) ? data.permission : data
-        if (typeof permission.id === "string") permissions.set(permission.id, permission as PermissionV1.Request)
+        if (typeof permission.id === "string") {
+          permissions.set(pendingKey(session.directory, session.id, permission.id), permission as PermissionV1.Request)
+        }
         continue
       }
       if (type === "permission.replied") {
-        if (typeof data.requestID === "string") permissions.delete(data.requestID)
+        if (typeof data.requestID === "string") {
+          permissions.delete(pendingKey(session.directory, session.id, data.requestID))
+        }
       }
     }
   }

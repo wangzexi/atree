@@ -93,4 +93,116 @@ describe("atree interaction store", () => {
     expect(state.questions.map((item) => String(item.id))).toEqual(["que_nested_pending"])
     expect(state.permissions.map((item) => String(item.id))).toEqual(["per_nested_pending"])
   })
+
+  test("keeps copied pending interactions distinct by containing directory", async () => {
+    const root = await tempdir()
+    const source = path.join(root, "source")
+    const target = path.join(root, "target")
+    await fs.mkdir(source, { recursive: true })
+
+    const session = {
+      id: "ses_copied_interaction",
+      slug: "copied-interaction",
+      version: "test",
+      projectID: "proj_copied_interaction",
+      directory: source,
+      path: "source",
+      title: "Copied interaction",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "question.asked",
+      question: {
+        id: "que_copied_pending",
+        sessionID: session.id,
+        questions: [{ header: "Pick", question: "Choose one", options: [], custom: true }],
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "permission.asked",
+      permission: {
+        id: "per_copied_pending",
+        sessionID: session.id,
+        permission: "bash",
+        patterns: ["*"],
+        metadata: {},
+        always: ["*"],
+      },
+    })
+    await fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true })
+
+    const state = await readSessionInteractionState(root)
+
+    expect(state.questions.map((item) => String(item.id))).toEqual([
+      "que_copied_pending",
+      "que_copied_pending",
+    ])
+    expect(state.permissions.map((item) => String(item.id))).toEqual([
+      "per_copied_pending",
+      "per_copied_pending",
+    ])
+  })
+
+  test("clears only the replied copied interaction in its containing directory", async () => {
+    const root = await tempdir()
+    const source = path.join(root, "source")
+    const target = path.join(root, "target")
+    await fs.mkdir(source, { recursive: true })
+
+    const session = {
+      id: "ses_copied_interaction_reply",
+      slug: "copied-interaction-reply",
+      version: "test",
+      projectID: "proj_copied_interaction_reply",
+      directory: source,
+      path: "source",
+      title: "Copied interaction reply",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+    } as any
+
+    await writeSessionStore(session)
+    await appendSessionJsonl(session, {
+      type: "question.asked",
+      question: {
+        id: "que_copied_reply",
+        sessionID: session.id,
+        questions: [{ header: "Pick", question: "Choose one", options: [], custom: true }],
+      },
+    })
+    await appendSessionJsonl(session, {
+      type: "permission.asked",
+      permission: {
+        id: "per_copied_reply",
+        sessionID: session.id,
+        permission: "bash",
+        patterns: ["*"],
+        metadata: {},
+        always: ["*"],
+      },
+    })
+    await fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true })
+    await appendSessionJsonl({ ...session, directory: target }, {
+      type: "question.replied",
+      sessionID: session.id,
+      requestID: "que_copied_reply",
+      answers: [["ok"]],
+    })
+    await appendSessionJsonl({ ...session, directory: target }, {
+      type: "permission.replied",
+      sessionID: session.id,
+      requestID: "per_copied_reply",
+      reply: "once",
+    })
+
+    const state = await readSessionInteractionState(root)
+
+    expect(state.questions.map((item) => String(item.id))).toEqual(["que_copied_reply"])
+    expect(state.permissions.map((item) => String(item.id))).toEqual(["per_copied_reply"])
+  })
 })
