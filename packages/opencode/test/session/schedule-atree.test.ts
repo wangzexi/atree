@@ -829,6 +829,119 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "prefers deleting directory schedule state over a stale database row with the same id",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-delete-stale-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const { db } = yield* Database.Service
+      const staleDirectory = path.join(root, "stale")
+      const actualDirectory = path.join(root, "actual")
+      const staleSessionID = "ses_stale_delete_schedule" as SessionID
+      const actualSessionID = "ses_actual_delete_schedule" as SessionID
+      const scheduleID = "sch_delete_prefers_directory"
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(staleDirectory, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(actualDirectory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_stale_delete_schedule",
+          worktree: staleDirectory,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: staleSessionID,
+          project_id: "proj_stale_delete_schedule",
+          slug: "stale-delete-schedule",
+          directory: staleDirectory,
+          title: "Stale delete schedule",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: staleSessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 30_000,
+          message: "stale database schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: actualSessionID,
+          slug: "actual-delete-schedule",
+          version: "test",
+          projectID: "proj_actual_delete_schedule",
+          directory: actualDirectory,
+          path: "actual",
+          title: "Actual delete schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(actualDirectory, actualSessionID, [
+          {
+            id: scheduleID,
+            sessionID: actualSessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "actual directory schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.delete(scheduleID as never))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(actualDirectory, actualSessionID))).toEqual([])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
+
   it.instance(
     "writes copied file-backed schedule state to the explicit target directory",
     Effect.gen(function* () {

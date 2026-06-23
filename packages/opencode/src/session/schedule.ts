@@ -1271,6 +1271,17 @@ export const layer = Layer.effect(
       return created
     })
 
+    const clearScheduleProjection = Effect.fn("Schedule.clearScheduleProjection")(function* (
+      scheduleID: ID,
+      directory?: string,
+    ) {
+      if (directory) {
+        if (!timerBelongsToDirectory(timers.get(scheduleID), directory)) return
+      }
+      yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, scheduleID)).run().pipe(Effect.orDie)
+      yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
+    })
+
     const deleteStoredSchedule = Effect.fn("Schedule.deleteStoredSchedule")(function* (
       scheduleID: ID,
       directory: string | undefined,
@@ -1303,6 +1314,7 @@ export const layer = Layer.effect(
           found.directory,
         )
         yield* Effect.promise(() => writeSessionScheduleState(found.directory, found.sessionID, remaining))
+        yield* clearScheduleProjection(scheduleID)
         return true
       }
       const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
@@ -1330,6 +1342,7 @@ export const layer = Layer.effect(
           directory,
         )
         yield* Effect.promise(() => writeSessionScheduleState(directory, session.id, remaining))
+        yield* clearScheduleProjection(scheduleID, directory)
         return true
       }
       return false
@@ -1344,6 +1357,8 @@ export const layer = Layer.effect(
         if (deleted) return
         return yield* Effect.fail(new NotFound({ scheduleID }))
       }
+      const deletedStored = yield* deleteStoredSchedule(scheduleID, undefined)
+      if (deletedStored) return
       const row = yield* db
         .select()
         .from(ScheduleTable)
