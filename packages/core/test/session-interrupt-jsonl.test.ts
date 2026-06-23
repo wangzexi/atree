@@ -152,3 +152,23 @@ it.effect("resumes pure file-backed sessions through an explicit directory", () 
     expect(executionCalls).toEqual([sessionID])
   }),
 )
+
+it.effect("resolves pure file-backed sessions before unavailable compact and wait operations", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const sessionID = SessionV2.ID.make("ses_file_unavailable_ops")
+    yield* writePureFileSession(tmp.path, sessionID)
+    const sessions = yield* SessionV2.Service
+
+    const compactError = yield* sessions
+      .compact({ sessionID, directory: AbsolutePath.make(tmp.path) })
+      .pipe(Effect.flip)
+    const waitError = yield* sessions.wait(sessionID, { directory: AbsolutePath.make(tmp.path) }).pipe(Effect.flip)
+
+    expect(compactError._tag).toBe("Session.OperationUnavailableError")
+    expect(waitError._tag).toBe("Session.OperationUnavailableError")
+  }),
+)

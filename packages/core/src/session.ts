@@ -90,6 +90,7 @@ type CreateInput = {
 
 type CompactInput = {
   sessionID: SessionSchema.ID
+  directory?: AbsolutePath
   prompt?: Prompt
 }
 
@@ -190,7 +191,10 @@ export interface Interface {
     resume?: boolean
   }) => Effect.Effect<void, OperationUnavailableError>
   readonly compact: (input: CompactInput) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
-  readonly wait: (id: SessionSchema.ID) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
+  readonly wait: (
+    id: SessionSchema.ID,
+    options?: { directory?: AbsolutePath },
+  ) => Effect.Effect<void, NotFoundError | OperationUnavailableError>
   readonly resume: (
     sessionID: SessionSchema.ID,
     options?: { directory?: AbsolutePath },
@@ -707,11 +711,11 @@ export const layer = Layer.effect(
         })
       }),
       compact: Effect.fn("V2Session.compact")(function* (input) {
-        yield* result.get(input.sessionID)
+        yield* result.get(input.sessionID, { directory: input.directory })
         return yield* new OperationUnavailableError({ operation: "compact" })
       }),
-      wait: Effect.fn("V2Session.wait")(function* (sessionID) {
-        yield* result.get(sessionID)
+      wait: Effect.fn("V2Session.wait")(function* (sessionID, options) {
+        yield* result.get(sessionID, { directory: options?.directory })
         return yield* new OperationUnavailableError({ operation: "wait" })
       }),
       resume: Effect.fn("V2Session.resume")(function* (sessionID, options) {
