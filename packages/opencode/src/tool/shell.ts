@@ -448,7 +448,7 @@ export const ShellTool = Tool.define(
       let last = ""
       const list: Chunk[] = []
       let used = 0
-      let file = ""
+      let file: string | undefined
       let sink: ReturnType<typeof createWriteStream> | undefined
       let cut = false
       let expired = false
@@ -515,7 +515,9 @@ export const ShellTool = Tool.define(
                       Effect.sync(() => {
                         file = next
                         cut = true
-                        sink = createWriteStream(next, { flags: "a" })
+                        if (next) {
+                          sink = createWriteStream(next, { flags: "a" })
+                        }
                         full = ""
                       }),
                     ),
@@ -587,6 +589,10 @@ export const ShellTool = Tool.define(
 
       if (cut && file) {
         output = `...output truncated...\n\nFull output saved to: ${file}\n\n` + output
+      } else if (cut) {
+        output =
+          "...output truncated...\n\nNo session asset store is available, so the full output was not retained.\n\n" +
+          output
       }
 
       if (meta.length > 0) {

@@ -50,7 +50,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("truncated...")
-        if (result.truncated) expect(result.outputPath).toBeDefined()
+        if (result.truncated) expect(result.outputPath).toBeUndefined()
       }),
     )
 
@@ -188,7 +188,7 @@ describe("Truncate", () => {
       }),
     )
 
-    it.live("writes full output to file when truncated", () =>
+    it.live("does not write full output without a file-backed session", () =>
       Effect.gen(function* () {
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
@@ -196,14 +196,9 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("The tool call succeeded but the output was truncated")
-        expect(result.content).toContain("Grep")
+        expect(result.content).toContain("No session asset store is available")
         if (!result.truncated) throw new Error("expected truncated")
-        expect(result.outputPath).toBeDefined()
-        expect(result.outputPath).toContain("tool_")
-
-        const fsys = yield* FSUtil.Service
-        const written = yield* fsys.readFileString(result.outputPath!)
-        expect(written).toBe(lines)
+        expect(result.outputPath).toBeUndefined()
       }),
     )
 
@@ -231,6 +226,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         if (!result.truncated) throw new Error("expected truncated")
+        if (!result.outputPath) throw new Error("expected output path")
         expect(result.outputPath).toContain(path.join(directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"))
         const fsys = yield* FSUtil.Service
         expect(yield* fsys.readFileString(result.outputPath)).toBe(lines)
@@ -264,6 +260,7 @@ describe("Truncate", () => {
 
         expect(result.truncated).toBe(true)
         if (!result.truncated) throw new Error("expected truncated")
+        if (!result.outputPath) throw new Error("expected output path")
         expect(result.outputPath).toContain(
           path.join(nodeDirectory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"),
         )
@@ -274,12 +271,28 @@ describe("Truncate", () => {
       }),
     )
 
-    it.live("suggests Task tool when agent has task permission", () =>
+    instanceIt.live("suggests Task tool when agent has task permission and output is retained", () =>
       Effect.gen(function* () {
+        const directory = yield* tmpdirScoped()
+        const sessionID = "ses_truncate_task_hint" as SessionID
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "truncate-task-hint",
+            version: "test",
+            projectID: "global" as never,
+            directory,
+            path: ".",
+            title: "Truncate task hint",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 1 },
+          } as never),
+        )
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
         const agent = { permission: [{ permission: "task", pattern: "*", action: "allow" as const }] }
-        const result = yield* svc.output(lines, { maxLines: 10 }, agent as any)
+        const result = yield* svc.output(lines, { maxLines: 10, sessionID }, agent as any).pipe(provideInstance(directory))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("Grep")
@@ -287,12 +300,28 @@ describe("Truncate", () => {
       }),
     )
 
-    it.live("omits Task tool hint when agent lacks task permission", () =>
+    instanceIt.live("omits Task tool hint when agent lacks task permission", () =>
       Effect.gen(function* () {
+        const directory = yield* tmpdirScoped()
+        const sessionID = "ses_truncate_no_task_hint" as SessionID
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "truncate-no-task-hint",
+            version: "test",
+            projectID: "global" as never,
+            directory,
+            path: ".",
+            title: "Truncate no task hint",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 1 },
+          } as never),
+        )
         const svc = yield* Truncate.Service
         const lines = Array.from({ length: 100 }, (_, i) => `line${i}`).join("\n")
         const agent = { permission: [{ permission: "task", pattern: "*", action: "deny" as const }] }
-        const result = yield* svc.output(lines, { maxLines: 10 }, agent as any)
+        const result = yield* svc.output(lines, { maxLines: 10, sessionID }, agent as any).pipe(provideInstance(directory))
 
         expect(result.truncated).toBe(true)
         expect(result.content).toContain("Grep")

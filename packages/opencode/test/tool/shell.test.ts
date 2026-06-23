@@ -20,6 +20,7 @@ import { testEffect } from "../lib/effect"
 import { Tool } from "@/tool/tool"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { InstanceStore } from "@/project/instance-store"
+import { writeSessionStore } from "@/atree/session-store"
 
 const shellLayer = Layer.mergeAll(
   CrossSpawnSpawner.defaultLayer,
@@ -1178,7 +1179,9 @@ describe("tool.shell truncation", () => {
         })
         mustTruncate(result)
         expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
-        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
+        expect(result.output).not.toMatch(/Full output saved to:\s+\S+/)
+        expect(result.output).toContain("No session asset store is available")
+        expect((result.metadata as { outputPath?: string }).outputPath).toBeUndefined()
       }),
     ),
   )
@@ -1194,7 +1197,9 @@ describe("tool.shell truncation", () => {
         })
         mustTruncate(result)
         expect(result.output).toMatch(/\.\.\.output truncated\.\.\./)
-        expect(result.output).toMatch(/Full output saved to:\s+\S+/)
+        expect(result.output).not.toMatch(/Full output saved to:\s+\S+/)
+        expect(result.output).toContain("No session asset store is available")
+        expect((result.metadata as { outputPath?: string }).outputPath).toBeUndefined()
       }),
     ),
   )
@@ -1213,7 +1218,7 @@ describe("tool.shell truncation", () => {
     ),
   )
 
-  it.live("full output is saved to file when truncated", () =>
+  it.live("does not save full output without a file-backed session", () =>
     runIn(
       projectRoot,
       Effect.gen(function* () {
@@ -1225,14 +1230,55 @@ describe("tool.shell truncation", () => {
         mustTruncate(result)
 
         const filepath = (result.metadata as { outputPath?: string }).outputPath
-        expect(filepath).toBeTruthy()
-
-        const saved = yield* (yield* FSUtil.Service).readFileString(filepath!)
-        const lines = saved.trim().split(/\r?\n/)
-        expect(lines.length).toBe(lineCount)
-        expect(lines[0]).toBe("1")
-        expect(lines[lineCount - 1]).toBe(String(lineCount))
+        expect(filepath).toBeUndefined()
+        expect(result.output).toContain("No session asset store is available")
       }),
     ),
+  )
+
+  it.live("saves full output to session assets when a file-backed session exists", () =>
+    Effect.gen(function* () {
+      const directory = yield* tmpdirScoped()
+      const sessionID = SessionID.make("ses_shell_truncate_assets")
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "shell-truncate-assets",
+          version: "test",
+          projectID: "global" as never,
+          directory,
+          path: ".",
+          title: "Shell truncate assets",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 1 },
+        } as never),
+      )
+
+      yield* runIn(
+        directory,
+        Effect.gen(function* () {
+          const lineCount = Truncate.MAX_LINES + 100
+          const result = yield* run(
+            {
+              command: fill("lines", lineCount),
+              description: "Generate lines for file check",
+            },
+            { ...ctx, sessionID },
+          )
+          mustTruncate(result)
+
+          const filepath = (result.metadata as { outputPath?: string }).outputPath
+          expect(filepath).toBeTruthy()
+          expect(filepath).toContain(path.join(directory, ".agents", "atree", "sessions", sessionID, "assets", "tool-output"))
+
+          const saved = yield* (yield* FSUtil.Service).readFileString(filepath!)
+          const lines = saved.trim().split(/\r?\n/)
+          expect(lines.length).toBe(lineCount)
+          expect(lines[0]).toBe("1")
+          expect(lines[lineCount - 1]).toBe(String(lineCount))
+        }),
+      )
+    }),
   )
 })

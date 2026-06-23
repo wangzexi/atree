@@ -147,7 +147,7 @@ it.instance("explore agent asks for external directories and allows whitelisted 
     const explore = yield* load((svc) => svc.get("explore"))
     expect(explore).toBeDefined()
     expect(Permission.evaluate("external_directory", "/some/other/path", explore!.permission).action).toBe("ask")
-    expect(Permission.evaluate("external_directory", Truncate.GLOB, explore!.permission).action).toBe("allow")
+    expect(Permission.evaluate("external_directory", Truncate.GLOB, explore!.permission).action).toBe("ask")
     expect(
       Permission.evaluate("external_directory", path.join(Global.Path.tmp, "agent-work"), explore!.permission).action,
     ).toBe("allow")
@@ -546,11 +546,11 @@ it.instance(
 )
 
 it.instance(
-  "Truncate.GLOB is allowed even when user denies external_directory globally",
+  "Truncate.GLOB is not specially allowed when user denies external_directory globally",
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
-      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("allow")
+      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("deny")
       expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
     }),
@@ -574,11 +574,11 @@ it.instance("global tmp directory children are allowed for external_directory", 
 )
 
 it.instance(
-  "Truncate.GLOB is allowed even when user denies external_directory per-agent",
+  "Truncate.GLOB is not specially allowed when user denies external_directory per-agent",
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))
-      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("allow")
+      expect(Permission.evaluate("external_directory", Truncate.GLOB, build!.permission).action).toBe("deny")
       expect(Permission.evaluate("external_directory", Truncate.DIR, build!.permission).action).toBe("deny")
       expect(Permission.evaluate("external_directory", "/some/other/path", build!.permission).action).toBe("deny")
     }),
@@ -596,7 +596,7 @@ it.instance(
 )
 
 it.instance(
-  "explicit Truncate.GLOB deny is respected",
+  "explicit Truncate.GLOB deny remains respected",
   () =>
     Effect.gen(function* () {
       const build = yield* load((svc) => svc.get("build"))

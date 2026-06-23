@@ -8,7 +8,6 @@ import { Location } from "../location"
 import { PermissionV2 } from "../permission"
 import { PluginV2 } from "../plugin"
 
-const TRUNCATION_GLOB = path.join(Global.Path.data, "tool-output", "*")
 const BUILD_SYSTEM =
   "You are an AI coding agent. Help the user accomplish software engineering tasks by inspecting the workspace, making targeted changes, and using tools according to the configured permissions."
 
@@ -103,7 +102,7 @@ export const Plugin = PluginV2.define({
     const agent = yield* AgentV2.Service
     const location = yield* Location.Service
     const worktree = location.directory
-    const whitelistedDirs = [TRUNCATION_GLOB, path.join(Global.Path.tmp, "*")]
+    const whitelistedDirs = [path.join(Global.Path.tmp, "*")]
     const readonlyExternalDirectory: PermissionV2.Ruleset = [
       { action: "external_directory", resource: "*", effect: "ask" },
       ...whitelistedDirs.map(

@@ -179,7 +179,7 @@ export const resolve = Effect.fn("SessionTools.resolve")(function* (input: {
           const metadata = {
             ...result.metadata,
             truncated: truncated.truncated,
-            ...(truncated.truncated && { outputPath: truncated.outputPath }),
+            ...(truncated.truncated && truncated.outputPath ? { outputPath: truncated.outputPath } : {}),
           }
 
           const output = {

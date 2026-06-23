@@ -22,7 +22,7 @@ export const MAX_BYTES = 50 * 1024
 export const DIR = TRUNCATION_DIR
 export const GLOB = path.join(TRUNCATION_DIR, "*")
 
-export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath: string }
+export type Result = { content: string; truncated: false } | { content: string; truncated: true; outputPath?: string }
 
 export interface Options {
   maxLines?: number
@@ -42,10 +42,11 @@ function hasTaskTool(agent?: Agent.Info) {
 
 export interface Interface {
   readonly cleanup: () => Effect.Effect<void>
-  readonly write: (text: string, options?: WriteOptions) => Effect.Effect<string>
+  readonly write: (text: string, options?: WriteOptions) => Effect.Effect<string | undefined>
   /**
-   * Returns output unchanged when it fits within the limits, otherwise writes the full text
-   * to the truncation directory and returns a preview plus a hint to inspect the saved file.
+   * Returns output unchanged when it fits within the limits. If a file-backed
+   * atree session is available, oversized output is saved under the session
+   * assets directory; otherwise only the bounded preview is returned.
    */
   readonly output: (text: string, options?: Options, agent?: Agent.Info) => Effect.Effect<Result>
   /**
@@ -63,7 +64,7 @@ export const layer = Layer.effect(
 
     const directory = Effect.fn("Truncate.directory")(function* (options?: WriteOptions) {
       const sessionID = options?.sessionID
-      if (!sessionID) return TRUNCATION_DIR
+      if (!sessionID) return undefined
       const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       const database = yield* Effect.serviceOption(Database.Service)
       const session = Option.isSome(database)
@@ -75,7 +76,7 @@ export const layer = Layer.effect(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
           : undefined
-      if (!session) return TRUNCATION_DIR
+      if (!session) return undefined
       yield* Effect.promise(() => ensureSessionPayloadFilesByID(session.directory, sessionID)).pipe(
         Effect.catchCause(() => Effect.void),
       )
@@ -98,6 +99,7 @@ export const layer = Layer.effect(
 
     const write = Effect.fn("Truncate.write")(function* (text: string, options?: WriteOptions) {
       const dir = yield* directory(options)
+      if (!dir) return undefined
       const file = path.join(dir, ToolID.ascending())
       yield* fs.ensureDir(dir).pipe(Effect.orDie)
       yield* fs.writeFileString(file, text).pipe(Effect.orDie)
@@ -158,9 +160,11 @@ export const layer = Layer.effect(
       const preview = out.join("\n")
       const file = yield* write(text, { sessionID: options.sessionID })
 
-      const hint = hasTaskTool(agent)
-        ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
-        : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+      const hint = file
+        ? hasTaskTool(agent)
+          ? `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse the Task tool to have explore agent process this file with Grep and Read (with offset/limit). Do NOT read the full file yourself - delegate to save context.`
+          : `The tool call succeeded but the output was truncated. Full output saved to: ${file}\nUse Grep to search the full content or Read with offset/limit to view specific sections.`
+        : "The tool call succeeded but the output was truncated. No session asset store is available, so the full output was not retained."
 
       return {
         content:
@@ -168,7 +172,7 @@ export const layer = Layer.effect(
             ? `${preview}\n\n...${removed} ${unit} truncated...\n\n${hint}`
             : `...${removed} ${unit} truncated...\n\n${hint}\n\n${preview}`,
         truncated: true,
-        outputPath: file,
+        ...(file ? { outputPath: file } : {}),
       } as const
     })
 
