@@ -602,6 +602,10 @@ export const layer = Layer.effect(
             const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
+            const returnPrompt = Effect.fnUntraced(function* (admitted: SessionInput.Admitted) {
+              if (input.resume !== false) yield* enqueueWake(session, admitted)
+              return admitted
+            }, Effect.uninterruptible)
             if (existingFileMessage && (existingFileMessage.type !== "user" || !promptsMatch(input.prompt, existingFileMessage)))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
             if (fileBacked) {
@@ -615,9 +619,9 @@ export const layer = Layer.effect(
                   timeCreated: yield* DateTime.now,
                 })
                 yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
-                return admitted
+                return yield* returnPrompt(admitted)
               }
-              return new SessionInput.Admitted({
+              const admitted = new SessionInput.Admitted({
                 admittedSeq: 0,
                 id: messageID,
                 sessionID: input.sessionID,
@@ -625,6 +629,7 @@ export const layer = Layer.effect(
                 delivery: input.delivery ?? "steer",
                 timeCreated: existingFileMessage?.time.created ?? (yield* DateTime.now),
               })
+              return yield* returnPrompt(admitted)
             }
             const sessionRow = yield* db
               .select({ id: SessionTable.id, directory: SessionTable.directory })
@@ -635,10 +640,6 @@ export const layer = Layer.effect(
             const matchingSessionRow =
               sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
             if (!matchingSessionRow) return yield* new NotFoundError({ sessionID: input.sessionID })
-            const returnPrompt = Effect.fnUntraced(function* (admitted: SessionInput.Admitted) {
-              if (input.resume !== false) yield* enqueueWake(session, admitted)
-              return admitted
-            }, Effect.uninterruptible)
             const delivery = input.delivery ?? "steer"
             const expected = { sessionID: input.sessionID, messageID, prompt: input.prompt, delivery }
             const admitted = yield* SessionInput.admit(db, events, {

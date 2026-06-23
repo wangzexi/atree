@@ -35,6 +35,27 @@ const sessionsLayer = SessionV2.layer.pipe(
 )
 const it = testEffect(Layer.mergeAll(database, events, projector, sessionsLayer))
 const storeIt = testEffect(Layer.mergeAll(database, SessionStore.layer.pipe(Layer.provide(database))))
+const wakeCalls: Array<{ sessionID: SessionV2.ID; seq: number | undefined; directory: string | undefined }> = []
+const wakeExecution = Layer.succeed(
+  SessionExecution.Service,
+  SessionExecution.Service.of({
+    resume: () => Effect.void,
+    wake: (sessionID, seq, options) =>
+      Effect.sync(() => {
+        wakeCalls.push({ sessionID, seq, directory: options?.directory })
+      }),
+    interrupt: () => Effect.void,
+  }),
+)
+const wakingSessionsLayer = SessionV2.layer.pipe(
+  Layer.provide(events),
+  Layer.provide(database),
+  Layer.provide(Project.defaultLayer),
+  Layer.provide(SessionStore.layer.pipe(Layer.provide(database))),
+  Layer.provide(wakeExecution),
+  Layer.provide(projector),
+)
+const wakingIt = testEffect(Layer.mergeAll(database, events, projector, wakingSessionsLayer))
 
 async function writeAtreeSession(input: {
   root: string
@@ -1925,6 +1946,51 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(admitted.id).toBe(SessionMessage.ID.make("msg_core_prompt"))
       expect(messages).toHaveLength(1)
       expect(messages[0]).toMatchObject({ id: "msg_core_prompt", type: "user", text: "record this prompt" })
+    }),
+  )
+
+  wakingIt.effect("wakes execution after recording a file-backed prompt", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-prompt-wake-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-prompt-wake-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      wakeCalls.length = 0
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_wake")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core prompt wake",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const admitted = yield* sessions.prompt({
+        sessionID,
+        directory: AbsolutePath.make(node),
+        id: SessionMessage.ID.make("msg_core_prompt_wake"),
+        prompt: new Prompt({ text: "wake after file prompt" }),
+      })
+
+      expect(wakeCalls).toEqual([{ sessionID, seq: admitted.admittedSeq, directory: path.resolve(node) }])
+      wakeCalls.length = 0
+
+      yield* sessions.prompt({
+        sessionID,
+        directory: AbsolutePath.make(node),
+        id: SessionMessage.ID.make("msg_core_prompt_no_wake"),
+        prompt: new Prompt({ text: "do not wake" }),
+        resume: false,
+      })
+
+      expect(wakeCalls).toEqual([])
     }),
   )
 
