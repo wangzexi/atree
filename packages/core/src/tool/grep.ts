@@ -88,6 +88,7 @@ export const layer = Layer.effectDiscard(
                 },
                 sessionID: context.sessionID,
                 agent: context.agent,
+                directory: context.directory,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
               const target = path.resolve(location.directory, input.path ?? ".")

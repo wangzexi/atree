@@ -151,6 +151,7 @@ export const layer = Layer.effectDiscard(
                 metadata: input,
                 sessionID: context.sessionID,
                 agent: context.agent,
+                directory: context.directory,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
 

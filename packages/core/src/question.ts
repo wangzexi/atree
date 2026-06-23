@@ -95,6 +95,7 @@ export class NotFoundError extends Schema.TaggedErrorClass<NotFoundError>()("Que
 
 export interface AskInput {
   readonly sessionID: SessionSchema.ID
+  readonly directory?: string
   readonly questions: ReadonlyArray<Info>
   readonly tool?: Tool
 }
@@ -134,9 +135,7 @@ export const layer = Layer.effect(
 
     const restorePending = Effect.fn("QuestionV2.restorePending")(function* () {
       const restored = yield* Effect.promise(() => readQuestionStateEntries()).pipe(
-        Effect.catchCause(() =>
-          Effect.succeed([] as Awaited<ReturnType<typeof readQuestionStateEntries>>),
-        ),
+        Effect.catchCause(() => Effect.succeed([] as Awaited<ReturnType<typeof readQuestionStateEntries>>)),
       )
       const restoredIDs = new Set(restored.map((entry) => entry.request.id))
       for (const [id, item] of pending) {
@@ -196,8 +195,8 @@ export const layer = Layer.effect(
           const id = ID.ascending()
           const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
           const request: Request = { id, ...input }
-          pending.set(id, { request, deferred })
-          return yield* publish(request.sessionID, Event.Asked, request).pipe(
+          pending.set(id, { request, deferred, directory: input.directory })
+          return yield* publish(request.sessionID, Event.Asked, request, input.directory).pipe(
             Effect.andThen(restore(Deferred.await(deferred))),
             Effect.ensuring(
               Effect.sync(() => {

@@ -42,6 +42,7 @@ export const layer = Layer.effectDiscard(
                 save: ["*"],
                 sessionID: context.sessionID,
                 agent: context.agent,
+                directory: context.directory,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
               yield* todos.update({ sessionID: context.sessionID, todos: input.todos })

@@ -64,6 +64,7 @@ export const layer = Layer.effectDiscard(
                 resources: ["*"],
                 sessionID: context.sessionID,
                 agent: context.agent,
+                directory: context.directory,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
               .pipe(
@@ -72,6 +73,7 @@ export const layer = Layer.effectDiscard(
                   question
                     .ask({
                       sessionID: context.sessionID,
+                      directory: context.directory,
                       questions: input.questions,
                       tool: { messageID: context.assistantMessageID, callID: context.toolCallID },
                     })

@@ -134,6 +134,7 @@ export const layer = Layer.effectDiscard(
                   ...LocationMutation.externalDirectoryPermission(external),
                   sessionID: context.sessionID,
                   agent: context.agent,
+                  directory: context.directory,
                   source,
                 })
               const warnings = externalCommandDirectories(input.command, target.canonical).map(
@@ -146,6 +147,7 @@ export const layer = Layer.effectDiscard(
                 save: [input.command],
                 sessionID: context.sessionID,
                 agent: context.agent,
+                directory: context.directory,
                 source,
               })
 

@@ -5,7 +5,7 @@ import { Global } from "@opencode-ai/core/global"
 import { QuestionV2 } from "@opencode-ai/core/question"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { Context, Effect, Exit, Layer, Scope } from "effect"
+import { Context, Effect, Exit, Fiber, Layer, Scope } from "effect"
 import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "fs/promises"
 import os from "os"
 import path from "path"
@@ -66,6 +66,73 @@ async function writeSessionJsonl(directory: string, sessionID: string, entries: 
 }
 
 describe("QuestionV2 atree state", () => {
+  it.effect("creates question asks in a directory-backed session without a global session row", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_question_directory_ask")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core question directory ask",
+        }),
+      )
+
+      const service = yield* QuestionV2.Service
+      const fiber = yield* service
+        .ask({
+          sessionID,
+          directory: node,
+          questions: [
+            {
+              question: "Write this question into the directory session?",
+              header: "Directory",
+              options: [{ label: "Yes", description: "Persist the ask event locally" }],
+            },
+          ],
+        })
+        .pipe(Effect.forkScoped)
+
+      const pending = yield* service.list()
+      expect(pending).toHaveLength(1)
+      const requestID = pending[0]?.id
+      expect(requestID).toBeDefined()
+
+      const raw = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "question.v2.asked",
+          id: requestID,
+          sessionID,
+        }),
+      )
+
+      if (requestID) yield* service.reply({ requestID, answers: [["Yes"]] })
+      expect(yield* Fiber.join(fiber)).toEqual([["Yes"]])
+    }),
+  )
+
   it.effect("restores pending questions from directory session.jsonl and appends replies", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
@@ -355,7 +422,9 @@ describe("QuestionV2 atree state", () => {
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as Record<string, unknown>)
-      expect(entries.some((entry) => entry.type === "question.v2.rejected" && entry.requestID === pendingID)).toBe(false)
+      expect(entries.some((entry) => entry.type === "question.v2.rejected" && entry.requestID === pendingID)).toBe(
+        false,
+      )
     }),
   )
 })

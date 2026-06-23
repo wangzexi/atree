@@ -44,6 +44,18 @@ const permissions = PermissionV2.locationLayer.pipe(
 )
 const it = testEffect(permissions)
 
+function setRules(rules: PermissionV2.Ruleset) {
+  return Effect.gen(function* () {
+    const agents = yield* AgentV2.Service
+    const update = yield* agents.transform()
+    yield* update((editor) =>
+      editor.update(AgentV2.ID.make("test"), (agent) => {
+        agent.permissions = [...rules]
+      }),
+    )
+  })
+}
+
 async function writeAtreeSession(input: {
   data: string
   root: string
@@ -93,6 +105,67 @@ async function writeSessionJsonl(directory: string, sessionID: string, entries: 
 }
 
 describe("PermissionV2 atree state", () => {
+  it.effect("creates permission asks in a directory-backed session without a global session row", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* setRules([])
+
+      const sessionID = SessionV2.ID.make("ses_core_permission_directory_ask")
+      const permissionID = PermissionV2.ID.create("per_core_permission_directory_ask")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: node,
+          sessionID,
+          title: "Core permission directory ask",
+        }),
+      )
+
+      const service = yield* PermissionV2.Service
+      expect(
+        yield* service.ask({
+          id: permissionID,
+          sessionID,
+          directory: node,
+          agent: AgentV2.ID.make("test"),
+          action: "bash",
+          resources: ["echo directory"],
+          save: ["echo directory"],
+        }),
+      ).toEqual({ id: permissionID, effect: "ask" })
+
+      const raw = yield* Effect.promise(() =>
+        readFile(path.join(node, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          type: "permission.v2.asked",
+          id: permissionID,
+          sessionID,
+          action: "bash",
+          resources: ["echo directory"],
+        }),
+      )
+    }),
+  )
+
   it.effect("restores pending permissions from directory session.jsonl and appends replies", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(

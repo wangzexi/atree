@@ -81,6 +81,7 @@ export const layer = Layer.effectDiscard(
                   save: [skill.name],
                   sessionID: context.sessionID,
                   agent: context.agent,
+                  directory: context.directory,
                   source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
                 })
                 const directory = path.dirname(skill.location)

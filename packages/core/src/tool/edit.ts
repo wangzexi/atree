@@ -142,6 +142,7 @@ export const layer = Layer.effectDiscard(
                       ...LocationMutation.externalDirectoryPermission(external),
                       sessionID: context.sessionID,
                       agent: context.agent,
+                      directory: context.directory,
                       source: permissionSource,
                     }),
                   )
@@ -154,6 +155,7 @@ export const layer = Layer.effectDiscard(
                     save: ["*"],
                     sessionID: context.sessionID,
                     agent: context.agent,
+                    directory: context.directory,
                     source: permissionSource,
                   }),
                 )

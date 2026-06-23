@@ -70,6 +70,7 @@ export const layer = Layer.effectDiscard(
                 save: ["*"],
                 sessionID: context.sessionID,
                 agent: context.agent,
+                directory: context.directory,
                 source: { type: "tool", messageID: context.assistantMessageID, callID: context.toolCallID },
               })
               if (type === "directory") return yield* reader.list(target, { offset: input.offset, limit: input.limit })
