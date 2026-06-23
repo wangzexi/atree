@@ -1154,45 +1154,11 @@ describe("atree file-backed SessionV2 discovery", () => {
 
       const store = yield* SessionStore.Service
       expect((yield* store.context(sessionID)).map((message) => message.id)).toEqual([messageID])
+      expect(yield* store.hasPendingInput(sessionID, "queue")).toBe(true)
       expect(yield* store.runnerEntries(sessionID, 0)).toEqual([])
 
-      yield* Effect.promise(() =>
-        appendSessionJsonl(node, sessionID, [
-          {
-            type: "session.next.prompt.admitted",
-            sessionID,
-            messageID,
-            timestamp: 30,
-            prompt: new Prompt({ text: "visible but not runnable yet" }),
-            delivery: "queue",
-          },
-          {
-            type: "session.next.prompt.promoted",
-            sessionID,
-            messageID,
-            timestamp: 40,
-            timeCreated: 30,
-            prompt: new Prompt({ text: "visible but not runnable yet" }),
-          },
-          {
-            type: "message.updated",
-            message: {
-              id: messageID,
-              role: "user",
-              time: { created: 30 },
-            },
-          },
-          {
-            type: "message.part.updated",
-            part: {
-              id: "prt_core_store_unpromoted",
-              messageID,
-              type: "text",
-              text: "visible but not runnable yet",
-            },
-          },
-        ]),
-      )
+      expect(yield* store.promoteInputs(sessionID, { delivery: "queue", mode: "next" })).toBe(1)
+      expect(yield* store.hasPendingInput(sessionID, "queue")).toBe(false)
 
       expect((yield* store.runnerEntries(sessionID, 0)).map((entry) => entry.message.id)).toEqual([messageID])
     }),

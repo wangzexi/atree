@@ -117,6 +117,8 @@ describe("ToolOutputStore", () => {
               runnerEntries: () => Effect.succeed([]),
               runnerContext: () => Effect.succeed([]),
               message: () => Effect.succeed(undefined),
+              hasPendingInput: () => Effect.succeed(undefined),
+              promoteInputs: () => Effect.succeed(undefined),
             }),
           )
           const storeLayer = ToolOutputStore.layer.pipe(

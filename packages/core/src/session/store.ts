@@ -2,11 +2,13 @@ export * as SessionStore from "./store"
 
 import { Context, Effect, Layer } from "effect"
 import { MessageDecodeError } from "./error"
+import { SessionInput } from "./input"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
 import {
   findSessionJsonlMessage,
   findSessionStore,
+  promoteSessionPrompts,
   readSessionPromptStates,
   readSessionJsonlMessages,
   readSessionStore,
@@ -35,6 +37,20 @@ export interface Interface {
   readonly message: (
     messageID: SessionMessage.ID,
   ) => Effect.Effect<{ readonly sessionID: SessionSchema.ID; readonly message: SessionMessage.Message } | undefined>
+  readonly hasPendingInput: (
+    sessionID: SessionSchema.ID,
+    delivery: SessionInput.Delivery,
+    options?: { directory?: string },
+  ) => Effect.Effect<boolean | undefined>
+  readonly promoteInputs: (
+    sessionID: SessionSchema.ID,
+    input: {
+      readonly delivery: SessionInput.Delivery
+      readonly mode: "all" | "next"
+      readonly cutoff?: number
+    },
+    options?: { directory?: string },
+  ) => Effect.Effect<number | undefined>
 }
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/SessionStore") {}
@@ -131,6 +147,19 @@ export const layer = Layer.effect(
       message: Effect.fn("SessionStore.message")(function* (messageID) {
         const fileMessage = yield* findFileBackedMessage(messageID)
         return fileMessage
+      }),
+      hasPendingInput: Effect.fn("SessionStore.hasPendingInput")(function* (sessionID, delivery, options) {
+        const fileSession = yield* resolveFileSession(sessionID, options?.directory)
+        if (!fileSession) return undefined
+        const states = yield* Effect.promise(() => readSessionPromptStates(fileSession)).pipe(
+          Effect.catchCause(() => Effect.succeed(new Map())),
+        )
+        return [...states.values()].some((state) => state.status === "admitted" && state.delivery === delivery)
+      }),
+      promoteInputs: Effect.fn("SessionStore.promoteInputs")(function* (sessionID, input, options) {
+        const fileSession = yield* resolveFileSession(sessionID, options?.directory)
+        if (!fileSession) return undefined
+        return yield* Effect.promise(() => promoteSessionPrompts(fileSession, input))
       }),
     })
   }),

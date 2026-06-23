@@ -1871,6 +1871,8 @@ export type SessionPromptState = {
   readonly status: "admitted" | "promoted"
   readonly admittedSeq: number
   readonly promotedSeq?: number
+  readonly timeCreated: number
+  readonly prompt: Record<string, unknown>
 }
 
 export async function readSessionPromptStates(info: SessionSchema.Info) {
@@ -1886,6 +1888,8 @@ export async function readSessionPromptStates(info: SessionSchema.Info) {
     const data = eventData(entry)
     const rawMessageID = typeof data.messageID === "string" ? data.messageID : undefined
     if (!rawMessageID) continue
+    const prompt = isRecord(data.prompt) ? data.prompt : undefined
+    if (!prompt) continue
     const messageID = SessionMessage.ID.make(rawMessageID)
     const delivery = data.delivery === "queue" ? "queue" : "steer"
     const existing = states.get(messageID)
@@ -1896,6 +1900,8 @@ export async function readSessionPromptStates(info: SessionSchema.Info) {
         status: existing?.status === "promoted" ? "promoted" : "admitted",
         admittedSeq: existing?.admittedSeq ?? index,
         promotedSeq: existing?.promotedSeq,
+        timeCreated: existing?.timeCreated ?? timestampValue(data.timeCreated, timestampValue(data.timestamp, index)),
+        prompt: existing?.prompt ?? prompt,
       })
       continue
     }
@@ -1905,7 +1911,37 @@ export async function readSessionPromptStates(info: SessionSchema.Info) {
       status: "promoted",
       admittedSeq: existing?.admittedSeq ?? index,
       promotedSeq: existing?.promotedSeq ?? index,
+      timeCreated: existing?.timeCreated ?? timestampValue(data.timeCreated, timestampValue(data.timestamp, index)),
+      prompt: existing?.prompt ?? prompt,
     })
   }
   return states
+}
+
+export async function promoteSessionPrompts(
+  info: SessionSchema.Info,
+  input: {
+    readonly delivery: SessionInput.Delivery
+    readonly mode: "all" | "next"
+    readonly cutoff?: number
+  },
+) {
+  const states = [...(await readSessionPromptStates(info)).values()]
+    .filter((state) => state.status === "admitted")
+    .filter((state) => state.delivery === input.delivery)
+    .filter((state) => input.cutoff === undefined || state.admittedSeq <= input.cutoff)
+    .sort((a, b) => a.admittedSeq - b.admittedSeq || a.messageID.localeCompare(b.messageID))
+  const selected = input.mode === "next" ? states.slice(0, 1) : states
+  const timestamp = Date.now()
+  for (const state of selected) {
+    await appendSessionJsonl(info, {
+      type: "session.next.prompt.promoted",
+      sessionID: info.id,
+      messageID: state.messageID,
+      timestamp,
+      timeCreated: state.timeCreated,
+      prompt: state.prompt,
+    })
+  }
+  return selected.length
 }
