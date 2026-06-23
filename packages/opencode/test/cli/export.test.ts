@@ -78,6 +78,13 @@ it.effect("exports directory-backed sessions that are missing SQLite session row
         part: { id: partID, sessionID, messageID, type: "text", text: "export me" },
       }),
     )
+    yield* Effect.promise(() =>
+      appendSessionJsonl(session, {
+        type: "session.diff",
+        sessionID,
+        diff: [{ file: "changed.ts", additions: 2, deletions: 1, status: "modified", patch: "@@" }],
+      }),
+    )
 
     const exported = yield* exportSessionData({ sessionID, directory })
 
@@ -86,5 +93,8 @@ it.effect("exports directory-backed sessions that are missing SQLite session row
     expect(exported.messages).toHaveLength(1)
     expect(exported.messages[0]?.info).toMatchObject({ id: messageID, role: "user" })
     expect(exported.messages[0]?.parts[0]).toMatchObject({ id: partID, type: "text", text: "export me" })
+    expect(exported.sessionDiff).toEqual([
+      { file: "changed.ts", additions: 2, deletions: 1, status: "modified", patch: "@@" },
+    ])
   }),
 )

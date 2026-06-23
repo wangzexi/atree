@@ -8,6 +8,7 @@ import * as prompts from "@clack/prompts"
 import { EOL } from "os"
 import { Effect } from "effect"
 import { InstanceRef } from "@/effect/instance-ref"
+import type { Snapshot } from "@/snapshot"
 
 function redact(kind: string, id: string, value: string) {
   return value.trim() ? `[redacted:${kind}:${id}]` : value
@@ -161,7 +162,7 @@ function part(part: SessionV1.Part): SessionV1.Part {
 
 const partFn = part
 
-export type ExportData = { info: Session.Info; messages: SessionV1.WithParts[] }
+export type ExportData = { info: Session.Info; messages: SessionV1.WithParts[]; sessionDiff?: Snapshot.FileDiff[] }
 
 function sanitize(data: ExportData) {
   return {
@@ -189,6 +190,7 @@ function sanitize(data: ExportData) {
                 : redact("revert-diff", data.info.id, data.info.revert.diff),
           },
     },
+    sessionDiff: diff("session-diff", data.sessionDiff),
     messages: data.messages.map((msg) => ({
       info:
         msg.info.role === "user"
@@ -247,7 +249,8 @@ export const exportSessionData = Effect.fn("Cli.export.sessionData")(function* (
   const svc = yield* Session.Service
   const sessionInfo = yield* svc.get(input.sessionID, { directory: input.directory })
   const messages = yield* svc.messages({ sessionID: sessionInfo.id, directory: sessionInfo.directory })
-  return { info: sessionInfo, messages } satisfies ExportData
+  const sessionDiff = yield* svc.diff(sessionInfo.id, { directory: sessionInfo.directory })
+  return { info: sessionInfo, messages, sessionDiff } satisfies ExportData
 })
 
 const run = Effect.fn("Cli.export.body")(function* (args: { sessionID?: string; sanitize?: boolean }) {
@@ -260,7 +263,7 @@ const run = Effect.fn("Cli.export.body")(function* (args: { sessionID?: string; 
     UI.empty()
     prompts.intro("Export session", { output: process.stderr })
 
-    const sessions = yield* svc.list()
+    const sessions = yield* svc.list(ctx?.directory ? { directory: ctx.directory } : undefined)
 
     if (sessions.length === 0) {
       prompts.log.error("No sessions found", { output: process.stderr })
