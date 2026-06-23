@@ -84,7 +84,6 @@ export function fromRow(row: SessionRow): Info {
           diffs: row.summary_diffs ?? undefined,
         }
       : undefined
-  const share = row.share_url ? { url: row.share_url } : undefined
   const revert = row.revert ?? undefined
   return {
     id: row.id,
@@ -115,7 +114,6 @@ export function fromRow(row: SessionRow): Info {
         write: row.tokens_cache_write,
       },
     },
-    share,
     metadata: row.metadata ?? undefined,
     revert,
     permission: row.permission ? [...row.permission] : undefined,
@@ -141,7 +139,7 @@ export function toRow(info: Info) {
     agent: info.agent ?? null,
     model: info.model ?? null,
     version: info.version,
-    share_url: info.share?.url ?? null,
+    share_url: null,
     summary_additions: info.summary?.additions ?? null,
     summary_deletions: info.summary?.deletions ?? null,
     summary_files: info.summary?.files ?? null,
@@ -171,7 +169,6 @@ function mergeFileSession(cached: Info | undefined, file: Info): Info {
     workspaceID: file.workspaceID ?? (sameCachedDirectory ? cached.workspaceID : undefined),
     path: file.path ?? (sameCachedDirectory ? cached.path : undefined),
     summary: file.summary ?? (sameCachedDirectory ? cached.summary : undefined),
-    share: file.share ?? (sameCachedDirectory ? cached.share : undefined),
     revert: file.revert ?? (sameCachedDirectory ? cached.revert : undefined),
     permission: file.permission ?? (sameCachedDirectory ? cached.permission : undefined),
     time: {
@@ -238,10 +235,6 @@ const Tokens = Schema.Struct({
 
 const EmptyTokens = { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
 
-const Share = Schema.Struct({
-  url: Schema.String,
-})
-
 // Legacy HTTP accepted negative values here. Keep archive timestamps permissive
 // while excluding non-finite values that cannot round-trip through JSON.
 export const ArchivedTimestamp = Schema.Finite
@@ -279,7 +272,6 @@ export const Info = Schema.Struct({
   summary: optionalOmitUndefined(Summary),
   cost: optionalOmitUndefined(Schema.Finite),
   tokens: optionalOmitUndefined(Tokens),
-  share: optionalOmitUndefined(Share),
   title: Schema.String,
   agent: optionalOmitUndefined(Schema.String),
   model: optionalOmitUndefined(Model),
@@ -374,10 +366,6 @@ const CreatedEventSchema = Schema.Struct({
   info: Info,
 })
 
-const UpdatedShare = Schema.Struct({
-  url: Schema.optional(Schema.NullOr(Schema.String)),
-})
-
 const UpdatedTime = Schema.Struct({
   created: Schema.optional(Schema.NullOr(NonNegativeInt)),
   updated: Schema.optional(Schema.NullOr(NonNegativeInt)),
@@ -396,7 +384,6 @@ const UpdatedInfo = Schema.Struct({
   summary: Schema.optional(Schema.NullOr(Summary)),
   cost: Schema.optional(Schema.Finite),
   tokens: Schema.optional(Tokens),
-  share: Schema.optional(UpdatedShare),
   title: Schema.optional(Schema.NullOr(Schema.String)),
   agent: Schema.optional(Schema.NullOr(Schema.String)),
   model: Schema.optional(Schema.NullOr(Model)),

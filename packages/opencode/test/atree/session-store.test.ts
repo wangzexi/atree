@@ -212,7 +212,7 @@ describe("atree session store", () => {
     expect(restored?.path).toBe("nested")
     expect(restored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
     expect(restored?.workspaceID).toBe("workspace-jsonl" as any)
-    expect(restored?.share).toEqual({ url: "https://example.com/share" })
+    expect((restored as any)?.share).toBeUndefined()
     expect(restored?.summary).toEqual({ additions: 1, deletions: 2, files: 3, diffs: [] })
     expect(restored?.revert).toEqual({ messageID: "msg_jsonl_revert", partID: "prt_jsonl_revert" } as any)
     expect(restored?.time.compacting).toBe(12)

@@ -616,7 +616,7 @@ describe("Session", () => {
       expect(copied.directory).toBe(target)
       expect(copied.title).toBe("target copied without optional metadata")
       expect(copied.summary).toBeUndefined()
-      expect(copied.share).toBeUndefined()
+      expect((copied as any).share).toBeUndefined()
       expect(copied.revert).toBeUndefined()
       expect(copied.permission).toBeUndefined()
     }),
@@ -1179,7 +1179,7 @@ describe("Session", () => {
       expect(stored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
       expect(stored?.time.archived).toBe(1234)
       expect(stored?.summary).toEqual({ additions: 4, deletions: 5, files: 6, diffs: [] })
-      expect(stored?.share).toBeUndefined()
+      expect((stored as any)?.share).toBeUndefined()
       expect(stored?.workspaceID).toBe("wrk_patched" as any)
       expect(stored?.revert).toBeUndefined()
 

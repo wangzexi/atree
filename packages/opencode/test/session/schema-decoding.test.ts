@@ -61,7 +61,6 @@ describe("Session.Info", () => {
         files: 2,
         diffs: [{ additions: 1, deletions: 0, file: "a.ts", patch: "--- a/a.ts" }],
       },
-      share: { url: "https://share.example.com/s/1" },
       title: "Full session",
       version: "1.0.0",
       metadata: { source: "test" },
@@ -75,6 +74,21 @@ describe("Session.Info", () => {
       },
     }
     expect(decode(input)).toEqual(input)
+  })
+
+  test("drops legacy share metadata", () => {
+    const input = {
+      id: sessionID,
+      slug: "legacy-share",
+      projectID,
+      directory: "/tmp/proj",
+      title: "Legacy share",
+      version: "1.0.0",
+      share: { url: "https://share.example.com/s/1" },
+      time: { created: 100, updated: 200 },
+    }
+    const decoded = decode(input) as Record<string, unknown>
+    expect(decoded.share).toBeUndefined()
   })
 
   test("accepts migrated summary diffs without file details", () => {

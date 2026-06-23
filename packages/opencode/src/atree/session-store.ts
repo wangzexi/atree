@@ -1222,9 +1222,6 @@ async function applySessionUpdatedEvents(info: SessionInfo) {
               typeof patch.workspaceID === "string" ? (patch.workspaceID as SessionInfo["workspaceID"]) : undefined,
           }
         : {}),
-      ...("share" in patch
-        ? { share: patch.share && typeof patch.share === "object" ? (patch.share as SessionInfo["share"]) : undefined }
-        : {}),
       ...("summary" in patch
         ? {
             summary:
@@ -1280,7 +1277,6 @@ function sessionInfoFromCreatedEvent(
     model: info.model && typeof info.model === "object" ? (info.model as SessionInfo["model"]) : undefined,
     metadata,
     permission: Array.isArray(info.permission) ? (info.permission as SessionInfo["permission"]) : undefined,
-    share: info.share && typeof info.share === "object" ? (info.share as SessionInfo["share"]) : undefined,
     summary: info.summary && typeof info.summary === "object" ? (info.summary as SessionInfo["summary"]) : undefined,
     revert: info.revert && typeof info.revert === "object" ? (info.revert as SessionInfo["revert"]) : undefined,
     cost: typeof info.cost === "number" ? info.cost : 0,
@@ -1425,7 +1421,6 @@ function parseMeta(raw: string, fallbackDirectory: string): SessionInfo | undefi
     model: data.model && typeof data.model === "object" ? (data.model as SessionInfo["model"]) : undefined,
     metadata,
     permission: Array.isArray(data.permission) ? (data.permission as SessionInfo["permission"]) : undefined,
-    share: data.share && typeof data.share === "object" ? (data.share as SessionInfo["share"]) : undefined,
     summary: data.summary && typeof data.summary === "object" ? (data.summary as SessionInfo["summary"]) : undefined,
     revert: data.revert && typeof data.revert === "object" ? (data.revert as SessionInfo["revert"]) : undefined,
     cost: typeof data.cost === "number" ? data.cost : 0,
