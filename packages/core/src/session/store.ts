@@ -166,7 +166,7 @@ export const layer = Layer.effect(
         const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
-        if (messages.length === 0 && !(yield* persistedRootOwnsSession(sessionID)))
+        if (messages.length === 0 && !options?.directory && !(yield* persistedRootOwnsSession(sessionID)))
           return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
         return messages
           .map((message, index) => ({ seq: index + 1, message }))
@@ -185,7 +185,7 @@ export const layer = Layer.effect(
           const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
             Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
           )
-          if (messages.length === 0 && !(yield* persistedRootOwnsSession(sessionID)))
+          if (messages.length === 0 && !options?.directory && !(yield* persistedRootOwnsSession(sessionID)))
             return yield* SessionHistory.load(db, sessionID)
           return messages
         }

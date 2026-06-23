@@ -1291,6 +1291,76 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("does not revive stale SQLite context for an explicit empty file-backed directory", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-explicit-empty-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-explicit-empty-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_explicit_empty")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core store explicit empty context",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() => rm(path.join(data, "atree", "state.json"), { force: true }))
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "explicit-empty",
+          directory: node,
+          title: "Core store explicit empty context",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionMessageTable)
+        .values({
+          id: SessionMessage.ID.make("msg_core_store_explicit_empty_sqlite"),
+          session_id: sessionID,
+          type: "user",
+          seq: 1,
+          time_created: 5,
+          data: {
+            time: { created: 5 },
+            text: "stale sqlite explicit context should stay hidden",
+            files: [],
+            agents: [],
+          },
+        } as typeof SessionMessageTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      const context = yield* store.context(sessionID, { directory: node })
+      const entries = yield* store.runnerEntries(sessionID, 0, { directory: node })
+      const runnerContext = yield* store.runnerContext(sessionID, 0, { directory: node })
+
+      expect(context).toEqual([])
+      expect(entries).toEqual([])
+      expect(runnerContext).toEqual([])
+    }),
+  )
+
   storeIt.effect("loads core SessionStore runner context from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-runner-context-data-")))
