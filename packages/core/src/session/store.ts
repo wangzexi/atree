@@ -7,7 +7,7 @@ import { SessionHistory } from "./history"
 import { MessageDecodeError } from "./error"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
-import { SessionMessageTable, SessionTable } from "./sql"
+import { SessionInputTable, SessionMessageTable, SessionTable } from "./sql"
 import { fromRow } from "./info"
 import {
   findSessionJsonlMessage,
@@ -147,8 +147,23 @@ export const layer = Layer.effect(
         )
         if (messages.length === 0 && !options?.directory && !(yield* persistedRootOwnsSession(sessionID)))
           return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)
+        const inputRows = yield* db
+          .select({
+            id: SessionInputTable.id,
+            promotedSeq: SessionInputTable.promoted_seq,
+          })
+          .from(SessionInputTable)
+          .where(eq(SessionInputTable.session_id, sessionID))
+          .all()
+          .pipe(Effect.orDie)
+        const inputState = new Map(inputRows.map((row) => [row.id, row.promotedSeq]))
         return messages
           .map((message, index) => ({ seq: index + 1, message }))
+          .filter((entry) => {
+            if (entry.message.type !== "user") return true
+            const promotedSeq = inputState.get(entry.message.id)
+            return promotedSeq === undefined || promotedSeq !== null
+          })
           .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
       }
       return yield* SessionHistory.entriesForRunner(db, sessionID, baselineSeq)

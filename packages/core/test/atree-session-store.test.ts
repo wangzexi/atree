@@ -1101,6 +1101,97 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("excludes unpromoted file-backed prompts from runner entries", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_unpromoted")
+      const messageID = SessionMessage.ID.make("msg_core_store_unpromoted")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core store unpromoted prompt",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_unpromoted",
+              messageID,
+              type: "text",
+              text: "visible but not runnable yet",
+            },
+          },
+        ]),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "unpromoted",
+          directory: node,
+          title: "Core store unpromoted prompt",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionInputTable)
+        .values({
+          id: messageID,
+          session_id: sessionID,
+          prompt: new Prompt({ text: "visible but not runnable yet" }),
+          delivery: "queue",
+          admitted_seq: 1,
+          promoted_seq: null,
+          time_created: 30,
+        } as typeof SessionInputTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+
+      const store = yield* SessionStore.Service
+      expect((yield* store.context(sessionID)).map((message) => message.id)).toEqual([messageID])
+      expect(yield* store.runnerEntries(sessionID, 0)).toEqual([])
+
+      yield* db
+        .update(SessionInputTable)
+        .set({ promoted_seq: 2 })
+        .where(eq(SessionInputTable.id, messageID))
+        .run()
+        .pipe(Effect.orDie)
+
+      expect((yield* store.runnerEntries(sessionID, 0)).map((entry) => entry.message.id)).toEqual([messageID])
+    }),
+  )
+
   storeIt.effect("resolves SessionStore context by explicit directory before persisted root copies", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-dir-data-")))
@@ -1190,7 +1281,7 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
-  storeIt.effect("does not resolve a cached child session from an explicit parent directory", () =>
+  storeIt.effect("does not resolve a cached child session from explicit directories without file stores", () =>
     Effect.gen(function* () {
       const parent = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-parent-")))
       const child = path.join(parent, "child")
@@ -1218,7 +1309,7 @@ describe("atree file-backed SessionV2 discovery", () => {
 
       const store = yield* SessionStore.Service
       expect(yield* store.get(sessionID, { directory: parent })).toBeUndefined()
-      expect((yield* store.get(sessionID, { directory: child }))?.id).toBe(sessionID)
+      expect(yield* store.get(sessionID, { directory: child })).toBeUndefined()
     }),
   )
 
