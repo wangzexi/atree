@@ -1380,6 +1380,31 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not resolve explicit directory sessions from the persisted root", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-session-explicit-root-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const other = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-session-explicit-other-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const info = yield* session.create({ title: "root-scoped-session" })
+      yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+
+      const error = yield* Effect.flip(session.get(info.id, { directory: other }))
+      expect(error).toBeInstanceOf(NotFoundError)
+      expect(error.message).toBe(`Session not found: ${info.id}`)
+    }),
+  )
+
   it.instance("does not list global directory sessions that only exist in the stale SQLite cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

@@ -34,6 +34,7 @@ export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function
 
   const explicit = yield* tryDirectory(input.directory)
   if (explicit) return explicit
+  if (input.directory) return
 
   const instance = sameDirectory(input.instanceDirectory, input.directory)
     ? undefined

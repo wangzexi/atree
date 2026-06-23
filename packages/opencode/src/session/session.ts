@@ -733,6 +733,7 @@ export const layer: Layer.Layer<
         return merged
       }
       if (cached?.directory) {
+        if (directoryHint) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
         const cachedFileSession = yield* Effect.promise(() => readSessionStore(cached.directory, id)).pipe(
           Effect.catchCause(() => Effect.succeed<Awaited<ReturnType<typeof readSessionStore>>>(undefined)),
         )
@@ -741,7 +742,6 @@ export const layer: Layer.Layer<
           yield* syncFileSessionCache(merged)
           return merged
         }
-        if (directoryHint) return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
         const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
           Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
         )
