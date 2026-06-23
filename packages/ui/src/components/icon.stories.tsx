@@ -90,7 +90,6 @@ const names = [
   "copy",
   "check",
   "photo",
-  "share",
   "download",
   "menu",
   "server",
