@@ -162,6 +162,7 @@ describe("public native OpenCode API", () => {
           const sessionID = Session.ID.make("ses_public_directory_routed")
           const leftDirectory = AbsolutePath.make(left.path)
           const rightDirectory = AbsolutePath.make(right.path)
+          yield* writeProvider(right.path)
 
           yield* Effect.promise(() =>
             writeAtreeSession({
@@ -213,6 +214,11 @@ describe("public native OpenCode API", () => {
           if (!event) return
           expect(event.event.type).toBe("session.next.prompt.admitted")
           expect(event.event.location?.directory).toBe(rightDirectory)
+
+          const model = ref({ variant: "fast" })
+          yield* opencode.sessions.switchModel({ sessionID, directory: rightDirectory, model })
+          expect((yield* opencode.sessions.get(sessionID, { directory: rightDirectory })).model).toEqual(model)
+          expect((yield* opencode.sessions.get(sessionID, { directory: leftDirectory })).model).toBeUndefined()
         }),
       ),
     ),

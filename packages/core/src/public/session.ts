@@ -81,6 +81,7 @@ export interface PromptInput {
 
 export interface SwitchModelInput {
   readonly sessionID: ID
+  readonly directory?: AbsolutePath
   readonly model: Model.Ref
 }
 

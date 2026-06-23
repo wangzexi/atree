@@ -99,7 +99,7 @@ export const layer = Layer.effect(
         get: (sessionID, options) => sessions.get(sessionID, options),
         list: sessions.list,
         switchModel: Effect.fn("OpenCode.sessions.switchModel")(function* (input) {
-          const session = yield* sessions.get(input.sessionID)
+          const session = yield* sessions.get(input.sessionID, { directory: input.directory })
           yield* validation.validate({ ...input, location: session.location })
           yield* sessions.switchModel(input)
         }),

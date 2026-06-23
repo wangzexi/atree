@@ -166,6 +166,7 @@ export interface Interface {
   }) => Effect.Effect<void, OperationUnavailableError>
   readonly switchModel: (input: {
     sessionID: SessionSchema.ID
+    directory?: AbsolutePath
     model: ModelV2.Ref
   }) => Effect.Effect<void, NotFoundError>
   readonly prompt: (input: {
@@ -660,7 +661,18 @@ export const layer = Layer.effect(
         return yield* new OperationUnavailableError({ operation: "switchAgent" })
       }),
       switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
-        const session = yield* result.get(input.sessionID)
+        const session = yield* result.get(input.sessionID, { directory: input.directory })
+        const sessionRow = yield* db
+          .select({ id: SessionTable.id, directory: SessionTable.directory })
+          .from(SessionTable)
+          .where(eq(SessionTable.id, input.sessionID))
+          .get()
+          .pipe(Effect.orDie)
+        const matchingSessionRow =
+          sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
+        const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
         const timestamp = yield* DateTime.now
         const messageID = SessionMessage.ID.create()
         yield* Effect.promise(() =>
@@ -680,6 +692,7 @@ export const layer = Layer.effect(
             }),
           ),
         )
+        if (fileBacked && !matchingSessionRow) return
         yield* events.publish(SessionEvent.ModelSwitched, {
           sessionID: input.sessionID,
           messageID,
