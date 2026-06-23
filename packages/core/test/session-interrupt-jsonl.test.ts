@@ -98,10 +98,10 @@ it.effect("mirrors interrupt requests into file-backed session jsonl", () =>
       location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
     })
 
-    yield* (yield* SessionV2.Service).interrupt(session.id)
+    yield* (yield* SessionV2.Service).interrupt(session.id, { directory: AbsolutePath.make(tmp.path) })
 
     expect(interruptSeqs).toHaveLength(1)
-    expect(interruptSeqs[0]).toBeNumber()
+    expect(interruptSeqs[0]).toBeUndefined()
     expect(interruptDirectories).toEqual([path.resolve(tmp.path)])
     const entries = (
       yield* Effect.promise(() =>

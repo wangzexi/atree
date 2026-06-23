@@ -594,14 +594,6 @@ export const layer = Layer.effect(
         Effect.uninterruptible(
           Effect.gen(function* () {
             const session = yield* result.get(input.sessionID, { directory: input.directory })
-            const sessionRow = yield* db
-              .select({ id: SessionTable.id, directory: SessionTable.directory })
-              .from(SessionTable)
-              .where(eq(SessionTable.id, input.sessionID))
-              .get()
-              .pipe(Effect.orDie)
-            const matchingSessionRow =
-              sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
             const messageID = input.id ?? SessionMessage.ID.create()
             const fileMessages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
               Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
@@ -634,6 +626,14 @@ export const layer = Layer.effect(
                 timeCreated: existingFileMessage?.time.created ?? (yield* DateTime.now),
               })
             }
+            const sessionRow = yield* db
+              .select({ id: SessionTable.id, directory: SessionTable.directory })
+              .from(SessionTable)
+              .where(eq(SessionTable.id, input.sessionID))
+              .get()
+              .pipe(Effect.orDie)
+            const matchingSessionRow =
+              sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
             if (!matchingSessionRow) {
               const admitted = new SessionInput.Admitted({
                 admittedSeq: 0,
@@ -692,14 +692,6 @@ export const layer = Layer.effect(
       }),
       switchModel: Effect.fn("V2Session.switchModel")(function* (input) {
         const session = yield* result.get(input.sessionID, { directory: input.directory })
-        const sessionRow = yield* db
-          .select({ id: SessionTable.id, directory: SessionTable.directory })
-          .from(SessionTable)
-          .where(eq(SessionTable.id, input.sessionID))
-          .get()
-          .pipe(Effect.orDie)
-        const matchingSessionRow =
-          sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
         const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
@@ -722,7 +714,7 @@ export const layer = Layer.effect(
             }),
           ),
         )
-        if (fileBacked && !matchingSessionRow) return
+        if (fileBacked) return
         yield* events.publish(SessionEvent.ModelSwitched, {
           sessionID: input.sessionID,
           messageID,
@@ -749,19 +741,11 @@ export const layer = Layer.effect(
               .get(sessionID, { directory: options?.directory })
               .pipe(Effect.catchTag("Session.NotFoundError", () => Effect.succeed(undefined)))
             if (!session) return yield* execution.interrupt(sessionID)
-            const sessionRow = yield* db
-              .select({ id: SessionTable.id, directory: SessionTable.directory })
-              .from(SessionTable)
-              .where(eq(SessionTable.id, sessionID))
-              .get()
-              .pipe(Effect.orDie)
-            const matchingSessionRow =
-              sessionRow && sameDirectory(sessionRow.directory, session.location.directory) ? sessionRow : undefined
             const fileBacked = yield* Effect.promise(() => readSessionStore(session.location.directory, session.id)).pipe(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
             const timestamp = yield* DateTime.now
-            if (fileBacked && !matchingSessionRow) {
+            if (fileBacked) {
               yield* Effect.promise(() =>
                 appendSessionJsonl(session, {
                   type: SessionEvent.InterruptRequested.type,
