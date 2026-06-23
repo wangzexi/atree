@@ -566,27 +566,6 @@ export const layer = Layer.effect(
           archived: session.time.archived !== undefined,
         } satisfies SessionLocation
       }
-      if (!fallbackDirectory) {
-        const row = yield* db
-          .select({ directory: SessionTable.directory, archived: SessionTable.time_archived })
-          .from(SessionTable)
-          .where(eq(SessionTable.id, sessionID))
-          .get()
-          .pipe(Effect.orDie)
-        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-        )
-        if (yield* Effect.promise(() => isWithinDirectory(state.rootDirectory ?? undefined, row?.directory))) {
-          return { type: "missing" } satisfies SessionLocation
-        }
-        if (row?.directory) {
-          return {
-            type: "found",
-            directory: row.directory,
-            archived: row.archived !== null,
-          } satisfies SessionLocation
-        }
-      }
       return { type: "none" } satisfies SessionLocation
     })
 
@@ -805,7 +784,7 @@ export const layer = Layer.effect(
       const message = row.message
       const timerDirectory = timers.get(scheduleID)?.directory
       const location = yield* resolveSessionLocation(sessionID, timerDirectory)
-      if (location.type === "missing") {
+      if (location.type !== "found") {
         const timer = timers.get(scheduleID)
         if (timer) {
           stopTimer(timer)
@@ -813,8 +792,8 @@ export const layer = Layer.effect(
         }
         return
       }
-      const directoryHint = location.type === "found" ? location.directory : timerDirectory
-      if (location.type === "found" && location.archived) {
+      const directoryHint = location.directory
+      if (location.archived) {
         yield* recordRun(scheduleID, sessionID, "skipped", Date.now(), { directory: directoryHint })
         if (kind === "once") {
           yield* completeOnce(scheduleID, sessionID, directoryHint)
@@ -953,8 +932,8 @@ export const layer = Layer.effect(
       }
       const sessionID = row.session_id as SessionID
       const location = yield* resolveSessionLocation(sessionID)
-      if (location.type === "missing") return
-      if (location.type === "found" && location.archived) {
+      if (location.type !== "found") return
+      if (location.archived) {
         yield* clearArchivedScheduleState(sessionID, location.directory)
         return
       }
@@ -965,7 +944,7 @@ export const layer = Layer.effect(
           sessionID,
           message: row.message,
         },
-        scheduleLocation(location.type === "found" ? location.directory : undefined),
+        scheduleLocation(location.directory),
       )
     })
 
@@ -1099,8 +1078,8 @@ export const layer = Layer.effect(
       const id = row.id as ID
       const sessionID = row.session_id as SessionID
       const location = yield* resolveSessionLocation(sessionID)
-      if (location.type === "missing") continue
-      if (location.type === "found" && location.archived) {
+      if (location.type !== "found") continue
+      if (location.archived) {
         yield* clearArchivedScheduleState(sessionID, location.directory)
         continue
       }
@@ -1108,7 +1087,7 @@ export const layer = Layer.effect(
       if (kind === "once") {
         const lastRun = yield* getLastRun(id)
         if (lastRun) {
-          yield* completeOnce(id, sessionID, location.type === "found" ? location.directory : undefined)
+          yield* completeOnce(id, sessionID, location.directory)
           continue
         }
       }
@@ -1119,7 +1098,7 @@ export const layer = Layer.effect(
         row.expression,
         row.run_at ?? null,
         serviceBridge,
-        location.type === "found" ? location.directory : undefined,
+        location.directory,
       )
     }
     const sessions = yield* db.select({ id: SessionTable.id }).from(SessionTable).all().pipe(Effect.orDie)
@@ -1144,63 +1123,25 @@ export const layer = Layer.effect(
     ) {
       const directoryHint = options?.directory
       const location = yield* resolveSessionLocation(sessionID, directoryHint)
-      if (location.type === "missing") return [] as Info[]
-      if (location.type === "found" && location.archived) {
+      if (location.type !== "found") return [] as Info[]
+      if (location.archived) {
         yield* clearArchivedScheduleState(sessionID, location.directory)
         return [] as Info[]
       }
-      const directory = location.type === "found" ? location.directory : undefined
-      if (directory) {
-        const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
-        if (projection.hasState) {
-          return yield* reconcileDirectorySchedules(
-            sessionID,
-            directory,
-            projection.schedules.map((schedule) => ({
-              ...schedule,
-              id: schedule.id as ID,
-              sessionID: schedule.sessionID as SessionID,
-            })),
-          )
-        }
-        return yield* reconcileDirectorySchedules(sessionID, directory, [])
+      const directory = location.directory
+      const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
+      if (projection.hasState) {
+        return yield* reconcileDirectorySchedules(
+          sessionID,
+          directory,
+          projection.schedules.map((schedule) => ({
+            ...schedule,
+            id: schedule.id as ID,
+            sessionID: schedule.sessionID as SessionID,
+          })),
+        )
       }
-      if (directoryHint && !directory) return [] as Info[]
-      const rows = yield* db
-        .select({
-          id: ScheduleTable.id,
-          session_id: ScheduleTable.session_id,
-          kind: ScheduleTable.kind,
-          expression: ScheduleTable.expression,
-          run_at: ScheduleTable.run_at,
-          message: ScheduleTable.message,
-          created_at: ScheduleTable.created_at,
-        })
-        .from(ScheduleTable)
-        .where(eq(ScheduleTable.session_id, sessionID))
-        .all()
-        .pipe(Effect.orDie)
-      for (const row of rows) {
-        const kind = (row.kind ?? "recurring") as Kind
-        const lastRun = yield* getLastRun(row.id as ID)
-        if (kind === "once" && lastRun) {
-          yield* completeOnce(row.id as ID, row.session_id as SessionID, directoryHint)
-        }
-      }
-      const items = yield* activeSchedules(sessionID)
-      if (items.length > 0 || rows.length > 0) {
-        yield* syncScheduleState(sessionID, directoryHint)
-        return items
-      }
-      if (!directory) return items
-      const restored = yield* restoreStoredSchedules(sessionID, directory)
-      if (restored.length > 0) return restored
-      const stored = yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))
-      return stored.filter(canRestoreStoredSchedule).map((schedule) => ({
-        ...schedule,
-        id: schedule.id as ID,
-        sessionID: schedule.sessionID as SessionID,
-      }))
+      return yield* reconcileDirectorySchedules(sessionID, directory, [])
     })
 
     const create: Interface["create"] = Effect.fn("Schedule.create")(function* (input: {
@@ -1221,29 +1162,22 @@ export const layer = Layer.effect(
         yield* validateExpression(expression)
       }
       const location = yield* resolveSessionLocation(input.sessionID, input.directory)
-      if (location.type === "missing") {
+      if (location.type !== "found") {
         return yield* Effect.fail(new SessionNotFound({ sessionID: input.sessionID }))
       }
-      const directory = location.type === "found" ? location.directory : undefined
-      if (input.directory && !directory) {
-        return yield* Effect.fail(new SessionNotFound({ sessionID: input.sessionID }))
-      }
-      if (directory) {
-        const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, input.sessionID))
-        yield* reconcileDirectorySchedules(
-          input.sessionID,
-          directory,
-          projection.hasState
-            ? projection.schedules.map((schedule) => ({
-                ...schedule,
-                id: schedule.id as ID,
-                sessionID: schedule.sessionID as SessionID,
-              }))
-            : [],
-        )
-      } else {
-        yield* restoreStoredSchedules(input.sessionID, directory)
-      }
+      const directory = location.directory
+      const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, input.sessionID))
+      yield* reconcileDirectorySchedules(
+        input.sessionID,
+        directory,
+        projection.hasState
+          ? projection.schedules.map((schedule) => ({
+              ...schedule,
+              id: schedule.id as ID,
+              sessionID: schedule.sessionID as SessionID,
+            }))
+          : [],
+      )
       yield* cleanupCompletedOnceForSession(input.sessionID, directory)
       const count = yield* db
         .select({ c: drizzleSql<number>`COUNT(*)` })
@@ -1325,7 +1259,9 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
         )
         if (!state.rootDirectory) return false
-        const found = yield* Effect.promise(() => findSessionScheduleState(state.rootDirectory!, scheduleID))
+        const found = yield* Effect.promise(() => findSessionScheduleState(state.rootDirectory!, scheduleID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
         if (!found) return false
         const remaining = found.schedules.filter((schedule) => schedule.id !== scheduleID)
         const timer = timers.get(scheduleID)

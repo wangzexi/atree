@@ -711,6 +711,110 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.instance("does not revive unscoped database schedules when the session store was removed", () =>
+    Effect.gen(function* () {
+      const { db } = yield* Database.Service
+      const instance = yield* TestInstance
+      const suffix = randomUUID().replaceAll("-", "")
+      const projectID = `proj_schedule_unscoped_missing_${suffix}`
+      const sessionID = `ses_schedule_unscoped_missing_${suffix}` as SessionID
+      const scheduleID = `sch_schedule_unscoped_missing_${suffix}` as Schedule.ID
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: projectID,
+          worktree: instance.directory,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: projectID,
+          slug: "schedule-unscoped-missing",
+          directory: instance.directory,
+          title: "Schedule unscoped missing",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale unscoped database schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "schedule-unscoped-missing",
+          version: "test",
+          projectID,
+          directory: instance.directory,
+          title: "Schedule unscoped missing",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", sessionID), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const events = yield* EventV2Bridge.Service
+      const triggered: unknown[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === "schedule.triggered") triggered.push(event)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+      expect(listed).toEqual([])
+      yield* Schedule.Service.use((schedule) => schedule.tick(scheduleID))
+      expect(triggered).toEqual([])
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule
+          .create({
+            sessionID,
+            kind: "once",
+            runAt: now + 60_000,
+            message: "should not be created",
+          })
+          .pipe(Effect.exit),
+      )
+      expect(Exit.isFailure(created)).toBe(true)
+    }),
+  )
+
   it.effect(
     "deletes a file-backed schedule from an explicit directory without a database row",
     Effect.gen(function* () {
