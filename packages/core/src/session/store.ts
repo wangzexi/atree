@@ -1,15 +1,13 @@
 export * as SessionStore from "./store"
 
-import { eq } from "drizzle-orm"
 import { Context, Effect, Layer } from "effect"
-import { Database } from "../database/database"
 import { MessageDecodeError } from "./error"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
-import { SessionInputTable } from "./sql"
 import {
   findSessionJsonlMessage,
   findSessionStore,
+  readSessionPromptStates,
   readSessionJsonlMessages,
   readSessionStore,
   readWorkspaceRoot,
@@ -44,7 +42,6 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
-    const { db } = yield* Database.Service
     const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (
       sessionID: SessionSchema.ID,
       directory?: string,
@@ -99,22 +96,14 @@ export const layer = Layer.effect(
         const messages = yield* Effect.promise(() => readSessionJsonlMessages(fileSession)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
         )
-        const inputRows = yield* db
-          .select({
-            id: SessionInputTable.id,
-            promotedSeq: SessionInputTable.promoted_seq,
-          })
-          .from(SessionInputTable)
-          .where(eq(SessionInputTable.session_id, sessionID))
-          .all()
-          .pipe(Effect.orDie)
-        const inputState = new Map(inputRows.map((row) => [row.id, row.promotedSeq]))
+        const promptStates = yield* Effect.promise(() => readSessionPromptStates(fileSession)).pipe(
+          Effect.catchCause(() => Effect.succeed(new Map())),
+        )
         return messages
           .map((message, index) => ({ seq: index + 1, message }))
           .filter((entry) => {
             if (entry.message.type !== "user") return true
-            const promotedSeq = inputState.get(entry.message.id)
-            return promotedSeq === undefined || promotedSeq !== null
+            return promptStates.get(entry.message.id)?.status !== "admitted"
           })
           .filter((entry) => entry.message.type !== "system" || entry.seq > baselineSeq)
       }
@@ -147,4 +136,4 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(Database.defaultLayer))
+export const defaultLayer = layer

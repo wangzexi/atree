@@ -1864,3 +1864,48 @@ export async function readSessionJsonlEntries(info: SessionSchema.Info) {
   }
   return entries
 }
+
+export type SessionPromptState = {
+  readonly messageID: SessionMessage.ID
+  readonly delivery: SessionInput.Delivery
+  readonly status: "admitted" | "promoted"
+  readonly admittedSeq: number
+  readonly promotedSeq?: number
+}
+
+export async function readSessionPromptStates(info: SessionSchema.Info) {
+  const states = new Map<SessionMessage.ID, SessionPromptState>()
+  for (const { index, entry } of await readSessionJsonlEntries(info)) {
+    const type = baseEventType(entry.type)
+    if (
+      type !== "session.next.prompted" &&
+      type !== "session.next.prompt.admitted" &&
+      type !== "session.next.prompt.promoted"
+    )
+      continue
+    const data = eventData(entry)
+    const rawMessageID = typeof data.messageID === "string" ? data.messageID : undefined
+    if (!rawMessageID) continue
+    const messageID = SessionMessage.ID.make(rawMessageID)
+    const delivery = data.delivery === "queue" ? "queue" : "steer"
+    const existing = states.get(messageID)
+    if (type === "session.next.prompt.admitted") {
+      states.set(messageID, {
+        messageID,
+        delivery,
+        status: existing?.status === "promoted" ? "promoted" : "admitted",
+        admittedSeq: existing?.admittedSeq ?? index,
+        promotedSeq: existing?.promotedSeq,
+      })
+      continue
+    }
+    states.set(messageID, {
+      messageID,
+      delivery: existing?.delivery ?? delivery,
+      status: "promoted",
+      admittedSeq: existing?.admittedSeq ?? index,
+      promotedSeq: existing?.promotedSeq ?? index,
+    })
+  }
+  return states
+}
