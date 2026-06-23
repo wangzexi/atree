@@ -310,6 +310,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - 当 `meta.yaml` 缺失时，core 和 opencode 都可以从 `session.jsonl` 的 `session.created` 重建会话元数据；该恢复路径同时接受扁平 `info` 和 EventV2 风格的 `data.info`，随后继续重放 `session.updated` 得到最新状态。
 - 会话 diff summary 可以从 `session.jsonl` 的 `session.diff` 事件恢复；即使 SQLite session row 和 `meta.yaml` 都不存在，带目录上下文的 `Session.diff` 仍能返回目录日志里的变更摘要。
 - `session.next.*` 中可重放的 durable 边界事件会经由 EventV2Bridge 镜像进当前目录会话的 `session.jsonl`；text/reasoning/tool input/compaction 的 delta 仍保持 live-only，不写入目录事实源。
+- core 的 `session.jsonl` reader 会恢复 `session.next.compaction.started`，即使压缩请求尚未产生 `compaction.ended` 摘要，目录事实源也能保留这次未完成的压缩动作。
 - 删除 session 会移除整个会话目录；归档 session 不删除会话目录，但会清除自动化消息状态。
 - 即使全局 SQLite 中没有 session/schedule 缓存行，只要会话能从目录 `meta.yaml` 恢复，归档该会话也必须清空同目录的 `schedule.json`。
 - 删除 workspace 时会通过 session service 查找当前 workspace 的会话，并把会话目录继续传给 `session.remove`；只有目录事实源、没有 SQLite session row 的 workspace 会话也会被删除，不会因为旧 `SessionTable.workspace_id` 缺失而残留在 `.agents/atree/`。

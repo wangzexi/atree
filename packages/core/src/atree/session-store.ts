@@ -1550,6 +1550,19 @@ export async function readSessionJsonlMessages(info: SessionSchema.Info) {
         completed: timestampValue(data.timestamp, index),
       })
     }
+    if (type === "session.next.compaction.started") {
+      const data = eventData(entry)
+      const messageID = typeof data.messageID === "string" ? data.messageID : undefined
+      const reason = data.reason === "auto" || data.reason === "manual" ? data.reason : undefined
+      if (!messageID || !reason) continue
+      compactions.set(messageID, {
+        messageID,
+        reason,
+        summary: "",
+        recent: "",
+        created: timestampValue(data.timestamp, index),
+      })
+    }
     if (type === "session.next.compaction.ended") {
       const data = eventData(entry)
       const messageID = typeof data.messageID === "string" ? data.messageID : undefined
