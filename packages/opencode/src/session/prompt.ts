@@ -54,6 +54,8 @@ import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
 import { AgentAttachment, FileAttachment, Prompt, Source } from "@opencode-ai/core/session/prompt"
 import * as DateTime from "effect/DateTime"
 import { eq } from "drizzle-orm"
@@ -86,6 +88,10 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
 
 function sameDirectory(left: string, right: string) {
   return path.resolve(left) === path.resolve(right)
+}
+
+function sessionEventLocation(directory: string | undefined) {
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
 }
 
 export interface Interface {
@@ -253,7 +259,9 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context
       const promptOps = yield* ops()
       const { task: taskTool } = yield* registry.named()
-      const taskModel = task.model ? yield* getModel(task.model.providerID, task.model.modelID, sessionID) : model
+      const taskModel = task.model
+        ? yield* getModel(task.model.providerID, task.model.modelID, sessionID, session.directory)
+        : model
       const assistantMessage: SessionV1.Assistant = yield* sessions.updateMessage(
         {
           id: MessageID.ascending(),
@@ -310,7 +318,7 @@ export const layer = Layer.effect(
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${task.agent}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+        yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() }, sessionEventLocation(session.directory))
         throw error
       }
 
@@ -474,7 +482,11 @@ export const layer = Layer.effect(
               const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
               const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
               const error = new NamedError.Unknown({ message: `Agent not found: "${input.agent}".${hint}` })
-              yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+              yield* events.publish(
+                Session.Event.Error,
+                { sessionID: input.sessionID, error: error.toObject() },
+                sessionEventLocation(session.directory),
+              )
               throw error
             }
             const model = input.model ?? agent.model ?? (yield* currentModel(session))
@@ -528,13 +540,17 @@ export const layer = Layer.effect(
             }
             yield* sessions.updatePart(part, { directory: session.directory })
             if (flags.experimentalEventSystem) {
-              yield* events.publish(SessionEvent.Shell.Started, {
-                sessionID: input.sessionID,
-                messageID: SessionMessage.ID.create(),
-                timestamp: DateTime.makeUnsafe(started),
-                callID: part.callID,
-                command: input.command,
-              })
+              yield* events.publish(
+                SessionEvent.Shell.Started,
+                {
+                  sessionID: input.sessionID,
+                  messageID: SessionMessage.ID.create(),
+                  timestamp: DateTime.makeUnsafe(started),
+                  callID: part.callID,
+                  command: input.command,
+                },
+                sessionEventLocation(session.directory),
+              )
             }
             return { msg, part, cwd: ctx.directory, directory: session.directory }
           }).pipe(Effect.ensuring(markReady))
@@ -552,12 +568,16 @@ export const layer = Layer.effect(
               }
               const completed = Date.now()
               if (flags.experimentalEventSystem) {
-                yield* events.publish(SessionEvent.Shell.Ended, {
-                  sessionID: input.sessionID,
-                  timestamp: DateTime.makeUnsafe(completed),
-                  callID: part.callID,
-                  output,
-                })
+                yield* events.publish(
+                  SessionEvent.Shell.Ended,
+                  {
+                    sessionID: input.sessionID,
+                    timestamp: DateTime.makeUnsafe(completed),
+                    callID: part.callID,
+                    output,
+                  },
+                  sessionEventLocation(directory),
+                )
               }
               if (!msg.time.completed) {
                 msg.time.completed = completed
@@ -623,18 +643,23 @@ export const layer = Layer.effect(
       providerID: ProviderV2.ID,
       modelID: ModelV2.ID,
       sessionID: SessionID,
+      directory?: string,
     ) {
       const exit = yield* provider.getModel(providerID, modelID).pipe(Effect.exit)
       if (Exit.isSuccess(exit)) return exit.value
       const err = Cause.squash(exit.cause)
       if (Provider.ModelNotFoundError.isInstance(err)) {
         const hint = err.suggestions?.length ? ` Did you mean: ${err.suggestions.join(", ")}?` : ""
-        yield* events.publish(Session.Event.Error, {
-          sessionID,
-          error: new NamedError.Unknown({
-            message: `Model not found: ${err.providerID}/${err.modelID}.${hint}`,
-          }).toObject(),
-        })
+        yield* events.publish(
+          Session.Event.Error,
+          {
+            sessionID,
+            error: new NamedError.Unknown({
+              message: `Model not found: ${err.providerID}/${err.modelID}.${hint}`,
+            }).toObject(),
+          },
+          sessionEventLocation(directory),
+        )
       }
       return yield* Effect.die(err)
     })
@@ -676,7 +701,11 @@ export const layer = Layer.effect(
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        yield* events.publish(
+          Session.Event.Error,
+          { sessionID: input.sessionID, error: error.toObject() },
+          sessionEventLocation(input.session.directory),
+        )
         throw error
       }
 
@@ -732,7 +761,7 @@ export const layer = Layer.effect(
             }),
           ),
         )
-        yield* events.publish(SessionEvent.AgentSwitched, data)
+        yield* events.publish(SessionEvent.AgentSwitched, data, sessionEventLocation(input.session.directory))
       }
       const currentModelChanged =
         !currentModelValue ||
@@ -760,7 +789,7 @@ export const layer = Layer.effect(
             }),
           ),
         )
-        yield* events.publish(SessionEvent.ModelSwitched, data)
+        yield* events.publish(SessionEvent.ModelSwitched, data, sessionEventLocation(input.session.directory))
       }
 
       yield* Effect.addFinalizer(() => instruction.clear(info.id))
@@ -937,10 +966,14 @@ export const layer = Layer.effect(
                   const error = Cause.squash(exit.cause)
                   yield* Effect.logError("failed to read file", { error, filepath })
                   const message = error instanceof Error ? error.message : String(error)
-                  yield* events.publish(Session.Event.Error, {
-                    sessionID: input.sessionID,
-                    error: new NamedError.Unknown({ message }).toObject(),
-                  })
+                  yield* events.publish(
+                    Session.Event.Error,
+                    {
+                      sessionID: input.sessionID,
+                      error: new NamedError.Unknown({ message }).toObject(),
+                    },
+                    sessionEventLocation(input.session.directory),
+                  )
                   pieces.push({
                     messageID: info.id,
                     sessionID: input.sessionID,
@@ -959,10 +992,14 @@ export const layer = Layer.effect(
                   const error = Cause.squash(exit.cause)
                   yield* Effect.logError("failed to read directory", { error, filepath })
                   const message = error instanceof Error ? error.message : String(error)
-                  yield* events.publish(Session.Event.Error, {
-                    sessionID: input.sessionID,
-                    error: new NamedError.Unknown({ message }).toObject(),
-                  })
+                  yield* events.publish(
+                    Session.Event.Error,
+                    {
+                      sessionID: input.sessionID,
+                      error: new NamedError.Unknown({ message }).toObject(),
+                    },
+                    sessionEventLocation(input.session.directory),
+                  )
                   return [
                     {
                       messageID: info.id,
@@ -1138,27 +1175,35 @@ export const layer = Layer.effect(
       )
       // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
       if (flags.experimentalEventSystem) {
-        yield* events.publish(SessionEvent.Prompted, {
-          sessionID: input.sessionID,
-          messageID: SessionMessage.ID.create(),
-          timestamp: DateTime.makeUnsafe(info.time.created),
-          delivery: "steer",
-          prompt: new Prompt({
-            text: nextPrompt.text.join("\n"),
-            files: nextPrompt.files,
-            agents: nextPrompt.agents,
-          }),
-        })
+        yield* events.publish(
+          SessionEvent.Prompted,
+          {
+            sessionID: input.sessionID,
+            messageID: SessionMessage.ID.create(),
+            timestamp: DateTime.makeUnsafe(info.time.created),
+            delivery: "steer",
+            prompt: new Prompt({
+              text: nextPrompt.text.join("\n"),
+              files: nextPrompt.files,
+              agents: nextPrompt.agents,
+            }),
+          },
+          sessionEventLocation(input.session.directory),
+        )
       }
       for (const text of nextPrompt.synthetic) {
         // TODO(v2): Temporary dual-write while migrating session messages to v2 events.
         if (flags.experimentalEventSystem) {
-          yield* events.publish(SessionEvent.Synthetic, {
-            sessionID: input.sessionID,
-            messageID: SessionMessage.ID.create(),
-            timestamp: DateTime.makeUnsafe(info.time.created),
-            text,
-          })
+          yield* events.publish(
+            SessionEvent.Synthetic,
+            {
+              sessionID: input.sessionID,
+              messageID: SessionMessage.ID.create(),
+              timestamp: DateTime.makeUnsafe(info.time.created),
+              text,
+            },
+            sessionEventLocation(input.session.directory),
+          )
         }
       }
 
@@ -1257,7 +1302,7 @@ export const layer = Layer.effect(
               history: msgs,
             }).pipe(Effect.ignore, Effect.forkIn(scope))
 
-          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID)
+          const model = yield* getModel(lastUser.model.providerID, lastUser.model.modelID, sessionID, session.directory)
           const task = tasks.pop()
 
           if (task?.type === "subtask") {
@@ -1298,7 +1343,7 @@ export const layer = Layer.effect(
             const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
             const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
             const error = new NamedError.Unknown({ message: `Agent not found: "${lastUser.agent}".${hint}` })
-            yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() })
+            yield* events.publish(Session.Event.Error, { sessionID, error: error.toObject() }, sessionEventLocation(session.directory))
             throw error
           }
           const maxSteps = agent.steps ?? Infinity
@@ -1439,7 +1484,11 @@ export const layer = Layer.effect(
                   message: "The response was blocked by the provider's content filter",
                 }).toObject()
                 yield* sessions.updateMessage(handle.message, { directory: session.directory })
-                yield* events.publish(Session.Event.Error, { sessionID, error: handle.message.error })
+                yield* events.publish(
+                  Session.Event.Error,
+                  { sessionID, error: handle.message.error },
+                  sessionEventLocation(session.directory),
+                )
                 return "break" as const
               }
               if (format.type === "json_schema") {
@@ -1502,12 +1551,17 @@ export const layer = Layer.effect(
         command: input.command,
         agent: input.agent,
       })
+      const commandSession = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
       const cmd = yield* commands.get(input.command)
       if (!cmd) {
         const available = (yield* commands.list()).map((c) => c.name)
         const hint = available.length ? ` Available commands: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Command not found: "${input.command}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        yield* events.publish(
+          Session.Event.Error,
+          { sessionID: input.sessionID, error: error.toObject() },
+          sessionEventLocation(commandSession.directory),
+        )
         throw error
       }
       const agentName = cmd.agent ?? input.agent
@@ -1550,7 +1604,6 @@ export const layer = Layer.effect(
         template = template.replace(bashRegex, () => results[index++])
       }
       template = template.trim()
-      const commandSession = yield* sessions.get(input.sessionID, { directory: input.directory }).pipe(Effect.orDie)
 
       const taskModel = yield* Effect.gen(function* () {
         if (cmd.model) return Provider.parseModel(cmd.model)
@@ -1562,14 +1615,18 @@ export const layer = Layer.effect(
         return yield* currentModel(commandSession)
       })
 
-      yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID)
+      yield* getModel(taskModel.providerID, taskModel.modelID, input.sessionID, commandSession.directory)
 
       const agent = agentName ? yield* agents.get(agentName) : yield* agents.defaultInfo()
       if (!agent) {
         const available = (yield* agents.list()).filter((a) => !a.hidden).map((a) => a.name)
         const hint = available.length ? ` Available agents: ${available.join(", ")}` : ""
         const error = new NamedError.Unknown({ message: `Agent not found: "${agentName}".${hint}` })
-        yield* events.publish(Session.Event.Error, { sessionID: input.sessionID, error: error.toObject() })
+        yield* events.publish(
+          Session.Event.Error,
+          { sessionID: input.sessionID, error: error.toObject() },
+          sessionEventLocation(commandSession.directory),
+        )
         throw error
       }
 
@@ -1616,12 +1673,16 @@ export const layer = Layer.effect(
         parts,
         variant: input.variant,
       })
-      yield* events.publish(Command.Event.Executed, {
-        name: input.command,
-        sessionID: input.sessionID,
-        arguments: input.arguments,
-        messageID: result.info.id,
-      })
+      yield* events.publish(
+        Command.Event.Executed,
+        {
+          name: input.command,
+          sessionID: input.sessionID,
+          arguments: input.arguments,
+          messageID: result.info.id,
+        },
+        sessionEventLocation(commandSession.directory),
+      )
       return result
     })
 
