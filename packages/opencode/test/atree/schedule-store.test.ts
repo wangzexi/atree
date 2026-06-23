@@ -249,6 +249,52 @@ describe("atree schedule store", () => {
     expect(await readSessionScheduleState(directory, sessionID)).toEqual([jsonl])
   })
 
+  test("records schedule deletions in session jsonl when rewriting projection state", async () => {
+    const directory = await tempdir()
+    const sessionID = "ses_jsonl_rewrite_delete"
+    const deleted = {
+      id: "sch_rewrite_deleted",
+      sessionID,
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "delete from rewrite",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+    const kept = { ...deleted, id: "sch_rewrite_kept", message: "keep from rewrite" }
+    await writeSessionStore({
+      id: sessionID as never,
+      slug: "jsonl-rewrite-delete",
+      version: "test",
+      projectID: "proj_jsonl_rewrite_delete" as never,
+      directory,
+      title: "JSONL rewrite delete",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+
+    await writeSessionScheduleState(directory, sessionID, [deleted, kept])
+    await writeSessionScheduleState(directory, sessionID, [kept])
+
+    const raw = await fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8")
+    const entries = raw
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        type: "schedule.deleted",
+        scheduleID: deleted.id,
+        sessionID,
+      }),
+    )
+    expect(await readSessionScheduleState(directory, sessionID)).toEqual([kept])
+  })
+
   test("does not find orphan schedules without a session metadata store", async () => {
     const directory = await tempdir()
     const schedule = {
