@@ -80,8 +80,11 @@ it.instance("plan agent denies edits except plan files", () =>
     expect(plan).toBeDefined()
     // Wildcard is denied
     expect(evalPerm(plan, "edit")).toBe("deny")
-    // But specific path is allowed
-    expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("allow")
+    expect(Permission.evaluate("edit", ".opencode/plans/foo.md", plan!.permission).action).toBe("deny")
+    expect(Permission.evaluate("edit", path.join(Global.Path.data, "plans", "foo.md"), plan!.permission).action).toBe(
+      "deny",
+    )
+    // But session-local plan paths are allowed.
     expect(
       Permission.evaluate(
         "edit",
