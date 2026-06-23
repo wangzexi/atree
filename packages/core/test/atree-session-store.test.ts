@@ -14,7 +14,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { readSessionStore, readSessionStoresDeep } from "@opencode-ai/core/atree/session-store"
+import { readSessionStore, readSessionStoresDeep, writeSessionStore } from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer, Stream } from "effect"
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "fs/promises"
@@ -1360,6 +1360,75 @@ describe("atree file-backed SessionV2 discovery", () => {
       expect(yield* store.runnerEntries(sessionID, 0)).toEqual([])
       expect(yield* store.runnerContext(sessionID, 0)).toEqual([])
       expect(yield* store.message(messageID)).toBeUndefined()
+    }),
+  )
+
+  storeIt.effect("does not use a SQLite cached directory to locate file-backed SessionStore context", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-no-cache-dir-")))
+      const sessionID = SessionV2.ID.make("ses_core_store_no_cache_dir")
+      const messageID = SessionMessage.ID.make("msg_core_store_no_cache_dir")
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(directory), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "no-cache-dir",
+          directory,
+          title: "No cache dir",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          projectID: Project.ID.global,
+          title: "No cache dir",
+          location: { directory: AbsolutePath.make(directory) },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(directory, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 2 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_no_cache_dir",
+              messageID,
+              type: "text",
+              text: "file-backed context requires an explicit source",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      expect(yield* store.get(sessionID)).toBeUndefined()
+      expect(yield* store.context(sessionID)).toEqual([])
+      expect(yield* store.runnerContext(sessionID, 0)).toEqual([])
+      expect(yield* store.message(messageID)).toBeUndefined()
+
+      expect((yield* store.get(sessionID, { directory }))?.id).toBe(sessionID)
+      expect((yield* store.context(sessionID, { directory })).map((message) => message.id)).toEqual([messageID])
+      expect((yield* store.runnerContext(sessionID, 0, { directory })).map((message) => message.id)).toEqual([messageID])
     }),
   )
 
