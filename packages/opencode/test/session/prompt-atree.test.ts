@@ -9,9 +9,10 @@ import { SessionCompaction } from "../../src/session/compaction"
 import { Schedule } from "../../src/session/schedule"
 import { SessionSummary } from "../../src/session/summary"
 import { Database } from "@opencode-ai/core/database/database"
+import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionEvent } from "@opencode-ai/core/session/event"
-import { readSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionStore } from "@/atree/session-store"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { MessageID } from "@/session/schema"
 import { Command } from "@/command"
@@ -23,6 +24,7 @@ import { MCP } from "../../src/mcp"
 import { CrossSpawnSpawner } from "@opencode-ai/core/cross-spawn-spawner"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { DateTime } from "effect"
+import { eq } from "drizzle-orm"
 
 const mcp = Layer.succeed(
   MCP.Service,
@@ -108,6 +110,18 @@ const providerConfig = (url: string) => ({
           cost: { input: 0, output: 0 },
           options: {},
         },
+        "fresh-model": {
+          id: "fresh-model",
+          name: "Fresh Model",
+          attachment: false,
+          reasoning: false,
+          temperature: false,
+          tool_call: true,
+          release_date: "2025-01-01",
+          limit: { context: 100000, output: 10000 },
+          cost: { input: 0, output: 0 },
+          options: {},
+        },
       },
       options: {
         apiKey: "test-key",
@@ -139,6 +153,57 @@ it.live("mirrors prompt agent and model switches into the directory session log"
         id: "test-model",
         providerID: "test",
       })
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("uses directory session jsonl model over a stale database projection when prompting", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const prompt = yield* SessionPrompt.Service
+      const sessions = yield* Session.Service
+      const { db } = yield* Database.Service
+      const session = yield* sessions.create({
+        title: "prompt model from jsonl",
+        model: { providerID: "test" as never, id: "test-model" as never },
+      })
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(session, {
+          type: "session.next.model.switched",
+          sessionID: session.id,
+          messageID: MessageID.ascending(),
+          model: { providerID: "test", modelID: "fresh-model", variant: "default" },
+          timestamp: Date.now() + 1000,
+        }),
+      )
+      yield* db
+        .update(SessionTable)
+        .set({
+          model: {
+            providerID: "test",
+            id: "test-model",
+            variant: "default",
+          },
+        })
+        .where(eq(SessionTable.id, session.id))
+
+      const message = yield* prompt.prompt({
+        sessionID: session.id,
+        directory: session.directory,
+        agent: "build",
+        noReply: true,
+        parts: [{ type: "text", text: "use current directory model" }],
+      })
+
+      expect(message.info.role).toBe("user")
+      if (message.info.role === "user") {
+        expect(message.info.model).toMatchObject({
+          providerID: "test",
+          modelID: "fresh-model",
+        })
+      }
     }),
     { config: providerConfig },
   ),

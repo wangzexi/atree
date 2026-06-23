@@ -49,7 +49,6 @@ import { TaskTool, type TaskPromptOps } from "@/tool/task"
 import { SessionRunState } from "./run-state"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
-import { Database } from "@opencode-ai/core/database/database"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -58,8 +57,6 @@ import { Location } from "@opencode-ai/core/location"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { AgentAttachment, FileAttachment, Prompt, Source } from "@opencode-ai/core/session/prompt"
 import * as DateTime from "effect/DateTime"
-import { eq } from "drizzle-orm"
-import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
@@ -84,10 +81,6 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   // cleanup() marks abandoned tool_use blocks this way after retries/aborts.
   // They are not pending work and must not trigger an assistant-prefill request.
   return part.state.status === "error" && part.state.metadata?.interrupted === true
-}
-
-function sameDirectory(left: string, right: string) {
-  return path.resolve(left) === path.resolve(right)
 }
 
 function sessionEventLocation(directory: string | undefined) {
@@ -134,8 +127,6 @@ export const layer = Layer.effect(
     const llm = yield* LLM.Service
     const events = yield* EventV2Bridge.Service
     const flags = yield* RuntimeFlags.Service
-    const database = yield* Database.Service
-    const { db } = database
     const ops = Effect.fn("SessionPrompt.ops")(function* () {
       return {
         cancel: (sessionID: SessionID) => cancel(sessionID),
@@ -665,19 +656,6 @@ export const layer = Layer.effect(
     })
 
     const currentModel = Effect.fnUntraced(function* (session: Session.Info) {
-      const current = yield* db
-        .select({ directory: SessionTable.directory, model: SessionTable.model })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, session.id))
-        .get()
-        .pipe(Effect.orDie)
-      if (current?.model && sameDirectory(current.directory, session.directory)) {
-        return {
-          providerID: ProviderV2.ID.make(current.model.providerID),
-          modelID: ModelV2.ID.make(current.model.id),
-          ...(current.model.variant && current.model.variant !== "default" ? { variant: current.model.variant } : {}),
-        }
-      }
       if (session.model) {
         return {
           providerID: session.model.providerID,
@@ -709,15 +687,8 @@ export const layer = Layer.effect(
         throw error
       }
 
-      const current = yield* db
-        .select({ directory: SessionTable.directory, agent: SessionTable.agent, model: SessionTable.model })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, input.sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      const currentBelongsToSession = current && sameDirectory(current.directory, input.session.directory) ? current : undefined
-      const currentAgent = currentBelongsToSession ? currentBelongsToSession.agent : input.session.agent
-      const currentModelValue = currentBelongsToSession ? currentBelongsToSession.model : input.session.model
+      const currentAgent = input.session.agent
+      const currentModelValue = input.session.model
       const model = input.model ?? ag.model ?? (yield* currentModel(input.session))
       const same = ag.model && model.providerID === ag.model.providerID && model.modelID === ag.model.modelID
       const full =
@@ -1721,7 +1692,6 @@ export const defaultLayer = Layer.suspend(() =>
     Layer.provide(
       Layer.mergeAll(
         Agent.defaultLayer,
-        Database.defaultLayer,
         SystemPrompt.defaultLayer,
         LLM.defaultLayer,
         CrossSpawnSpawner.defaultLayer,
@@ -1865,7 +1835,6 @@ export const node = LayerNode.make(layer, [
   LLM.node,
   EventV2Bridge.node,
   RuntimeFlags.node,
-  Database.node,
 ])
 
 export * as SessionPrompt from "./prompt"
