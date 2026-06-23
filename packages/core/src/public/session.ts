@@ -12,6 +12,7 @@ import { Prompt } from "../session/prompt"
 import { Agent } from "./agent"
 import { Location } from "./location"
 import { Model } from "./model"
+import { AbsolutePath } from "../schema"
 
 export const ID = SessionV2.ID
 export type ID = SessionV2.ID
@@ -73,6 +74,7 @@ export interface CreateInput {
 export interface PromptInput {
   readonly id?: MessageID
   readonly sessionID: ID
+  readonly directory?: AbsolutePath
   readonly prompt: Prompt
   readonly delivery?: Delivery
 }
@@ -84,6 +86,7 @@ export interface SwitchModelInput {
 
 export interface MessagesInput {
   readonly sessionID: ID
+  readonly directory?: AbsolutePath
   readonly limit?: number
   readonly order?: "asc" | "desc"
   readonly cursor?: {
@@ -94,17 +97,19 @@ export interface MessagesInput {
 
 export interface MessageInput {
   readonly sessionID: ID
+  readonly directory?: AbsolutePath
   readonly messageID: MessageID
 }
 
 export interface EventsInput {
   readonly sessionID: ID
+  readonly directory?: AbsolutePath
   readonly after?: EventCursor
 }
 
 export interface Interface {
   readonly create: (input: CreateInput) => Effect.Effect<Info>
-  readonly get: (sessionID: ID) => Effect.Effect<Info, NotFoundError>
+  readonly get: (sessionID: ID, options?: { readonly directory?: AbsolutePath }) => Effect.Effect<Info, NotFoundError>
   readonly list: (input?: ListInput) => Effect.Effect<Info[]>
   readonly prompt: (input: PromptInput) => Effect.Effect<Admission, NotFoundError | PromptConflictError>
   readonly switchModel: (
@@ -114,6 +119,9 @@ export interface Interface {
   readonly interrupt: (sessionID: ID) => Effect.Effect<void>
   readonly messages: (input: MessagesInput) => Effect.Effect<Message[], NotFoundError | MessageDecodeError>
   readonly message: (input: MessageInput) => Effect.Effect<Message | undefined>
-  readonly context: (sessionID: ID) => Effect.Effect<Message[], NotFoundError | MessageDecodeError>
+  readonly context: (
+    sessionID: ID,
+    options?: { readonly directory?: AbsolutePath },
+  ) => Effect.Effect<Message[], NotFoundError | MessageDecodeError>
   readonly events: (input: EventsInput) => Stream.Stream<Event, NotFoundError>
 }

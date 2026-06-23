@@ -96,7 +96,7 @@ export const layer = Layer.effect(
             model: input.model,
             location: input.location,
           }),
-        get: sessions.get,
+        get: (sessionID, options) => sessions.get(sessionID, options),
         list: sessions.list,
         switchModel: Effect.fn("OpenCode.sessions.switchModel")(function* (input) {
           const session = yield* sessions.get(input.sessionID)
@@ -108,19 +108,22 @@ export const layer = Layer.effect(
           sessions.prompt({
             id: input.id,
             sessionID: input.sessionID,
+            directory: input.directory,
             prompt: input.prompt,
             delivery: input.delivery,
           }),
         messages: (input) =>
           sessions.messages({
             sessionID: input.sessionID,
+            directory: input.directory,
             limit: input.limit,
             order: input.order,
             cursor: input.cursor,
           }),
-        message: (input) => sessions.message({ sessionID: input.sessionID, messageID: input.messageID }),
-        context: sessions.context,
-        events: (input) => sessions.events({ sessionID: input.sessionID, after: input.after }),
+        message: (input) =>
+          sessions.message({ sessionID: input.sessionID, directory: input.directory, messageID: input.messageID }),
+        context: (sessionID, options) => sessions.context(sessionID, options),
+        events: (input) => sessions.events({ sessionID: input.sessionID, directory: input.directory, after: input.after }),
       },
     })
   }),
