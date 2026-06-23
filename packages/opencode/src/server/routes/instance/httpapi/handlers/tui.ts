@@ -1,4 +1,5 @@
 import { EventV2Bridge } from "@/event-v2-bridge"
+import * as InstanceState from "@/effect/instance-state"
 import { TuiEvent } from "@/server/tui-event"
 import { Session } from "@/session/session"
 import { Effect } from "effect"
@@ -99,7 +100,8 @@ export const tuiHandlers = HttpApiBuilder.group(InstanceHttpApi, "tui", (handler
       payload: typeof TuiEvent.SessionSelect.data.Type
     }) {
       if (!ctx.payload.sessionID.startsWith("ses")) return yield* new HttpApiError.BadRequest({})
-      yield* SessionError.mapStorageNotFound(session.get(ctx.payload.sessionID))
+      const context = yield* InstanceState.context
+      yield* SessionError.mapStorageNotFound(session.get(ctx.payload.sessionID, { directory: context.directory }))
       yield* events.publish(TuiEvent.SessionSelect, ctx.payload)
       return true
     })

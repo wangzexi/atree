@@ -62,7 +62,8 @@ export const syncHandlers = HttpApiBuilder.group(InstanceHttpApi, "sync", (handl
     const steal = Effect.fn("SyncHttpApi.steal")(function* (ctx: { payload: typeof SessionPayload.Type }) {
       const workspaceID = yield* InstanceState.workspaceID
       if (!workspaceID) return yield* new HttpApiError.BadRequest({})
-      const current = yield* session.get(ctx.payload.sessionID).pipe(
+      const context = yield* InstanceState.context
+      const current = yield* session.get(ctx.payload.sessionID, { directory: context.directory }).pipe(
         Effect.catchIf(NotFoundError.isInstance, () => Effect.fail(new HttpApiError.BadRequest({}))),
       )
 
