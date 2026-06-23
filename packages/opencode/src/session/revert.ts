@@ -9,6 +9,12 @@ import { MessageV2 } from "./message-v2"
 import { SessionID, MessageID, PartID } from "./schema"
 import { SessionRunState } from "./run-state"
 import { SessionSummary } from "./summary"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+
+function sessionEventLocation(directory: string | undefined) {
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
 
 export const RevertInput = Schema.Struct({
   sessionID: SessionID,
@@ -77,7 +83,7 @@ export const layer = Layer.effect(
       const range = all.filter((msg) => msg.info.id >= rev.messageID)
       const diffs = yield* summary.computeDiff({ messages: range })
       yield* storage.write(["session_diff", input.sessionID], diffs).pipe(Effect.ignore)
-      yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: diffs })
+      yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: diffs }, sessionEventLocation(session.directory))
       yield* sessions.setRevert({
         sessionID: input.sessionID,
         directory: session.directory,

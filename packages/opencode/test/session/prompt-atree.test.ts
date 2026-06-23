@@ -13,6 +13,7 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionEvent } from "@opencode-ai/core/session/event"
 import { readSessionStore } from "@/atree/session-store"
 import { EventV2Bridge } from "@/event-v2-bridge"
+import { MessageID } from "@/session/schema"
 import { Command } from "@/command"
 import { provideTmpdirServer } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -311,6 +312,28 @@ it.live("mirrors session diffs into the directory session log", () =>
           }),
         ]),
       )
+    }),
+    { config: providerConfig },
+  ),
+)
+
+it.live("publishes summary diff events in the session directory", () =>
+  provideTmpdirServer(
+    Effect.fnUntraced(function* () {
+      const events = yield* EventV2Bridge.Service
+      const sessions = yield* Session.Service
+      const summary = yield* SessionSummary.Service
+      const session = yield* sessions.create({ title: "summary diff location" })
+      const locations: string[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type === Session.Event.Diff.type) locations.push(event.location?.directory ?? "")
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
+
+      yield* summary.summarize({ sessionID: session.id, messageID: MessageID.ascending(), directory: session.directory })
+
+      expect(locations).toEqual([session.directory])
     }),
     { config: providerConfig },
   ),

@@ -6,6 +6,12 @@ import { Snapshot } from "@/snapshot"
 import { Session } from "./session"
 import { SessionID, MessageID } from "./schema"
 import { Config } from "@/config/config"
+import { Location } from "@opencode-ai/core/location"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+
+function sessionEventLocation(directory: string | undefined) {
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
 
 function unquoteGitPath(input: string) {
   if (!input.startsWith('"')) return input
@@ -123,7 +129,7 @@ export const layer = Layer.effect(
           files: 0,
         },
       })
-      yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: [] })
+      yield* events.publish(Session.Event.Diff, { sessionID: input.sessionID, diff: [] }, sessionEventLocation(current.directory))
       if ((yield* config.get()).snapshot === false) return
       const all = yield* sessions.messages({ sessionID: input.sessionID, directory: current.directory }).pipe(Effect.orDie)
       if (!all.length) return
