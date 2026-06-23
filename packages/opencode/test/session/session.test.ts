@@ -585,9 +585,6 @@ describe("Session", () => {
       )
 
       yield* provideInstance(source)(
-        session.setShare({ sessionID: info.id, share: { url: "https://example.com/source-share" } }),
-      )
-      yield* provideInstance(source)(
         session.setSummary({
           sessionID: info.id,
           summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
@@ -1168,7 +1165,6 @@ describe("Session", () => {
         sessionID: info.id,
         summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
       })
-      yield* session.setShare({ sessionID: info.id, share: { url: "https://example.com/share" } })
       yield* session.setWorkspace({ sessionID: info.id, workspaceID: "wrk_patched" as any })
       yield* session.setRevert({
         sessionID: info.id,
@@ -1183,7 +1179,7 @@ describe("Session", () => {
       expect(stored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
       expect(stored?.time.archived).toBe(1234)
       expect(stored?.summary).toEqual({ additions: 4, deletions: 5, files: 6, diffs: [] })
-      expect(stored?.share).toEqual({ url: "https://example.com/share" })
+      expect(stored?.share).toBeUndefined()
       expect(stored?.workspaceID).toBe("wrk_patched" as any)
       expect(stored?.revert).toBeUndefined()
 
@@ -1195,7 +1191,7 @@ describe("Session", () => {
       expect(row?.summary_additions).toBe(4)
       expect(row?.summary_deletions).toBe(5)
       expect(row?.summary_files).toBe(6)
-      expect(row?.share_url).toBe("https://example.com/share")
+      expect(row?.share_url).toBeNull()
       expect(row?.workspace_id).toBe("wrk_patched" as any)
       expect(row?.revert).toBeNull()
 
@@ -1221,7 +1217,6 @@ describe("Session", () => {
         { permission: [{ permission: "bash", pattern: "*", action: "allow" }] },
         { time: { archived: 1234 } },
         { summary: { additions: 1, deletions: 2, files: 3, diffs: [] } },
-        { share: { url: "https://example.com/share" } },
         { workspaceID: "wrk_patched" },
         {
           summary: { additions: 4, deletions: 5, files: 6, diffs: [] },

@@ -555,7 +555,6 @@ export interface Interface {
   readonly setSummary: (
     input: { sessionID: SessionID; summary: Info["summary"] } & DirectoryOption,
   ) => Effect.Effect<void>
-  readonly setShare: (input: { sessionID: SessionID; share: Info["share"] } & DirectoryOption) => Effect.Effect<void>
   readonly setWorkspace: (
     input: { sessionID: SessionID; workspaceID: Info["workspaceID"] } & DirectoryOption,
   ) => Effect.Effect<void>
@@ -1278,19 +1277,6 @@ export const layer: Layer.Layer<
       ).pipe(Effect.orDie)
     })
 
-    const setShare = Effect.fn("Session.setShare")(function* (input: {
-      sessionID: SessionID
-      share: Info["share"]
-      directory?: string
-    }) {
-      yield* recordSessionPatch(input.sessionID, { share: input.share ?? null }, { directory: input.directory })
-      yield* patch(
-        input.sessionID,
-        { share: input.share ?? null, time: { updated: Date.now() } },
-        { directory: input.directory },
-      ).pipe(Effect.orDie)
-    })
-
     const setWorkspace = Effect.fn("Session.setWorkspace")(function* (input: {
       sessionID: SessionID
       workspaceID: Info["workspaceID"]
@@ -1493,7 +1479,6 @@ export const layer: Layer.Layer<
       setRevert,
       clearRevert,
       setSummary,
-      setShare,
       setWorkspace,
       diff,
       messages,
