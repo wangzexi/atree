@@ -127,13 +127,7 @@ export const layer = Layer.effect(
           ),
         )
       }
-      const row = yield* db
-        .select({ id: SessionTable.id })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, input.sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      if (row || !session) {
+      if (!session) {
         yield* db
           .transaction((tx) =>
             Effect.gen(function* () {

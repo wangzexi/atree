@@ -196,26 +196,28 @@ export const layer = Layer.effect(
           ),
         )
       }
-      yield* db
-        .transaction((tx) =>
-          Effect.gen(function* () {
-            yield* tx.delete(TodoTable).where(eq(TodoTable.session_id, input.sessionID)).run()
-            if (input.todos.length === 0) return
-            yield* tx
-              .insert(TodoTable)
-              .values(
-                input.todos.map((todo, position) => ({
-                  session_id: input.sessionID,
-                  content: todo.content,
-                  status: todo.status,
-                  priority: todo.priority,
-                  position,
-                })),
-              )
-              .run()
-          }),
-        )
-        .pipe(Effect.orDie)
+      if (!fileSession) {
+        yield* db
+          .transaction((tx) =>
+            Effect.gen(function* () {
+              yield* tx.delete(TodoTable).where(eq(TodoTable.session_id, input.sessionID)).run()
+              if (input.todos.length === 0) return
+              yield* tx
+                .insert(TodoTable)
+                .values(
+                  input.todos.map((todo, position) => ({
+                    session_id: input.sessionID,
+                    content: todo.content,
+                    status: todo.status,
+                    priority: todo.priority,
+                    position,
+                  })),
+                )
+                .run()
+            }),
+          )
+          .pipe(Effect.orDie)
+      }
       if (fileSession) {
         yield* Effect.promise(() => writeSessionTodoState(fileSession.directory, input.sessionID, input.todos))
       }

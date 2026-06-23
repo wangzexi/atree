@@ -83,6 +83,17 @@ describe("atree todo state", () => {
         sessionID: session.id,
         todos: [{ content: "stale database todo", status: "pending", priority: "low" }],
       })
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: session.id,
+          content: "stale database todo",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
       yield* Effect.promise(() => writeSessionTodoState(instance.directory, session.id, []))
 
       const rows = yield* db
@@ -131,6 +142,17 @@ describe("atree todo state", () => {
         sessionID: session.id,
         todos: [{ content: "stale explicit todo", status: "pending", priority: "low" }],
       })
+      yield* db
+        .insert(TodoTable)
+        .values({
+          session_id: session.id,
+          content: "stale explicit todo",
+          status: "pending",
+          priority: "low",
+          position: 0,
+        })
+        .run()
+        .pipe(Effect.orDie)
       yield* Effect.promise(() =>
         fs.rm(path.join(instance.directory, ".agents", "atree", "sessions", session.id), {
           recursive: true,
@@ -255,7 +277,7 @@ describe("atree todo state", () => {
       const dbRows = yield* Database.Service.use(({ db }) =>
         db.select().from(TodoTable).where(eq(TodoTable.session_id, sessionID)).all().pipe(Effect.orDie),
       )
-      expect(dbRows).toHaveLength(1)
+      expect(dbRows).toEqual([])
       const sessionRow = yield* Database.Service.use(({ db }) =>
         db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
       )

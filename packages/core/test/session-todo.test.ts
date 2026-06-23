@@ -143,6 +143,9 @@ describe("SessionTodo", () => {
         hasState: true,
         todos: state,
       })
+      expect(
+        yield* db.select().from(TodoTable).where(eq(TodoTable.session_id, fileSessionID)).all().pipe(Effect.orDie),
+      ).toEqual([])
 
       yield* db.delete(TodoTable).where(eq(TodoTable.session_id, fileSessionID)).run().pipe(Effect.orDie)
       yield* Effect.promise(() =>
