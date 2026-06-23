@@ -18,12 +18,6 @@ export type StoredSchedule = {
   nextRun: number | null
 }
 
-type ScheduleState = {
-  version: 1
-  updatedAt: number
-  sessions: Record<string, StoredSchedule[]>
-}
-
 type SessionScheduleState = {
   version: 1
   updatedAt: number
@@ -32,10 +26,6 @@ type SessionScheduleState = {
 
 function publicScheduleProjection(input: { hasState: boolean; schedules: StoredSchedule[] }) {
   return { hasState: input.hasState, schedules: input.schedules }
-}
-
-function legacyStatePath(directory: string) {
-  return path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json")
 }
 
 function sessionStatePath(directory: string, sessionID: string) {
@@ -84,23 +74,6 @@ function isStoredSchedule(value: unknown): value is StoredSchedule {
 
 function sameSchedule(left: StoredSchedule | undefined, right: StoredSchedule | undefined) {
   return JSON.stringify(left) === JSON.stringify(right)
-}
-
-async function readState(target: string): Promise<ScheduleState> {
-  try {
-    const raw = await fs.readFile(target, "utf8")
-    const parsed = JSON.parse(raw) as Partial<ScheduleState>
-    return {
-      version: 1,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
-      sessions: parsed.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
-    }
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return { version: 1, updatedAt: 0, sessions: {} }
-    }
-    throw error
-  }
 }
 
 async function readSessionState(target: string) {
@@ -181,20 +154,11 @@ async function readSessionJsonlProjection(directory: string, sessionID: string) 
   return { hasState, updatedAt, schedules: [...schedules.values()] }
 }
 
-async function writeAtomic(target: string, value: ScheduleState | SessionScheduleState) {
+async function writeAtomic(target: string, value: SessionScheduleState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
   await fs.writeFile(temp, JSON.stringify(value, null, 2))
   await fs.rename(temp, target)
-}
-
-async function removeLegacySessionSchedule(directory: string, sessionID: string) {
-  const target = legacyStatePath(directory)
-  const state = await readState(target)
-  if (!Object.hasOwn(state.sessions, sessionID)) return
-  delete state.sessions[sessionID]
-  state.updatedAt = Date.now()
-  await writeAtomic(target, state)
 }
 
 export async function writeSessionScheduleState(directory: string, sessionID: string, schedules: StoredSchedule[]) {
@@ -237,7 +201,6 @@ export async function writeSessionScheduleState(directory: string, sessionID: st
     schedules,
   })
   await touchSessionStore(directory, sessionID as SessionID)
-  await removeLegacySessionSchedule(directory, sessionID)
 }
 
 export async function readSessionScheduleProjection(directory: string, sessionID: string) {

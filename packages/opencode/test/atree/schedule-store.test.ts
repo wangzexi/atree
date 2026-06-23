@@ -27,15 +27,6 @@ async function readState(directory: string) {
   }
 }
 
-async function readLegacyState(directory: string) {
-  return JSON.parse(
-    await fs.readFile(path.join(directory, ".agents", "atree", "extensions", "schedule", "state.json"), "utf8"),
-  ) as {
-    version: 1
-    sessions: Record<string, unknown[]>
-  }
-}
-
 afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })))
 })
@@ -149,7 +140,6 @@ describe("atree schedule store", () => {
     expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([])
     await writeSessionScheduleState(directory, "ses_legacy", [])
     expect(await readSessionScheduleState(directory, "ses_legacy")).toEqual([])
-    expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()
   })
 
   test("replays schedule state from session jsonl when the projection file is missing", async () => {

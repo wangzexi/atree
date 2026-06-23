@@ -16,18 +16,8 @@ type SessionTodoState = {
   todos: StoredTodo[]
 }
 
-type LegacyTodoState = {
-  version: 1
-  updatedAt: number
-  sessions: Record<string, StoredTodo[]>
-}
-
 function publicTodoProjection(input: { hasState: boolean; todos: StoredTodo[] }) {
   return { hasState: input.hasState, todos: input.todos }
-}
-
-function legacyStatePath(directory: string) {
-  return path.join(directory, ".agents", "atree", "extensions", "todo", "state.json")
 }
 
 function sessionStatePath(directory: string, sessionID: string) {
@@ -57,28 +47,11 @@ function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) 
   return
 }
 
-async function writeAtomic(target: string, value: SessionTodoState | LegacyTodoState) {
+async function writeAtomic(target: string, value: SessionTodoState) {
   await fs.mkdir(path.dirname(target), { recursive: true })
   const temp = path.join(path.dirname(target), `.${path.basename(target)}.${process.pid}.${Date.now()}.${randomUUID()}.tmp`)
   await fs.writeFile(temp, JSON.stringify(value, null, 2))
   await fs.rename(temp, target)
-}
-
-async function readLegacyState(target: string): Promise<LegacyTodoState> {
-  try {
-    const raw = await fs.readFile(target, "utf8")
-    const parsed = JSON.parse(raw) as Partial<LegacyTodoState>
-    return {
-      version: 1,
-      updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : 0,
-      sessions: parsed.sessions && typeof parsed.sessions === "object" ? parsed.sessions : {},
-    }
-  } catch (error) {
-    if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") {
-      return { version: 1, updatedAt: 0, sessions: {} }
-    }
-    throw error
-  }
 }
 
 async function readSessionJsonlProjection(directory: string, sessionID: string) {
@@ -150,16 +123,6 @@ export async function writeSessionTodoState(directory: string, sessionID: string
     todos: state,
   })
   await touchSessionStore(directory, sessionID as SessionSchema.ID)
-  await removeLegacySessionTodo(directory, sessionID)
-}
-
-async function removeLegacySessionTodo(directory: string, sessionID: string) {
-  const target = legacyStatePath(directory)
-  const state = await readLegacyState(target)
-  if (!Object.hasOwn(state.sessions, sessionID)) return
-  delete state.sessions[sessionID]
-  state.updatedAt = Date.now()
-  await writeAtomic(target, state)
 }
 
 export async function readSessionTodoProjection(directory: string, sessionID: string) {

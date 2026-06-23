@@ -22,15 +22,6 @@ async function readState(directory: string) {
   }
 }
 
-async function readLegacyState(directory: string) {
-  return JSON.parse(
-    await fs.readFile(path.join(directory, ".agents", "atree", "extensions", "todo", "state.json"), "utf8"),
-  ) as {
-    version: 1
-    sessions: Record<string, unknown[]>
-  }
-}
-
 afterEach(async () => {
   await Promise.all(temps.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })))
 })
@@ -110,7 +101,6 @@ describe("atree todo store", () => {
     expect(await readSessionTodoState(directory, "ses_legacy")).toEqual([])
     await writeSessionTodoState(directory, "ses_legacy", [])
     expect(await readSessionTodoProjection(directory, "ses_legacy")).toMatchObject({ hasState: true, todos: [] })
-    expect((await readLegacyState(directory)).sessions.ses_legacy).toBeUndefined()
   })
 
   test("replays todo state from session jsonl when the projection file is missing", async () => {

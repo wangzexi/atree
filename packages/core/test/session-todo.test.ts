@@ -644,10 +644,6 @@ describe("SessionTodo", () => {
         hasState: true,
         todos: [],
       })
-      const legacyRaw = yield* Effect.promise(() =>
-        Bun.file(path.join(directory, ".agents", "atree", "extensions", "todo", "state.json")).json(),
-      )
-      expect(legacyRaw.sessions[fileSessionID]).toBeUndefined()
       const touched = yield* Effect.promise(() => readSessionStore(directory, fileSessionID))
       expect(touched ? DateTime.toEpochMillis(touched.time.updated) : 0).toBeGreaterThan(20)
     }),
