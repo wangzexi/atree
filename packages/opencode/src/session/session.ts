@@ -54,6 +54,7 @@ import type { Provider } from "@/provider/provider"
 import { Permission } from "@/permission"
 import { Effect, Layer, Option, Context, Schema, Types } from "effect"
 import { AbsolutePath, NonNegativeInt, optionalOmitUndefined } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
@@ -68,6 +69,10 @@ export function isDefaultTitle(title: string) {
 }
 
 type SessionRow = typeof SessionTable.$inferSelect
+
+function sessionEventLocation(directory: string | undefined) {
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
 
 export function fromRow(row: SessionRow): Info {
   const summary =
@@ -659,7 +664,7 @@ export const layer: Layer.Layer<
           info: result,
         }),
       ).pipe(Effect.orDie)
-      yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result })
+      yield* events.publish(SessionV1.Event.Created, { sessionID: result.id, info: result }, sessionEventLocation(result.directory))
 
       return result
     })
@@ -972,7 +977,7 @@ export const layer: Layer.Layer<
           Effect.catchCause((cause) => Effect.logWarning("failed to delete atree session store", { sessionID, cause })),
         )
 
-        yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session })
+        yield* events.publish(SessionV1.Event.Deleted, { sessionID, info: session }, sessionEventLocation(session.directory))
         yield* events.remove(sessionID)
       } catch (error) {
         yield* Effect.logError("failed to remove session", { sessionID, error })
@@ -982,18 +987,28 @@ export const layer: Layer.Layer<
     const updateMessage = <T extends SessionV1.Info>(msg: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
         yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg }, options)
-        yield* events.publish(SessionV1.Event.MessageUpdated, { sessionID: msg.sessionID, info: msg })
+        const session = yield* getWithDirectory(msg.sessionID, options?.directory).pipe(Effect.orDie)
+        yield* events.publish(
+          SessionV1.Event.MessageUpdated,
+          { sessionID: msg.sessionID, info: msg },
+          sessionEventLocation(session.directory),
+        )
         return msg
       }).pipe(Effect.withSpan("Session.updateMessage"))
 
     const updatePart = <T extends SessionV1.Part>(part: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
         yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part }, options)
-        yield* events.publish(SessionV1.Event.PartUpdated, {
-          sessionID: part.sessionID,
-          part: structuredClone(part),
-          time: Date.now(),
-        })
+        const session = yield* getWithDirectory(part.sessionID, options?.directory).pipe(Effect.orDie)
+        yield* events.publish(
+          SessionV1.Event.PartUpdated,
+          {
+            sessionID: part.sessionID,
+            part: structuredClone(part),
+            time: Date.now(),
+          },
+          sessionEventLocation(session.directory),
+        )
         return part
       }).pipe(Effect.withSpan("Session.updatePart"))
 
@@ -1149,7 +1164,7 @@ export const layer: Layer.Layer<
         } as Info
         yield* Effect.promise(() => writeSessionStore(next))
         yield* syncFileSessionCache(next)
-        yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next })
+        yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next }, sessionEventLocation(next.directory))
       })
 
     const touch = Effect.fn("Session.touch")(function* (sessionID: SessionID, options?: DirectoryOption) {
@@ -1369,10 +1384,15 @@ export const layer: Layer.Layer<
       directory?: string
     }) {
       yield* appendSessionEvent(input.sessionID, { type: "message.removed", messageID: input.messageID }, input)
-      yield* events.publish(SessionV1.Event.MessageRemoved, {
-        sessionID: input.sessionID,
-        messageID: input.messageID,
-      })
+      const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(Effect.orDie)
+      yield* events.publish(
+        SessionV1.Event.MessageRemoved,
+        {
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+        },
+        sessionEventLocation(session.directory),
+      )
       return input.messageID
     })
 
@@ -1391,11 +1411,16 @@ export const layer: Layer.Layer<
         },
         input,
       )
-      yield* events.publish(SessionV1.Event.PartRemoved, {
-        sessionID: input.sessionID,
-        messageID: input.messageID,
-        partID: input.partID,
-      })
+      const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(Effect.orDie)
+      yield* events.publish(
+        SessionV1.Event.PartRemoved,
+        {
+          sessionID: input.sessionID,
+          messageID: input.messageID,
+          partID: input.partID,
+        },
+        sessionEventLocation(session.directory),
+      )
       return input.partID
     })
 

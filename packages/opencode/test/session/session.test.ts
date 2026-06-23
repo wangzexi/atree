@@ -1175,6 +1175,14 @@ describe("Session", () => {
         fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
       )
 
+      const events = yield* EventV2Bridge.Service
+      const eventDirectories: string[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type === SessionNs.Event.Updated.type) eventDirectories.push(event.location?.directory ?? "")
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
+
       yield* session.setArchived({ sessionID: info.id, directory: target, time: 1234 })
 
       const targetStore = yield* Effect.promise(() => readSessionStore(target, info.id))
@@ -1183,6 +1191,7 @@ describe("Session", () => {
       expect(targetStore?.time.archived).toBe(1234)
       expect(sourceStore?.directory).toBe(source.directory)
       expect(sourceStore?.time.archived).toBeUndefined()
+      expect(eventDirectories).toEqual([target])
     }),
   )
 
