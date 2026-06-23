@@ -1122,10 +1122,19 @@ describe("atree schedule restore", () => {
         fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
       )
 
+      const events = yield* EventV2Bridge.Service
+      const eventDirectories: string[] = []
+      const off = yield* events.listen((event) => {
+        if (event.type === Schedule.Event.Deleted.type) eventDirectories.push(event.location?.directory ?? "")
+        return Effect.void
+      })
+      yield* Effect.addFinalizer(() => off)
+
       yield* schedules.delete(storedSchedule.id as Schedule.ID, { directory: target })
 
       expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
       expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual(sourceBeforeDelete)
+      expect(eventDirectories).toEqual([target])
       const row = yield* db
         .select()
         .from(ScheduleTable)

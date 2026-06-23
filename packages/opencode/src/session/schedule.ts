@@ -11,6 +11,7 @@ import { Cron } from "croner"
 import { desc, eq, inArray, sql as drizzleSql } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { AbsolutePath } from "@opencode-ai/core/schema"
+import { Location } from "@opencode-ai/core/location"
 import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
@@ -237,6 +238,10 @@ function timerBelongsToDirectory(timer: Timer | undefined, directory: string) {
   return timer?.directory !== undefined && path.resolve(timer.directory) === path.resolve(directory)
 }
 
+function scheduleLocation(directory: string | undefined) {
+  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
+}
+
 function stopSessionTimersInDirectory(timers: Map<ID, Timer>, sessionID: SessionID, directory: string) {
   for (const [id, timer] of timers.entries()) {
     if (timer.sessionID !== sessionID) continue
@@ -390,7 +395,11 @@ export const layer = Layer.effect(
               .run(),
           )
           .pipe(Effect.orDie)
-        yield* events.publish(Event.Ran, { scheduleID, sessionID, status: runStatus, ranAt })
+        yield* events.publish(
+          Event.Ran,
+          { scheduleID, sessionID, status: runStatus, ranAt },
+          scheduleLocation(options?.directory),
+        )
         const timer = timers.get(scheduleID)
         const nextRun = timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
         yield* appendScheduleSessionEventBestEffort(
@@ -428,7 +437,7 @@ export const layer = Layer.effect(
       if (timer) stopTimer(timer)
       timers.delete(scheduleID)
       yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
-      yield* events.publish(Event.Deleted, { scheduleID, sessionID })
+      yield* events.publish(Event.Deleted, { scheduleID, sessionID }, scheduleLocation(directoryHint))
       yield* syncScheduleState(sessionID, directoryHint)
     })
 
@@ -812,11 +821,15 @@ export const layer = Layer.effect(
         }
         return
       }
-      yield* events.publish(Event.Triggered, {
-        scheduleID,
-        sessionID,
-        message,
-      })
+      yield* events.publish(
+        Event.Triggered,
+        {
+          scheduleID,
+          sessionID,
+          message,
+        },
+        scheduleLocation(directoryHint),
+      )
       const statusService = yield* Effect.serviceOption(SessionStatus.Service)
       const sessionStatus = Option.isSome(statusService)
         ? yield* Effect.gen(function* () {
@@ -928,11 +941,15 @@ export const layer = Layer.effect(
         yield* clearArchivedScheduleState(sessionID, location.directory)
         return
       }
-      yield* events.publish(Event.Triggered, {
-        scheduleID,
-        sessionID,
-        message: row.message,
-      })
+      yield* events.publish(
+        Event.Triggered,
+        {
+          scheduleID,
+          sessionID,
+          message: row.message,
+        },
+        scheduleLocation(location.type === "found" ? location.directory : undefined),
+      )
     })
 
     const serviceBridge = yield* EffectBridge.make()
@@ -1240,7 +1257,7 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
       const bridge = yield* EffectBridge.make()
       startTimer(id, input.sessionID, kind, expression || "", runAt, bridge, directory)
-      yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID })
+      yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID }, scheduleLocation(directory))
       const createdTimer = timers.get(id)
       const created = {
         id,
@@ -1299,10 +1316,14 @@ export const layer = Layer.effect(
           stopTimer(timer)
           timers.delete(scheduleID)
         }
-        yield* events.publish(Event.Deleted, {
-          scheduleID,
-          sessionID: found.sessionID as SessionID,
-        })
+        yield* events.publish(
+          Event.Deleted,
+          {
+            scheduleID,
+            sessionID: found.sessionID as SessionID,
+          },
+          scheduleLocation(found.directory),
+        )
         yield* appendScheduleSessionEventBestEffort(
           found.sessionID as SessionID,
           {
@@ -1327,10 +1348,14 @@ export const layer = Layer.effect(
           stopTimer(timer)
           timers.delete(scheduleID)
         }
-        yield* events.publish(Event.Deleted, {
-          scheduleID,
-          sessionID: session.id,
-        })
+        yield* events.publish(
+          Event.Deleted,
+          {
+            scheduleID,
+            sessionID: session.id,
+          },
+          scheduleLocation(directory),
+        )
         yield* appendScheduleSessionEventBestEffort(
           session.id,
           {
@@ -1387,10 +1412,14 @@ export const layer = Layer.effect(
         stopTimer(timer)
         timers.delete(scheduleID)
       }
-      yield* events.publish(Event.Deleted, {
-        scheduleID,
-        sessionID: row.session_id as SessionID,
-      })
+      yield* events.publish(
+        Event.Deleted,
+        {
+          scheduleID,
+          sessionID: row.session_id as SessionID,
+        },
+        scheduleLocation(options?.directory ?? timer?.directory),
+      )
       yield* syncScheduleState(row.session_id as SessionID, options?.directory)
     })
 
@@ -1431,7 +1460,7 @@ export const layer = Layer.effect(
             .pipe(Effect.orDie)
           yield* db.delete(ScheduleTable).where(inArray(ScheduleTable.id, deletedIDs)).run().pipe(Effect.orDie)
           for (const id of deletedIDs) {
-            yield* events.publish(Event.Deleted, { scheduleID: id, sessionID })
+            yield* events.publish(Event.Deleted, { scheduleID: id, sessionID }, scheduleLocation(directory))
           }
         }
         yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
@@ -1475,7 +1504,11 @@ export const layer = Layer.effect(
         yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
       }
       for (const row of rows) {
-        yield* events.publish(Event.Deleted, { scheduleID: row.id as ID, sessionID })
+        yield* events.publish(
+          Event.Deleted,
+          { scheduleID: row.id as ID, sessionID },
+          scheduleLocation(directory ?? options?.directory),
+        )
       }
       yield* syncScheduleState(sessionID, options?.directory)
     })
