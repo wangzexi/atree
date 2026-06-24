@@ -440,26 +440,6 @@ export const layer = Layer.effect(
         const direction = input.anchor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
         const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
-        const sortColumn = SessionTable.time_created
-        const conditions: SQL[] = []
-        if ("directory" in input) conditions.push(eq(SessionTable.directory, input.directory))
-        if (input.workspaceID) conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
-        if ("project" in input) conditions.push(eq(SessionTable.project_id, input.project))
-        if (input.search) conditions.push(like(SessionTable.title, `%${input.search}%`))
-        if (!input.archived) conditions.push(isNull(SessionTable.time_archived))
-        if (input.anchor) {
-          conditions.push(
-            order === "asc"
-              ? or(
-                  gt(sortColumn, input.anchor.time),
-                  and(eq(sortColumn, input.anchor.time), gt(SessionTable.id, input.anchor.id)),
-                )!
-              : or(
-                  lt(sortColumn, input.anchor.time),
-                  and(eq(sortColumn, input.anchor.time), lt(SessionTable.id, input.anchor.id)),
-                )!,
-          )
-        }
         const fileSessions =
           "directory" in input
             ? yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
@@ -479,28 +459,9 @@ export const layer = Layer.effect(
         const rootScopedFileIndex = !("directory" in input)
         const itemKey = (item: Pick<SessionSchema.Info, "location" | "id">) =>
           rootScopedFileIndex ? `${path.resolve(item.location.directory)}\n${item.id}` : item.id
-        const fileKeys = new Set(fileSessions.map(itemKey))
-        const query = db
-          .select()
-          .from(SessionTable)
-          .where(conditions.length > 0 ? and(...conditions) : undefined)
-          .orderBy(
-            order === "asc" ? asc(sortColumn) : desc(sortColumn),
-            order === "asc" ? asc(SessionTable.id) : desc(SessionTable.id),
-          )
-        const rows = yield* (input.limit === undefined ? query.all() : query.limit(input.limit).all()).pipe(
-          Effect.orDie,
-        )
         const byID = new Map<string, SessionSchema.Info>()
-        for (const row of rows) {
-          const item = fromRow(row)
-          const key = itemKey(item)
-          if (!fileKeys.has(key)) continue
-          byID.set(key, item)
-        }
         for (const fileSession of fileSessions) {
           const key = itemKey(fileSession)
-          byID.delete(key)
           if (!matchesListInput(fileSession, input, order)) continue
           byID.set(key, fileSession)
         }
