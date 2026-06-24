@@ -575,46 +575,28 @@ export const layer = Layer.effect(
       if (location.type === "found") return { directory: location.directory, archived: location.archived }
     })
 
-    const activeSchedules = Effect.fn("Schedule.activeSchedules")(function* (sessionID: SessionID) {
-      const rows = yield* db
-        .select({
-          id: ScheduleTable.id,
-          session_id: ScheduleTable.session_id,
-          kind: ScheduleTable.kind,
-          expression: ScheduleTable.expression,
-          run_at: ScheduleTable.run_at,
-          message: ScheduleTable.message,
-          created_at: ScheduleTable.created_at,
-        })
-        .from(ScheduleTable)
-        .where(eq(ScheduleTable.session_id, sessionID))
-        .all()
-        .pipe(Effect.orDie)
-
-      return yield* Effect.all(
-        rows.map((row) =>
-          Effect.gen(function* () {
-            const id = row.id as ID
-            const kind = (row.kind ?? "recurring") as Kind
-            const lastRun = yield* getLastRun(id)
-            const timer = timers.get(id)
-            const nextRun =
-              timer?.kind === "recurring" ? (timer.cron.nextRun()?.getTime() ?? null) : (timer?.runAt ?? null)
-            return {
-              id,
-              sessionID: row.session_id as SessionID,
-              kind,
-              expression: row.expression,
-              runAt: row.run_at ?? null,
-              message: row.message,
-              createdAt: row.created_at,
-              lastRanAt: lastRun?.ran_at ?? null,
-              lastRunStatus: (lastRun?.status as RunStatus | undefined) ?? null,
-              nextRun,
-            } satisfies Info
-          }),
-        ),
-      )
+    const activeSchedules = Effect.fn("Schedule.activeSchedules")(function* (
+      sessionID: SessionID,
+      directoryHint?: string,
+    ) {
+      const directory = yield* sessionDirectory(sessionID, directoryHint)
+      if (!directory) return [] as Info[]
+      const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
+      return projection.schedules.map((schedule) => {
+        const timer = timers.get(schedule.id as ID)
+        const nextRun =
+          timer && timerBelongsToDirectory(timer, directory)
+            ? timer.kind === "recurring"
+              ? (timer.cron.nextRun()?.getTime() ?? null)
+              : (timer.runAt ?? null)
+            : schedule.nextRun
+        return {
+          ...schedule,
+          id: schedule.id as ID,
+          sessionID: schedule.sessionID as SessionID,
+          nextRun,
+        } satisfies Info
+      })
     })
 
     const syncScheduleState = Effect.fn("Schedule.syncScheduleState")(function* (
@@ -623,7 +605,7 @@ export const layer = Layer.effect(
     ) {
       const directory = yield* sessionDirectory(sessionID, directoryHint)
       if (!directory) return
-      const schedules = yield* activeSchedules(sessionID)
+      const schedules = yield* activeSchedules(sessionID, directory)
       yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, schedules))
     })
 
@@ -1042,7 +1024,7 @@ export const layer = Layer.effect(
         yield* restoreStoredRun(schedule)
       }
 
-      const schedules = yield* activeSchedules(sessionID)
+      const schedules = yield* activeSchedules(sessionID, directory)
       if (schedules.length > 0) yield* syncScheduleState(sessionID, directory)
       return schedules
     })

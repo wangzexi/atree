@@ -14,7 +14,7 @@ import { readSessionStore, writeSessionStore } from "../../src/atree/session-sto
 import { writeWorkspaceRoot } from "../../src/atree/state"
 import { EventV2Bridge } from "../../src/event-v2-bridge"
 import { Schedule } from "../../src/session/schedule"
-import { ScheduleTable } from "../../src/session/schedule.sql"
+import { ScheduleRunTable, ScheduleTable } from "../../src/session/schedule.sql"
 import type { SessionID } from "../../src/session/schema"
 import { TestInstance } from "../fixture/fixture"
 import { testEffect } from "../lib/effect"
@@ -2029,6 +2029,113 @@ describe("atree schedule restore", () => {
       const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
       expect(stored?.time.updated).toBeGreaterThanOrEqual(entries[2].at)
       expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+    }),
+  )
+
+  it.effect(
+    "prefers directory run state over stale schedule run rows when listing",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_schedule_stale_run_rows" as SessionID
+      const scheduleID = "sch_schedule_stale_run_rows"
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_schedule_stale_run_rows",
+          worktree: directory,
+          vcs: "git",
+          name: "schedule stale run rows",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_schedule_stale_run_rows",
+          slug: "schedule-stale-run-rows",
+          directory,
+          title: "Schedule stale run rows",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "schedule-stale-run-rows",
+          version: "test",
+          projectID: "proj_schedule_stale_run_rows",
+          directory,
+          path: ".",
+          title: "Schedule stale run rows",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "recurring",
+            expression: "* * * * *",
+            runAt: null,
+            message: "directory run state wins",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "recurring",
+          expression: "* * * * *",
+          run_at: null,
+          message: "directory run state wins",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleRunTable)
+        .values({
+          id: "shr_schedule_stale_run_rows" as never,
+          schedule_id: scheduleID as never,
+          ran_at: now - 5_000,
+          status: "ran",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const schedules = yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
+
+      expect(schedules).toHaveLength(1)
+      expect(schedules[0]).toMatchObject({
+        id: scheduleID,
+        lastRanAt: null,
+        lastRunStatus: null,
+      })
     }),
   )
 
