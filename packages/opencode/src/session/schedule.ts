@@ -723,6 +723,38 @@ export const layer = Layer.effect(
       yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
     })
 
+    const ensureScheduleStillExists = Effect.fn("Schedule.ensureScheduleStillExists")(function* (
+      scheduleID: ID,
+      sessionID: SessionID,
+      directoryHint?: string,
+    ) {
+      const location = yield* resolveSessionLocation(sessionID, directoryHint)
+      if (location.type !== "found") {
+        const timer = timers.get(scheduleID)
+        if (timer) {
+          stopTimer(timer)
+          timers.delete(scheduleID)
+        }
+        yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, scheduleID)).run().pipe(Effect.orDie)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
+        return { type: "missing" } as const
+      }
+      if (location.archived) return { type: "archived", directory: location.directory } as const
+      const projection = yield* Effect.promise(() => readSessionScheduleProjection(location.directory, sessionID))
+      const schedule = projection.schedules.find((item) => item.id === scheduleID)
+      if (!schedule || !canRestoreStoredSchedule(schedule)) {
+        const timer = timers.get(scheduleID)
+        if (timer) {
+          stopTimer(timer)
+          timers.delete(scheduleID)
+        }
+        yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, scheduleID)).run().pipe(Effect.orDie)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
+        return { type: "stale", directory: location.directory } as const
+      }
+      return { type: "found", directory: location.directory } as const
+    })
+
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
       sessionID: SessionID,
       directoryHint?: string,
@@ -758,17 +790,10 @@ export const layer = Layer.effect(
       const kind = (row.kind ?? "recurring") as Kind
       const message = row.message
       const timerDirectory = timers.get(scheduleID)?.directory
-      const location = yield* resolveSessionLocation(sessionID, timerDirectory)
-      if (location.type !== "found") {
-        const timer = timers.get(scheduleID)
-        if (timer) {
-          stopTimer(timer)
-          timers.delete(scheduleID)
-        }
-        return
-      }
-      const directoryHint = location.directory
-      if (location.archived) {
+      const scheduleState = yield* ensureScheduleStillExists(scheduleID, sessionID, timerDirectory)
+      if (scheduleState.type === "missing" || scheduleState.type === "stale") return
+      const directoryHint = scheduleState.directory
+      if (scheduleState.type === "archived") {
         yield* recordRun(scheduleID, sessionID, "skipped", Date.now(), { directory: directoryHint })
         if (kind === "once") {
           yield* completeOnce(scheduleID, sessionID, directoryHint)
@@ -906,10 +931,10 @@ export const layer = Layer.effect(
         return
       }
       const sessionID = row.session_id as SessionID
-      const location = yield* resolveSessionLocation(sessionID)
-      if (location.type !== "found") return
-      if (location.archived) {
-        yield* clearArchivedScheduleState(sessionID, location.directory)
+      const scheduleState = yield* ensureScheduleStillExists(scheduleID, sessionID)
+      if (scheduleState.type === "missing" || scheduleState.type === "stale") return
+      if (scheduleState.type === "archived") {
+        yield* clearArchivedScheduleState(sessionID, scheduleState.directory)
         return
       }
       yield* events.publish(
@@ -919,7 +944,7 @@ export const layer = Layer.effect(
           sessionID,
           message: row.message,
         },
-        scheduleLocation(location.directory),
+        scheduleLocation(scheduleState.directory),
       )
     })
 
@@ -1046,21 +1071,17 @@ export const layer = Layer.effect(
     for (const row of hydrated) {
       const id = row.id as ID
       const sessionID = row.session_id as SessionID
-      const location = yield* resolveSessionLocation(sessionID)
-      if (location.type !== "found") {
-        yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, id)).run().pipe(Effect.orDie)
-        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, id)).run().pipe(Effect.orDie)
-        continue
-      }
-      if (location.archived) {
-        yield* clearArchivedScheduleState(sessionID, location.directory)
+      const scheduleState = yield* ensureScheduleStillExists(id, sessionID)
+      if (scheduleState.type === "missing" || scheduleState.type === "stale") continue
+      if (scheduleState.type === "archived") {
+        yield* clearArchivedScheduleState(sessionID, scheduleState.directory)
         continue
       }
       const kind = (row.kind ?? "recurring") as Kind
       if (kind === "once") {
         const lastRun = yield* getLastRun(id)
         if (lastRun) {
-          yield* completeOnce(id, sessionID, location.directory)
+          yield* completeOnce(id, sessionID, scheduleState.directory)
           continue
         }
       }
@@ -1071,7 +1092,7 @@ export const layer = Layer.effect(
         row.expression,
         row.run_at ?? null,
         serviceBridge,
-        location.directory,
+        scheduleState.directory,
       )
     }
     const rootDirectory = yield* Effect.promise(() => readWorkspaceState()).pipe(
