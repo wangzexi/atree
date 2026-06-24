@@ -65,6 +65,7 @@
 - SQLite 仍承担运行时投影、执行队列和部分兼容缓存；目前还不能删除。
 - core `SessionV2` 已经能恢复文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件。
 - core `QuestionV2` 和 `PermissionV2` 已能从目录 `session.jsonl` 恢复 pending question/permission，并把 reply 继续写回对应会话日志；但 permission/question 的更完整 UI 状态和历史展示还没有统一成 typed session view model。
+- `QuestionV2` / `PermissionV2` 这一层的目录闭环已经比较明确：恢复 pending、外部 reply/reject、以及 source/target 复制目录下同 session id 的 overlap 场景，都已经有测试覆盖，reply/reject 会回写到各自所属目录的 `session.jsonl`，不会再按同一个 session id 互相串写。
 - 真正模型输出链路仍主要由 OpenCode 原有 projector/runtime 推动，目录 JSONL 目前是事实源化过程中的镜像与恢复层。
 
 ### 运行层边界审查
@@ -73,6 +74,7 @@
 
 - `SessionInputTable` 是 prompt admit/promote 的运行队列和并发护栏。目录事实源要求是：prompt 一旦被 durable 接收，必须能从当前目录的 `session.jsonl` 恢复；队列本身可以暂时保留在 SQLite，后续再迁移为可重建运行态。
 - `SessionContextEpochTable` 是系统上下文 baseline、replacement 和 revision 的运行锁/快照。当前已经能为 file-backed session 自动重建必要的 SQLite 投影，并把 context update 写回 `session.jsonl`；后续要做的是把 typed view model 和重建逻辑收敛，而不是直接删除表。
+- 但 `SessionInputTable` / `SessionContextEpochTable` 当前仍然是按 `session_id` 单键表达的全局运行态。对于 copied source/target 同 id 并存的场景，它们还不能像 `question/permission` 那样天然区分“每个目录副本各自的 pending/epoch”；这一层后续如果要彻底目录自包含，要么改成目录作用域 key，要么改成纯目录内可重建运行模型。
 - `storage.write(["session_diff", sessionID], ...)` 目前仍作为旧 HTTP/UI 兼容投影存在。目录事实源已经通过 `session.diff` 事件和 session summary replay 恢复会话级 diff；后续迁移目标是让读取链路不再依赖这个全局 storage。
 
 判断原则：
