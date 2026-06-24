@@ -544,7 +544,7 @@ describe("Session", () => {
     }),
   )
 
-  it.instance("updates the runtime cache to the explicit file-backed session directory", () =>
+  it.instance("does not rewrite the runtime cache to the explicit copied session directory", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const source = yield* tmpdirScoped({ git: true })
@@ -571,7 +571,7 @@ describe("Session", () => {
 
       expect(copied.directory).toBe(target)
       expect(copied.title).toBe("target copied session")
-      expect(row?.directory).toBe(target)
+      expect(row?.directory).toBe(source)
     }),
   )
 
@@ -1148,7 +1148,7 @@ describe("Session", () => {
     }),
   )
 
-  it.instance("persists patched session metadata to .agents and refreshes the runtime cache", () =>
+  it.instance("persists patched session metadata to .agents and updates the runtime projection", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const { db } = yield* Database.Service
@@ -1419,6 +1419,14 @@ describe("Session", () => {
         text: "message written to copied target",
       })
       expect(sourceMessages.find((message) => message.info.id === messageID)).toBeUndefined()
+      const { db } = yield* Database.Service
+      const row = yield* db
+        .select({ directory: SessionTable.directory })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, info.id))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.directory).toBe(source.directory)
     }),
   )
 

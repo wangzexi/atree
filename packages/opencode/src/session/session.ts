@@ -678,15 +678,17 @@ export const layer: Layer.Layer<
         .pipe(Effect.orDie)
     })
 
-    const syncFileSessionCache = Effect.fn("Session.syncFileSessionCache")(function* (fileSession: Info) {
+    const ensureFileSessionCache = Effect.fn("Session.ensureFileSessionCache")(function* (fileSession: Info) {
+      const existing = yield* db
+        .select({ id: SessionTable.id })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, fileSession.id))
+        .get()
+        .pipe(Effect.orDie)
+      if (existing) return
       yield* ensureFileSessionProject(fileSession)
       const row = toRow(fileSession)
-      yield* db
-        .insert(SessionTable)
-        .values(row)
-        .onConflictDoUpdate({ target: SessionTable.id, set: row })
-        .run()
-        .pipe(Effect.orDie)
+      yield* db.insert(SessionTable).values(row).onConflictDoNothing().run().pipe(Effect.orDie)
     })
 
     const getWithDirectory = Effect.fn("Session.getWithDirectory")(function* (id: SessionID, directoryHint?: string) {
@@ -703,7 +705,7 @@ export const layer: Layer.Layer<
       })
       if (fileSession) {
         const merged = mergeFileSession(cached, localizeFileSession(fileSession, ctx))
-        yield* syncFileSessionCache(merged)
+        yield* ensureFileSessionCache(merged)
         return merged
       }
       return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
@@ -725,7 +727,7 @@ export const layer: Layer.Layer<
       const base = projected ?? session
       const next = { ...base, time: { ...base.time, updated } }
       yield* Effect.promise(() => writeSessionStore(next)).pipe(Effect.orDie)
-      yield* syncFileSessionCache(next)
+      yield* ensureFileSessionCache(next)
     })
 
     const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (
@@ -1135,7 +1137,7 @@ export const layer: Layer.Layer<
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
         yield* Effect.promise(() => writeSessionStore(next))
-        yield* syncFileSessionCache(next)
+        yield* ensureFileSessionCache(next)
         yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next }, sessionEventLocation(next.directory))
       })
 

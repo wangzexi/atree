@@ -44,6 +44,7 @@
 - opencode 的 schedule 根目录查找已复用 file-backed session store 的深度扫描结果，不再维护独立目录遍历策略；schedule 继续作为会话目录内的工具状态读取。
 - opencode 的 `Todo` 服务已经停止在 `get/update` 时顺手镜像 `SessionTable`/`ProjectTable` 缓存；它现在直接依赖 file-backed session resolver 和目录内 `todo.json`/`session.jsonl`，不会再因为一次 todo 更新去改写旧的 session 缓存目录。
 - opencode 的 `Schedule` 服务仍保留 SQLite `ScheduleTable` / `ScheduleRunTable` 作为运行投影，并且为了满足外键约束会在缺失时补一条 `SessionTable` 行；但它已经不再在每次解析 file-backed session 时覆盖更新旧的 `SessionTable` 缓存。目录归档态和目录内自动化消息清理由文件事实源驱动，不再借 schedule 解析顺手改写旧 session 元数据。
+- opencode 的 `Session` 服务也已经把 file-backed session cache sync 收紧为“只补缺失、不覆盖旧行”：`session.get`、消息事件追加和普通 patch 不再因为解析到 copied target 会话就把 `SessionTable.directory` 改写到目标目录。显式 session patch 仍会通过现有 projector 更新运行投影；同时修正了 unarchive 时 `SessionTable.time_archived` 会残留旧值的问题。
 - file-backed session resolver 当前只按显式目录、当前 instance、持久化 atree root 解析目录事实源；它已经不再把 SQLite 中的目录缓存当作最终兜底 hint，但 core/opencode 两侧在“复制目录歧义”上的实现和测试仍需继续统一。
 - `todo` 护栏已经与当前目录歧义规则对齐：当 persisted root 下存在多个复制目录、且同一个 session id 无显式目录 hint 时，不再猜测其中一个 todo 状态，而是视为歧义；但 core/opencode 两侧的 resolver 语义仍未完全统一，这会继续影响 schedule/todo 等工具状态的无目录解析。
 
