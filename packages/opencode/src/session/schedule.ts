@@ -1044,7 +1044,11 @@ export const layer = Layer.effect(
       const id = row.id as ID
       const sessionID = row.session_id as SessionID
       const location = yield* resolveSessionLocation(sessionID)
-      if (location.type !== "found") continue
+      if (location.type !== "found") {
+        yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, id)).run().pipe(Effect.orDie)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, id)).run().pipe(Effect.orDie)
+        continue
+      }
       if (location.archived) {
         yield* clearArchivedScheduleState(sessionID, location.directory)
         continue

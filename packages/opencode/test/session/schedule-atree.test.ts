@@ -119,6 +119,76 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  baseIt.effect(
+    "removes stale database schedules at startup when no file-backed session exists",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_missing_schedule_boot" as SessionID
+      const scheduleID = "sch_missing_schedule_boot"
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_missing_schedule_boot",
+          worktree: directory,
+          vcs: "git",
+          name: "missing schedule boot",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_missing_schedule_boot",
+          slug: "missing-schedule-boot",
+          directory,
+          title: "Missing schedule boot",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale startup schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* Effect.gen(function* () {
+        yield* Schedule.Service
+      }).pipe(Effect.provide(schedule))
+
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
+
   it.instance(
     "restores a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {
