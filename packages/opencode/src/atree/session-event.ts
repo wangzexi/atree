@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { appendSessionJsonl, findSessionStore, touchSessionStore } from "./session-store"
+import { appendSessionJsonl, findSessionStore, readSessionStore, touchSessionStore } from "./session-store"
 import { readWorkspaceState } from "./state"
 import { InstanceState } from "@/effect/instance-state"
 import type { SessionID } from "@/session/schema"
@@ -12,13 +12,21 @@ const findSessionInRoot = (rootDirectory: string | undefined, sessionID: Session
     )
   })
 
+const findSessionInDirectory = (directory: string | undefined, sessionID: SessionID) =>
+  Effect.gen(function* () {
+    if (!directory) return
+    return yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
+      Effect.catchCause(() => Effect.succeed(undefined)),
+    )
+  })
+
 export const appendAtreeSessionEventInDirectory = (
   directory: string | undefined,
   sessionID: SessionID,
   entry: Record<string, unknown>,
 ): Effect.Effect<boolean> =>
   Effect.gen(function* () {
-    const session = yield* findSessionInRoot(directory, sessionID)
+    const session = yield* findSessionInDirectory(directory, sessionID)
     if (!session) return false
     yield* Effect.promise(() => appendSessionJsonl(session, entry))
     yield* Effect.promise(() => touchSessionStore(session.directory, session.id))
@@ -33,7 +41,7 @@ export const appendAtreeSessionEventByID = (
     const instanceDirectory = yield* InstanceState.directory.pipe(
       Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
     )
-    const instanceSession = yield* findSessionInRoot(instanceDirectory, sessionID)
+    const instanceSession = yield* findSessionInDirectory(instanceDirectory, sessionID)
     if (instanceSession) {
       yield* Effect.promise(() => appendSessionJsonl(instanceSession, entry))
       yield* Effect.promise(() => touchSessionStore(instanceSession.directory, instanceSession.id))
@@ -63,6 +71,6 @@ export const appendAtreeSessionEventBestEffort = (
   entry: Record<string, unknown>,
 ): Effect.Effect<void> =>
   appendAtreeSessionEventInDirectory(directory, sessionID, entry).pipe(
-    Effect.flatMap((written) => (written ? Effect.void : appendAtreeSessionEventByID(sessionID, entry))),
+    Effect.flatMap((written) => (written || directory ? Effect.void : appendAtreeSessionEventByID(sessionID, entry))),
     Effect.catchCause((cause) => Effect.logWarning("failed to append atree session event", { sessionID, cause })),
   )
