@@ -220,10 +220,21 @@ export async function readSessionScheduleState(directory: string, sessionID: str
 export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {
   const root = await fs.realpath(rootDirectory)
   const sessions = await readSessionStoresDeep(root)
+  let found:
+    | {
+        directory: string
+        sessionID: string
+        schedules: StoredSchedule[]
+      }
+    | undefined
   for (const session of sessions) {
     const schedules = await readSessionScheduleState(session.directory, session.id)
-    if (schedules.some((schedule) => schedule.id === scheduleID)) {
-      return { directory: session.directory, sessionID: session.id, schedules }
+    if (!schedules.some((schedule) => schedule.id === scheduleID)) continue
+    if (!found) {
+      found = { directory: session.directory, sessionID: session.id, schedules }
+      continue
     }
+    if (found.directory !== session.directory || found.sessionID !== session.id) return
   }
+  return found
 }

@@ -311,6 +311,52 @@ describe("atree schedule store", () => {
     expect(await findSessionScheduleState(directory, "sch_orphan")).toBeUndefined()
   })
 
+  test("does not resolve a schedule from nested copied sessions when the schedule id is ambiguous", async () => {
+    const root = await tempdir()
+    const source = path.join(root, "source")
+    const target = path.join(root, "target")
+    const scheduleID = "sch_ambiguous"
+    const schedule = {
+      id: scheduleID,
+      sessionID: "ses_ambiguous",
+      kind: "once" as const,
+      expression: "",
+      runAt: 2,
+      message: "ambiguous schedule",
+      createdAt: 1,
+      lastRanAt: null,
+      lastRunStatus: null,
+      nextRun: 2,
+    }
+
+    await writeSessionStore({
+      id: "ses_ambiguous" as never,
+      slug: "ambiguous-source",
+      version: "test",
+      projectID: "proj_ambiguous_source" as never,
+      directory: source,
+      title: "Ambiguous source",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    await writeSessionStore({
+      id: "ses_ambiguous" as never,
+      slug: "ambiguous-target",
+      version: "test",
+      projectID: "proj_ambiguous_target" as never,
+      directory: target,
+      title: "Ambiguous target",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 1 },
+    })
+    await writeSessionScheduleState(source, "ses_ambiguous", [schedule])
+    await writeSessionScheduleState(target, "ses_ambiguous", [schedule])
+
+    expect(await findSessionScheduleState(root, scheduleID)).toBeUndefined()
+  })
+
   test("replays deleted schedules from session jsonl as absent", async () => {
     const directory = await tempdir()
     const schedule = {
