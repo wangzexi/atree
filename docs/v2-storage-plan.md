@@ -257,7 +257,7 @@ OpenCode spike 当前已经把一部分关键事实源移回目录：
 - Shell 执行内部的 session resolve 也使用传入的目录上下文；shell 用户消息、工具 part 和后续恢复 loop 会继续写入当前目录会话。
 - Summary diff/summarize 读取和写入也接受目录上下文；HTTP diff 会用解析出的当前 session 目录读取消息摘要，避免同 session id 的旧缓存目录影响 diff 展示。
 - Revert/unrevert 也接受目录上下文；HTTP revert/unrevert 会把当前 session 目录传给回滚链路，让 revert 状态、message/part 清理继续落在目录会话内。
-- CLI `import` 导入分享或 JSON 文件时，会先写入当前目录的 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl`，再刷新 SQLite 兼容投影；导入来的会话不再只是全局数据库里的会话。
+- CLI `import` 导入本地 JSON 文件时，会先写入当前目录的 `.agents/atree/sessions/<session-id>/meta.yaml` 和 `session.jsonl`，再刷新 SQLite 兼容投影；导入来的会话不再只是全局数据库里的会话。
 - CLI `import` 的 SQLite session/message/part 回填只是兼容投影；目录事实源写入成功后，即使兼容投影因为缺少旧 project row 或外键状态失败，也不会阻断导入。
 - CLI `stats` 聚合会话时会通过 `Session.listGlobal()` 和带目录上下文的 `Session.messages()` 读取；只有目录事实源、没有 SQLite session row 的会话也会被统计。
 - Project 识别从 global 或旧 root project 升级为真实 git/remote project 时，会同步迁移当前目录下 file-backed sessions 的 `projectID`，并把 `session.updated` 写入各自 `session.jsonl`；即使没有 SQLite session row，目录会话也不会停留在旧 project 归属。

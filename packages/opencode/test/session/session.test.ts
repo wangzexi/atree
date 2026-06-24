@@ -1194,7 +1194,6 @@ describe("Session", () => {
       expect(row?.summary_additions).toBe(4)
       expect(row?.summary_deletions).toBe(5)
       expect(row?.summary_files).toBe(6)
-      expect(row?.share_url).toBeNull()
       expect(row?.workspace_id).toBe("wrk_patched" as any)
       expect(row?.revert).toBeNull()
 

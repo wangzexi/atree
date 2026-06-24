@@ -45,7 +45,7 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
               agent: "build",
               model: { providerID: "test", modelID: "test-model" },
             } as any,
-            parts: [{ id: partID, sessionID, messageID, type: "text", text: "from imported share" } as any],
+                parts: [{ id: partID, sessionID, messageID, type: "text", text: "from imported export" } as any],
           },
         ],
       },
@@ -91,7 +91,7 @@ it.effect("persists imported sessions into the directory-backed atree store", ()
     const messages = yield* Effect.promise(() => readSessionJsonlMessages(imported))
     expect(messages).toHaveLength(1)
     expect(messages[0]?.info).toMatchObject({ id: messageID, role: "user" })
-    expect(messages[0]?.parts[0]).toMatchObject({ id: partID, type: "text", text: "from imported share" })
+    expect(messages[0]?.parts[0]).toMatchObject({ id: partID, type: "text", text: "from imported export" })
 
     const raw = yield* Effect.promise(() =>
       fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),

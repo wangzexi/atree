@@ -66,10 +66,10 @@ export const persistImportedSession = Effect.fn("Cli.import.persist")(function* 
 
 export const ImportCommand = effectCmd({
   command: "import <file>",
-  describe: "import session data from JSON file",
+  describe: "import session data from local JSON file",
   builder: (yargs) =>
     yargs.positional("file", {
-      describe: "path to JSON file",
+      describe: "path to local JSON file",
       type: "string",
       demandOption: true,
     }),
@@ -88,7 +88,7 @@ const runImport = Effect.fn("Cli.import.body")(function* (file: string, ctx: Ins
   const isUrl = file.startsWith("http://") || file.startsWith("https://")
 
   if (isUrl) {
-    process.stdout.write("Importing sessions from URLs has been removed from atree")
+    process.stdout.write("Importing sessions from URLs has been removed from atree. Use a local JSON export instead.")
     process.stdout.write(EOL)
     return
   } else {
