@@ -16,7 +16,7 @@ const database = Database.layerFromPath(":memory:")
 const it = testEffect(Layer.mergeAll(database))
 
 describe("atree session resolver", () => {
-  it.effect("prefers the persisted root copy over a still-valid SQLite directory row", () =>
+  it.effect("does not resolve a persisted-root session when copied directories make the session id ambiguous", () =>
     Effect.gen(function* () {
       const root = yield* Effect.acquireRelease(
         Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-root-"))),
@@ -75,8 +75,7 @@ describe("atree session resolver", () => {
 
       const resolved = yield* resolveFileSession(db, { sessionID })
 
-      expect(resolved?.directory).toBe(yield* Effect.promise(() => fs.realpath(target)))
-      expect(resolved?.title).toBe("Target root copy")
+      expect(resolved).toBeUndefined()
     }),
   )
 
@@ -127,7 +126,7 @@ describe("atree session resolver", () => {
     }),
   )
 
-  it.effect("uses a valid SQLite directory row as the final file-backed session hint", () =>
+  it.effect("does not use a SQLite directory row as the final file-backed session hint", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
         Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-db-row-"))),
@@ -171,8 +170,7 @@ describe("atree session resolver", () => {
 
       const resolved = yield* resolveFileSession(db, { sessionID })
 
-      expect(resolved?.directory).toBe(path.resolve(directory))
-      expect(resolved?.title).toBe("DB row file-backed session")
+      expect(resolved).toBeUndefined()
     }),
   )
 })
