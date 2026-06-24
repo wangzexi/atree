@@ -900,11 +900,6 @@ export const layer: Layer.Layer<
         .where(and(eq(SessionTable.parent_id, parentID)))
         .all()
         .pipe(Effect.orDie)
-      for (const row of rows) {
-        const item = fromRow(row)
-        if (item.time.archived !== undefined) continue
-        byID.set(item.id, item)
-      }
       const directory =
         parent.directory ??
         options?.directory ??
@@ -912,10 +907,23 @@ export const layer: Layer.Layer<
         (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
       if (directory) {
         const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
+        const fileIDs = new Set(fileSessions.map((item) => item.id))
+        for (const row of rows) {
+          const item = fromRow(row)
+          if (!fileIDs.has(item.id)) continue
+          if (item.time.archived !== undefined) continue
+          byID.set(item.id, item)
+        }
         for (const fileSession of fileSessions) {
           const item = localizeFileSession(fileSession, ctx)
           byID.delete(item.id)
           if (item.parentID !== parentID) continue
+          if (item.time.archived !== undefined) continue
+          byID.set(item.id, item)
+        }
+      } else {
+        for (const row of rows) {
+          const item = fromRow(row)
           if (item.time.archived !== undefined) continue
           byID.set(item.id, item)
         }

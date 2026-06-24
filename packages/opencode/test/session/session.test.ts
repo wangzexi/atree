@@ -1446,6 +1446,30 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not revive stale cached child sessions after the file-backed child store is removed", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const parent = yield* Effect.acquireRelease(session.create({ title: "file-child-parent-missing-store" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const child = yield* Effect.acquireRelease(
+        session.create({ parentID: parent.id, title: "file-child-missing-store" }),
+        (created) => session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* Effect.promise(() =>
+        fs.rm(path.join(parent.directory, ".agents", "atree", "sessions", child.id), {
+          recursive: true,
+          force: true,
+        }),
+      )
+
+      const children = yield* session.children(parent.id)
+      expect(children.map((item) => item.id)).not.toContain(child.id)
+      expect(children).toEqual([])
+    }),
+  )
+
   it.instance("uses file-backed archived metadata to separate active and archived directory lists", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
