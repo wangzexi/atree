@@ -42,7 +42,7 @@
 - core `SessionTodo` 的目录文件读写已经和 opencode 侧对齐：会创建会话 payload 骨架、读取旧 `extensions/todo/state.json` 作为迁移兼容，并在重写后清理旧状态。
 - opencode 的 session/message/todo/schedule 已经共享同一个 file-backed session resolver；后续收紧“全局 root 回退”只需要优先改这个解析入口，而不是在多个模块里重复修。
 - opencode 的 schedule 根目录查找已复用 file-backed session store 的深度扫描结果，不再维护独立目录遍历策略；schedule 继续作为会话目录内的工具状态读取。
-- file-backed session resolver 的优先级为显式目录、当前 instance、持久化 atree root，最后才使用 SQLite 中的目录缓存作为 hint；即使用到 SQLite，返回的会话内容仍来自目录文件。
+- file-backed session resolver 当前只按显式目录、当前 instance、持久化 atree root 解析目录事实源；它已经不再把 SQLite 中的目录缓存当作最终兜底 hint，但 core/opencode 两侧在“复制目录歧义”上的实现和测试仍需继续统一。
 - `todo` 护栏已经与当前目录歧义规则对齐：当 persisted root 下存在多个复制目录、且同一个 session id 无显式目录 hint 时，不再猜测其中一个 todo 状态，而是视为歧义；但 core/opencode 两侧的 resolver 语义仍未完全统一，这会继续影响 schedule/todo 等工具状态的无目录解析。
 
 已通过的护栏：
