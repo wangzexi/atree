@@ -396,11 +396,21 @@ export async function readSessionStoresDeep(rootDirectory: string) {
 export async function findSessionStore(rootDirectory: string, sessionID: SessionSchema.ID) {
   const root = await fs.realpath(rootDirectory)
   const budget = { count: 0 }
+  let ambiguous = false
+  let found: SessionSchema.Info | undefined
+
+  const sessionKey = (session: SessionSchema.Info) => `${session.location.directory}\n${session.id}`
 
   async function walk(directory: string, depth: number): Promise<SessionSchema.Info | undefined> {
     if (budget.count++ >= FindMaxNodes) return
-    const found = await readSessionStore(directory, sessionID)
-    if (found) return found
+    const current = await readSessionStore(directory, sessionID)
+    if (current) {
+      if (!found) found = current
+      else if (sessionKey(found) !== sessionKey(current)) {
+        ambiguous = true
+        return
+      }
+    }
     if (depth >= FindMaxDepth) return
 
     const entries = await fs.readdir(directory, { withFileTypes: true }).catch((error: unknown) => {
@@ -418,9 +428,11 @@ export async function findSessionStore(rootDirectory: string, sessionID: Session
     for (const entry of entries) {
       if (!entry.isDirectory()) continue
       if (IgnoredDirectories.has(entry.name)) continue
-      const result = await walk(path.join(directory, entry.name), depth + 1)
-      if (result) return result
+      await walk(path.join(directory, entry.name), depth + 1)
+      if (ambiguous) return
     }
+
+    return ambiguous ? undefined : found
   }
 
   return walk(root, 0)

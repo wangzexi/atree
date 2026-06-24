@@ -432,6 +432,41 @@ describe("atree session store", () => {
     expect(await findSessionStore(root, "ses_missing" as any)).toBeUndefined()
   })
 
+  test("does not resolve a nested session store when copied directories make the session id ambiguous", async () => {
+    const root = await tempdir()
+    const source = path.join(root, "source")
+    const target = path.join(root, "target")
+    await fs.mkdir(source, { recursive: true })
+    await fs.mkdir(target, { recursive: true })
+
+    await writeSessionStore({
+      id: "ses_ambiguous_lookup",
+      slug: "ambiguous-source",
+      version: "test",
+      projectID: "proj_test",
+      directory: source,
+      path: "source",
+      title: "Ambiguous source",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 2 },
+    } as any)
+    await writeSessionStore({
+      id: "ses_ambiguous_lookup",
+      slug: "ambiguous-target",
+      version: "test",
+      projectID: "proj_test",
+      directory: target,
+      path: "target",
+      title: "Ambiguous target",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: 1, updated: 3 },
+    } as any)
+
+    expect(await findSessionStore(root, "ses_ambiguous_lookup" as any)).toBeUndefined()
+  })
+
   test("treats the containing directory as authoritative when a session store is copied", async () => {
     const source = await tempdir()
     const target = await tempdir()
