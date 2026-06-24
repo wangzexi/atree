@@ -805,26 +805,6 @@ export const layer: Layer.Layer<
             Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
           )
       if (!directoryInput && !rootDirectory) return []
-      const conditions: SQL[] = []
-      if (input?.directory) conditions.push(eq(SessionTable.directory, input.directory))
-      if (input?.roots) conditions.push(isNull(SessionTable.parent_id))
-      if (input?.start) conditions.push(gte(SessionTable.time_updated, input.start))
-      if (input?.cursor) conditions.push(lt(SessionTable.time_updated, input.cursor))
-      if (input?.search) conditions.push(like(SessionTable.title, `%${input.search}%`))
-      if (!input?.archived) conditions.push(isNull(SessionTable.time_archived))
-
-      const query =
-        conditions.length > 0
-          ? db
-              .select()
-              .from(SessionTable)
-              .where(and(...conditions))
-          : db.select().from(SessionTable)
-      const rows = yield* query
-        .orderBy(desc(SessionTable.time_updated), desc(SessionTable.id))
-        .limit(input?.limit ?? 100)
-        .all()
-        .pipe(Effect.orDie)
       const fileSessions = directoryInput
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
         : rootDirectory
@@ -835,23 +815,11 @@ export const layer: Layer.Layer<
       const rootScopedFileIndex = !directoryInput && rootDirectory !== undefined && fileSessions !== undefined
       const itemKey = (item: Pick<Info, "directory" | "id">) =>
         rootScopedFileIndex ? `${path.resolve(item.directory)}\n${item.id}` : item.id
-      const fileKeys = fileSessions ? new Set(fileSessions.map(itemKey)) : undefined
       const byID = new Map<string, Info>()
-      for (const row of rows) {
-        const item = fromRow(row)
-        const key = itemKey(item)
-        if (directoryInput && fileKeys && !fileKeys.has(key)) continue
-        if (rootScopedFileIndex && !fileKeys?.has(key)) continue
-        byID.set(key, item)
-      }
-      if (fileSessions) {
-        for (const fileSession of fileSessions) {
-          const item = localizeFileSession(fileSession, ctx)
-          const key = itemKey(item)
-          byID.delete(key)
-          if (!matchesGlobalListInput(item, input ?? {})) continue
-          byID.set(key, item)
-        }
+      for (const fileSession of fileSessions ?? []) {
+        const item = localizeFileSession(fileSession, ctx)
+        if (!matchesGlobalListInput(item, input ?? {})) continue
+        byID.set(itemKey(item), item)
       }
       const sessions = [...byID.values()]
         .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
