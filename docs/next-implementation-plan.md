@@ -22,6 +22,25 @@
 
 下一阶段要继续收紧会话事实源边界，再处理接口收敛和核心替换。
 
+## 新约束：停止业务 fallback
+
+基于当前 demo 阶段判断，atree 下一步不再追求“目录事实源 + 全局 SQLite fallback”并存。
+
+这个兼容层已经开始明显拖慢实现：
+
+- 每做一个会话相关能力，都要回答“目录事实源”和“全局缓存”谁优先。
+- copied directory、同 id session、多入口读取时，逻辑会持续分叉。
+- 前端 bug 和运行态 bug 很难快速归因，因为数据来源不再单一。
+
+因此主线原则改为：
+
+- 会话存在性、归档状态、emoji、标题、schedule、todo、消息历史、资产路径，全部以目录内 `.agents/atree/` 为唯一业务事实源。
+- 找不到目录事实源时，直接视为不存在；不再回退到全局 SQLite 猜测旧数据。
+- 全局 SQLite 如果继续存在，只能承载“可丢弃、可重建”的运行态，不再承载任何会改变目录业务语义的数据。
+- 如果某个功能必须依赖 fallback 才能跑通，优先删该 fallback，再补最小运行时重建，而不是继续双写。
+
+这意味着后续改造不是“渐进兼容旧 OpenCode 存储”，而是“用可运行的方式逐段切断旧事实源”。
+
 ## 2026-06-20 审查结论
 
 另一个 AI 已经推进了一批目录自包含相关改动，其中一部分可以保留并继续沿用。
@@ -82,13 +101,23 @@
 - 会话历史、标题、归档、emoji、自动化消息、todo、权限/问题决策、工具调用结果和长期资产必须能随目录迁移。
 - 运行锁、执行队列、SSE 投影、搜索索引和最近打开记录可以暂时留在全局运行层，但必须能从目录事实源重建或失效后安全丢弃。
 
+### 运行层收紧结论
+
+如果按新的 demo 策略继续推进，运行层也应该继续收紧：
+
+- `SessionTable` / `ProjectTable` 不再作为“会话目录归属”的兜底来源。
+- `SessionInputTable` / `SessionContextEpochTable` 可以短期保留，但要被明确标记为纯运行态；它们丢失后，不能导致会话业务事实丢失。
+- `ScheduleTable` / `ScheduleRunTable` 也应该逐步降级为运行投影，最终由目录内 schedule 状态和 `session.jsonl` 恢复。
+- 后续如果某个运行表无法自然重建，就说明它仍然混入了业务事实，应该继续拆。
+
 下一步优先级：
 
 1. 继续补护栏测试，固定当前可用行为，尤其是直接打开 session URL、切换目录、归档、一次性 schedule 触发后清空 header。
 2. 把“会话读写事实源”集中到一个 atree session store 模块，减少 `packages/core/src/atree/session-store.ts` 和 `packages/opencode/src/atree/session-store.ts` 的重复逻辑。
-3. 先统一 core/opencode `session resolver` 对“复制目录歧义”的规则，再继续扩展 core JSONL reader 和 typed view model，让 permission/question、schedule、todo 等目录状态在 UI/API 侧有统一投影。
-4. 等读写边界稳定后，再考虑收敛 HTTP facade；不要先删 OpenCode 接口，否则测试与回退路径会不够。
-5. Pi core 替换应新开分支做，保留当前 OpenCode spike 作为可运行对照。
+3. 把 `SessionTable` / `ProjectTable` 在 atree 主链路上的读取责任继续剥离，只保留必要运行态，不再让它们决定业务真相。
+4. 统一 core/opencode `session resolver` 对“复制目录歧义”的规则，再继续扩展 core JSONL reader 和 typed view model，让 permission/question、schedule、todo 等目录状态在 UI/API 侧有统一投影。
+5. 等目录事实源链路稳定后，再收敛 HTTP facade；不要先删 OpenCode 接口，否则测试护栏会不够。
+6. Pi core 替换应新开分支做，保留当前 OpenCode spike 作为可运行对照。
 
 ## 阶段 0：固定当前可用版本
 
