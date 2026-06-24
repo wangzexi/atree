@@ -1322,6 +1322,122 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
+    "clears copied file-backed schedule state in the explicit target directory without deleting the source DB row when no timer is running",
+    Effect.gen(function* () {
+      const schedules = yield* Schedule.Service
+      const source = yield* TestInstance
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-clear-target-no-timer-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-clear-target-no-timer-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => writeWorkspaceRoot(path.dirname(source.directory)))
+
+      const { db } = yield* Database.Service
+      const sessionID = "ses_copied_schedule_clear_no_timer" as SessionID
+      const scheduleID = "sch_copied_schedule_clear_no_timer"
+      const now = Date.now()
+      const storedSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 60_000,
+        message: "source clear without timer",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_copied_schedule_clear_no_timer",
+          worktree: source.directory,
+          vcs: "git",
+          name: "copied schedule clear no timer",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_copied_schedule_clear_no_timer",
+          slug: "copied-schedule-clear-no-timer",
+          directory: source.directory,
+          title: "Copied schedule clear no timer",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "source clear without timer",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "copied-schedule-clear-no-timer",
+          version: "test",
+          projectID: "proj_copied_schedule_clear_no_timer",
+          directory: source.directory,
+          path: ".",
+          title: "Copied schedule clear no timer",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [storedSchedule]))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+
+      yield* schedules.clear(sessionID, { directory: target })
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual([
+        storedSchedule,
+      ])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("source clear without timer")
+    }),
+  )
+
+  it.instance(
     "restores recurring schedule run state from directory state",
     Effect.gen(function* () {
       const instance = yield* TestInstance

@@ -306,22 +306,23 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.session_id, sessionID))
         .all()
         .pipe(Effect.orDie)
-      const alternateFileSession =
-        directory !== undefined
-          ? yield* Effect.promise(() => readWorkspaceState())
-              .pipe(
-                Effect.flatMap((state) =>
-                  state.rootDirectory
-                    ? Effect.promise(() => findSessionStore(state.rootDirectory!, sessionID))
-                    : Effect.succeed(undefined),
-                ),
-                Effect.catchCause(() => Effect.succeed(undefined)),
-              )
-          : undefined
       const hasAlternateFileSession =
-        directory !== undefined &&
-        alternateFileSession?.directory !== undefined &&
-        path.resolve(alternateFileSession.directory) !== path.resolve(directory)
+        directory !== undefined
+          ? yield* Effect.promise(() => readWorkspaceState()).pipe(
+              Effect.flatMap((state) =>
+                state.rootDirectory
+                  ? Effect.promise(() => readSessionStoresDeep(state.rootDirectory!))
+                  : Effect.succeed([]),
+              ),
+              Effect.map((sessions) =>
+                sessions.some(
+                  (session) =>
+                    session.id === sessionID && path.resolve(session.directory) !== path.resolve(directory),
+                ),
+              ),
+              Effect.catchCause(() => Effect.succeed(false)),
+            )
+          : false
       const ids = rows
         .map((row) => row.id as ID)
         .filter((id) => {
