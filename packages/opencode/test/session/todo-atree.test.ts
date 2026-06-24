@@ -289,7 +289,7 @@ describe("atree todo state", () => {
     }),
   )
 
-  it.effect("updates todo state for an explicit directory without a database session row", () =>
+  it.effect("updates todo state for an explicit directory without writing database todo rows", () =>
     Effect.gen(function* () {
       const todo = yield* Todo.Service
       const directory = yield* Effect.acquireRelease(
@@ -327,10 +327,92 @@ describe("atree todo state", () => {
         db.select().from(TodoTable).where(eq(TodoTable.session_id, sessionID)).all().pipe(Effect.orDie),
       )
       expect(dbRows).toEqual([])
-      const sessionRow = yield* Database.Service.use(({ db }) =>
-        db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+    }),
+  )
+
+  it.effect("does not rewrite a stale database session row when updating explicit directory todos", () =>
+    Effect.gen(function* () {
+      const todo = yield* Todo.Service
+      const source = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-stale-session-source-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
       )
-      expect(sessionRow?.directory).toBe(directory)
+      const target = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-todo-stale-session-target-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const { db } = yield* Database.Service
+      const suffix = randomUUID().replaceAll("-", "")
+      const projectID = `proj_todo_stale_session_${suffix}`
+      const sessionID = `ses_todo_stale_session_${suffix}` as SessionID
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: projectID,
+          worktree: source,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: projectID,
+          slug: "todo-stale-session",
+          directory: source,
+          title: "Todo stale session",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "todo-stale-session",
+          version: "test",
+          projectID: "proj_file",
+          directory: target,
+          path: ".",
+          title: "Todo stale session",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* todo.update({
+        sessionID,
+        directory: target,
+        todos: [{ content: "write explicit todo", status: "in_progress", priority: "medium" }],
+      })
+
+      expect(yield* Effect.promise(() => readSessionTodoState(target, sessionID))).toEqual([
+        { content: "write explicit todo", status: "in_progress", priority: "medium" },
+      ])
+      const dbRows = yield* db.select().from(TodoTable).where(eq(TodoTable.session_id, sessionID)).all().pipe(Effect.orDie)
+      expect(dbRows).toEqual([])
+      const sessionRow = yield* db
+        .select()
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(sessionRow?.directory).toBe(source)
     }),
   )
 
@@ -485,10 +567,6 @@ describe("atree todo state", () => {
       expect(yield* Effect.promise(() => readSessionTodoState(nodeDirectory, sessionID))).toEqual([
         { content: "write nested todo", status: "in_progress", priority: "high" },
       ])
-      const sessionRow = yield* Database.Service.use(({ db }) =>
-        db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
-      )
-      expect(sessionRow?.directory).toBe(nodeDirectory)
     }),
   )
 

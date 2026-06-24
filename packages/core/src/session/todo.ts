@@ -3,7 +3,6 @@ export * as SessionTodo from "./todo"
 import { Context, Effect, Layer, Schema } from "effect"
 import { appendSessionJsonl, findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "../atree/todo-store"
-import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
 
@@ -118,4 +117,4 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(EventV2.defaultLayer), Layer.provide(Database.defaultLayer))
+export const defaultLayer = layer.pipe(Layer.provide(EventV2.defaultLayer))
