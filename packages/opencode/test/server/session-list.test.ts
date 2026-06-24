@@ -5,7 +5,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { Session as SessionNs } from "@/session/session"
 import { disposeAllInstances, provideInstance, TestInstance } from "../fixture/fixture"
-import { cp, mkdir } from "fs/promises"
+import { cp, mkdir, rm } from "fs/promises"
 import path from "path"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { eq } from "drizzle-orm"
@@ -294,6 +294,31 @@ describe("session.list", () => {
           session.list({ directory, path: "packages/opencode/src", archived: true }),
         )).map((session) => String(session.id))
         expect(archivedIDs).toContain("ses_file_path_archived")
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "does not revive stale SQLite rows for path lists after the file-backed session store is removed",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const directory = path.join(test.directory, "packages", "opencode", "src")
+        yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+
+        const created = yield* withSession({ title: "stale-path-session" }).pipe(provideInstance(directory))
+
+        const beforeIDs = (yield* SessionNs.Service.use((session) =>
+          session.list({ path: "packages/opencode/src" }),
+        )).map((session) => session.id)
+        expect(beforeIDs).toContain(created.id)
+
+        yield* Effect.promise(() => rm(path.join(directory, ".agents", "atree", "sessions", created.id), { recursive: true, force: true }))
+
+        const afterIDs = (yield* SessionNs.Service.use((session) =>
+          session.list({ path: "packages/opencode/src" }),
+        )).map((session) => session.id)
+        expect(afterIDs).not.toContain(created.id)
       }),
     { git: true },
   )

@@ -759,13 +759,21 @@ export const layer: Layer.Layer<
     ) {
       if (!input?.path || !ctx?.worktree) return items
       const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(ctx.worktree))
+      const itemKey = (item: Pick<Info, "directory" | "id">) => `${path.resolve(item.directory)}\n${item.id}`
+      const fileKeys = new Set(fileSessions.map(itemKey))
       const byID = new Map<string, Info>()
-      for (const item of items) byID.set(item.id, item)
+      for (const item of items) {
+        const key = itemKey(item)
+        if (!fileKeys.has(key)) continue
+        if (!matchesListInput(item, input)) continue
+        byID.set(key, item)
+      }
       for (const fileSession of fileSessions) {
         const item = localizeFileSession(fileSession, ctx)
-        byID.delete(item.id)
+        const key = itemKey(item)
+        byID.delete(key)
         if (!matchesListInput(item, input)) continue
-        byID.set(item.id, item)
+        byID.set(key, item)
       }
       return [...byID.values()]
         .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
