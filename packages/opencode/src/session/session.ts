@@ -696,7 +696,7 @@ export const layer: Layer.Layer<
       const ctx = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
-      const fileSession = yield* resolveFileSession(db, {
+      const fileSession = yield* resolveFileSession({
         sessionID: id,
         directory: directoryHint,
         instanceDirectory: ctx?.directory,

@@ -425,7 +425,7 @@ export const page = Effect.fn("MessageV2.page")(function* (input: {
 }) {
   const before = input.before ? cursor.decode(input.before) : undefined
   const { db } = yield* Database.Service
-  const fileSession = yield* resolveFileSession(db, { directory: input.directory, sessionID: input.sessionID })
+  const fileSession = yield* resolveFileSession({ directory: input.directory, sessionID: input.sessionID })
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     if (projection.hasMessageEvents) return pageFileMessages(projection.messages, { limit: input.limit, before })
@@ -468,7 +468,7 @@ export function parts(messageID: MessageID, options?: { sessionID?: SessionID; d
       return []
     }
     if (options?.sessionID) {
-      const fileSession = yield* resolveFileSession(db, { directory: options.directory, sessionID: options.sessionID })
+      const fileSession = yield* resolveFileSession({ directory: options.directory, sessionID: options.sessionID })
       if (fileSession) {
         const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
         return projection.messages.find((message) => message.info.id === messageID)?.parts ?? []
@@ -493,7 +493,7 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
   directory?: string
 }) {
   const { db } = yield* Database.Service
-  const fileSession = yield* resolveFileSession(db, { directory: input.directory, sessionID: input.sessionID })
+  const fileSession = yield* resolveFileSession({ directory: input.directory, sessionID: input.sessionID })
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     const message = projection.messages.find((item) => item.info.id === input.messageID)

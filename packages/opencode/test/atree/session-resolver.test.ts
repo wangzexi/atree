@@ -73,7 +73,7 @@ describe("atree session resolver", () => {
         .run()
         .pipe(Effect.orDie)
 
-      const resolved = yield* resolveFileSession(db, { sessionID })
+      const resolved = yield* resolveFileSession({ sessionID })
 
       expect(resolved).toBeUndefined()
     }),
@@ -118,8 +118,8 @@ describe("atree session resolver", () => {
         writeSessionStore({ ...base, directory: instanceNode, title: "Instance copy" } as never),
       )
 
-      const { db } = yield* Database.Service
-      const resolved = yield* resolveFileSession(db, { sessionID, instanceDirectory: instanceNode })
+      const _database = yield* Database.Service
+      const resolved = yield* resolveFileSession({ sessionID, instanceDirectory: instanceNode })
 
       expect(resolved?.directory).toBe(path.resolve(instanceNode))
       expect(resolved?.title).toBe("Instance copy")
@@ -168,7 +168,7 @@ describe("atree session resolver", () => {
         .run()
         .pipe(Effect.orDie)
 
-      const resolved = yield* resolveFileSession(db, { sessionID })
+      const resolved = yield* resolveFileSession({ sessionID })
 
       expect(resolved).toBeUndefined()
     }),

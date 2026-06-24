@@ -1,6 +1,5 @@
 import path from "path"
 import { Effect } from "effect"
-import type { Database } from "@opencode-ai/core/database/database"
 import type { SessionID } from "@/session/schema"
 import { findSessionStore, readSessionStore } from "./session-store"
 import { readWorkspaceState } from "./state"
@@ -12,14 +11,11 @@ function sameDirectory(left: string | undefined, right: string | undefined) {
   return path.resolve(left) === path.resolve(right)
 }
 
-export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function* (
-  _db: Database.Interface["db"],
-  input: {
-    sessionID: SessionID
-    directory?: string
-    instanceDirectory?: string
-  },
-) {
+export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function* (input: {
+  sessionID: SessionID
+  directory?: string
+  instanceDirectory?: string
+}) {
   const tried = new Set<string>()
 
   const tryDirectory = Effect.fnUntraced(function* (directory: string | undefined) {

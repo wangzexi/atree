@@ -339,7 +339,7 @@ export const layer = Layer.effect(
             : undefined
       if (!sessionID) return
 
-      const fileSession = yield* resolveFileSession(db, { sessionID }).pipe(
+      const fileSession = yield* resolveFileSession({ sessionID }).pipe(
         Effect.catchCause(() => Effect.succeed(undefined)),
       )
       if (!fileSession) return
@@ -632,7 +632,7 @@ export const layer = Layer.effect(
         const currentFileSession =
           !input.copyChanges || currentRow?.workspaceID
             ? undefined
-            : yield* resolveFileSession(db, {
+            : yield* resolveFileSession({
                 sessionID: input.sessionID,
                 directory: currentRow?.directory ?? undefined,
               })

@@ -123,7 +123,7 @@ export const layer = Layer.effect(
       fallbackDirectory?: string,
     ) {
       const instance = yield* currentInstance
-      const fileSession = yield* resolveFileSession(db, {
+      const fileSession = yield* resolveFileSession({
         sessionID,
         directory: fallbackDirectory,
         instanceDirectory: instance?.directory,

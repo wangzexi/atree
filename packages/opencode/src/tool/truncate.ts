@@ -68,7 +68,7 @@ export const layer = Layer.effect(
       const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
       const database = yield* Effect.serviceOption(Database.Service)
       const session = Option.isSome(database)
-        ? yield* resolveFileSession(database.value.db, { sessionID, instanceDirectory: ctx?.directory }).pipe(
+        ? yield* resolveFileSession({ sessionID, instanceDirectory: ctx?.directory }).pipe(
             Effect.catchCause(() => Effect.succeed(undefined)),
           )
         : ctx
