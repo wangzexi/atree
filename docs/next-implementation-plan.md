@@ -43,6 +43,7 @@
 - opencode 的 session/message/todo/schedule 已经共享同一个 file-backed session resolver；后续收紧“全局 root 回退”只需要优先改这个解析入口，而不是在多个模块里重复修。
 - opencode 的 schedule 根目录查找已复用 file-backed session store 的深度扫描结果，不再维护独立目录遍历策略；schedule 继续作为会话目录内的工具状态读取。
 - file-backed session resolver 的优先级为显式目录、当前 instance、持久化 atree root，最后才使用 SQLite 中的目录缓存作为 hint；即使用到 SQLite，返回的会话内容仍来自目录文件。
+- `todo` 护栏已经与当前目录歧义规则对齐：当 persisted root 下存在多个复制目录、且同一个 session id 无显式目录 hint 时，不再猜测其中一个 todo 状态，而是视为歧义；但 core/opencode 两侧的 resolver 语义仍未完全统一，这会继续影响 schedule/todo 等工具状态的无目录解析。
 
 已通过的护栏：
 
@@ -80,7 +81,7 @@
 
 1. 继续补护栏测试，固定当前可用行为，尤其是直接打开 session URL、切换目录、归档、一次性 schedule 触发后清空 header。
 2. 把“会话读写事实源”集中到一个 atree session store 模块，减少 `packages/core/src/atree/session-store.ts` 和 `packages/opencode/src/atree/session-store.ts` 的重复逻辑。
-3. 继续扩展 core JSONL reader 和 typed view model，让 permission/question、schedule、todo 等目录状态在 UI/API 侧有统一投影。
+3. 先统一 core/opencode `session resolver` 对“复制目录歧义”的规则，再继续扩展 core JSONL reader 和 typed view model，让 permission/question、schedule、todo 等目录状态在 UI/API 侧有统一投影。
 4. 等读写边界稳定后，再考虑收敛 HTTP facade；不要先删 OpenCode 接口，否则测试与回退路径会不够。
 5. Pi core 替换应新开分支做，保留当前 OpenCode spike 作为可运行对照。
 
