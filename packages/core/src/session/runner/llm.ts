@@ -104,12 +104,15 @@ export const layer = Layer.effect(
     const db = (yield* Database.Service).db
     const compaction = SessionCompaction.make({ events, llm, config: yield* config.entries() })
     const getSession = Effect.fn("SessionRunner.getSession")(function* (sessionID: SessionSchema.ID) {
-      const session = yield* store.get(sessionID)
+      const session =
+        (yield* store.get(sessionID, { directory: location.directory })) ?? (yield* store.get(sessionID))
       if (!session) return yield* Effect.die(`Session not found: ${sessionID}`)
       return session
     })
 
     const getContext = Effect.fn("SessionRunner.getContext")(function* (sessionID: SessionSchema.ID) {
+      const fileSession = yield* store.get(sessionID, { directory: location.directory })
+      if (fileSession) return yield* store.context(sessionID, { directory: fileSession.location.directory })
       return yield* store.context(sessionID)
     })
     const failInterruptedTools = Effect.fn("SessionRunner.failInterruptedTools")(function* (
@@ -182,30 +185,35 @@ export const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       delivery: SessionInput.Delivery,
     ) {
-      const filePending = yield* store.hasPendingInput(sessionID, delivery, { directory: location.directory })
-      if (filePending !== undefined) return filePending
+      const fileSession = yield* store.get(sessionID, { directory: location.directory })
+      if (fileSession) {
+        const filePending = yield* store.hasPendingInput(sessionID, delivery, { directory: fileSession.location.directory })
+        return filePending ?? false
+      }
       return yield* SessionInput.hasPending(db, sessionID, delivery)
     })
     const promoteInputs = Effect.fn("SessionRunner.promoteInputs")(function* (
       session: SessionSchema.Info,
       promotion: SessionInput.Delivery,
     ) {
-      const filePromoted =
-        promotion === "steer"
-          ? yield* store.promoteInputs(session.id, { delivery: "steer", mode: "all" }, {
-              directory: session.location.directory,
-            })
-          : yield* Effect.gen(function* () {
-              const queued = yield* store.promoteInputs(session.id, { delivery: "queue", mode: "next" }, {
-                directory: session.location.directory,
-              })
-              if (queued === undefined) return undefined
-              const steers = yield* store.promoteInputs(session.id, { delivery: "steer", mode: "all" }, {
-                directory: session.location.directory,
-              })
-              return queued + (steers ?? 0)
-            })
-      if (filePromoted !== undefined) return
+      const fileSession = yield* store.get(session.id, { directory: session.location.directory })
+      if (fileSession) {
+        if (promotion === "steer") {
+          yield* store.promoteInputs(session.id, { delivery: "steer", mode: "all" }, {
+            directory: fileSession.location.directory,
+          })
+          return
+        }
+        yield* Effect.gen(function* () {
+          yield* store.promoteInputs(session.id, { delivery: "queue", mode: "next" }, {
+            directory: fileSession.location.directory,
+          })
+          yield* store.promoteInputs(session.id, { delivery: "steer", mode: "all" }, {
+            directory: fileSession.location.directory,
+          })
+        })
+        return
+      }
       const cutoff = yield* SessionInput.latestSeq(db, session.id)
       if (promotion === "steer") yield* SessionInput.promoteSteers(db, events, session.id, cutoff)
       if (promotion === "queue") {

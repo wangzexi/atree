@@ -433,8 +433,14 @@ export const layer = Layer.effect(
           return yield* new NotFoundError({ sessionID })
         }
         const session = yield* store.get(sessionID)
-        if (!session) return yield* new NotFoundError({ sessionID })
-        return session
+        if (session) return session
+        const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+          Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+        )
+        if (root) return yield* new NotFoundError({ sessionID })
+        const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+        if (!row) return yield* new NotFoundError({ sessionID })
+        return fromRow(row)
       }),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"

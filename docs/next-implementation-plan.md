@@ -110,6 +110,8 @@
 如果按新的 demo 策略继续推进，运行层也应该继续收紧：
 
 - `SessionTable` / `ProjectTable` 不再作为“会话目录归属”的兜底来源。
+- `SessionRunner` 读取目录会话时也不该再依赖全局 workspace root；当前已经改成“先按当前 `Location.directory` 取 file-backed session，再按旧全局路径兼容纯 SQLite session”。
+- `SessionRunner` 的 pending-input 判断也已经加了护栏：只要当前目录下存在 file-backed session，就以该目录的 prompt state 为准，不再让脏 `SessionInputTable` 队列误触发额外 provider turn。
 - `SessionInputTable` / `SessionContextEpochTable` 可以短期保留，但要被明确标记为纯运行态；它们丢失后，不能导致会话业务事实丢失。
 - `ScheduleTable` / `ScheduleRunTable` 也应该逐步降级为运行投影，最终由目录内 schedule 状态和 `session.jsonl` 恢复。
 - 后续如果某个运行表无法自然重建，就说明它仍然混入了业务事实，应该继续拆。
