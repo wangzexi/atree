@@ -2934,7 +2934,7 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
-    "prefers archived file metadata over stale database cache when restoring schedules",
+    "uses archived file metadata to clear directory schedule state without rewriting a stale database session row",
     Effect.gen(function* () {
       const instance = yield* TestInstance
       const ctx = yield* InstanceState.context
@@ -3020,8 +3020,8 @@ describe("atree schedule restore", () => {
         .where(eq(SessionTable.id, sessionID))
         .get()
         .pipe(Effect.orDie)
-      expect(row?.title).toBe("File archive wins")
-      expect(row?.archived).toBe(now)
+      expect(row?.title).toBe("Stale active cache")
+      expect(row?.archived).toBeNull()
     }),
   )
 })

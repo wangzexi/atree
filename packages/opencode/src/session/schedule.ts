@@ -493,7 +493,14 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const upsertFileSessionCache = Effect.fn("Schedule.upsertFileSessionCache")(function* (session: FileSession) {
+    const ensureFileSessionCache = Effect.fn("Schedule.ensureFileSessionCache")(function* (session: FileSession) {
+      const existing = yield* db
+        .select({ id: SessionTable.id })
+        .from(SessionTable)
+        .where(eq(SessionTable.id, session.id))
+        .get()
+        .pipe(Effect.orDie)
+      if (existing) return
       const ctx = yield* currentInstance
       const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
       const projectID = ctx?.project.id ?? session.projectID
@@ -528,12 +535,7 @@ export const layer = Layer.effect(
         time_compacting: session.time.compacting ?? null,
         time_archived: session.time.archived ?? null,
       } as typeof SessionTable.$inferInsert
-      yield* db
-        .insert(SessionTable)
-        .values(row)
-        .onConflictDoUpdate({ target: SessionTable.id, set: row })
-        .run()
-        .pipe(Effect.orDie)
+      yield* db.insert(SessionTable).values(row).onConflictDoNothing().run().pipe(Effect.orDie)
     })
 
     const resolveSessionLocation = Effect.fn("Schedule.resolveSessionLocation")(function* (
@@ -547,7 +549,7 @@ export const layer = Layer.effect(
         instanceDirectory: directory,
       })
       if (session) {
-        yield* upsertFileSessionCache(session)
+        yield* ensureFileSessionCache(session)
         return {
           type: "found",
           directory: session.directory,
