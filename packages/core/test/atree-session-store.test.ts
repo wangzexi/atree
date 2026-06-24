@@ -1767,6 +1767,87 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("does not resolve an unscoped file-backed message when copied sessions make the message id ambiguous", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-copy-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-copy-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = "ses_core_store_message_copy"
+      const messageID = "msg_core_store_message_copy"
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source copied message",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target copied message",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 50 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_message_copy_source",
+              messageID,
+              type: "text",
+              text: "source copied message",
+            },
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 60 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_message_copy_target",
+              messageID,
+              type: "text",
+              text: "target copied message",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      const result = yield* store.message(SessionMessage.ID.make(messageID))
+      expect(result).toBeUndefined()
+    }),
+  )
+
   storeIt.effect("prefers file-backed messages over stale SQLite message rows", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-message-data-")))
