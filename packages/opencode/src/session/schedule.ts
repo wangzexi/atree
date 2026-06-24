@@ -752,7 +752,41 @@ export const layer = Layer.effect(
         yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
         return { type: "stale", directory: location.directory } as const
       }
-      return { type: "found", directory: location.directory } as const
+      const existingRow = yield* db
+        .select({ id: ScheduleTable.id, kind: ScheduleTable.kind, expression: ScheduleTable.expression, run_at: ScheduleTable.run_at, message: ScheduleTable.message, created_at: ScheduleTable.created_at })
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
+      const needsRefresh =
+        !existingRow ||
+        (existingRow.kind ?? "recurring") !== schedule.kind ||
+        existingRow.expression !== schedule.expression ||
+        (existingRow.run_at ?? null) !== schedule.runAt ||
+        existingRow.message !== schedule.message ||
+        existingRow.created_at !== schedule.createdAt
+      if (needsRefresh) {
+        yield* db.delete(ScheduleRunTable).where(eq(ScheduleRunTable.schedule_id, scheduleID)).run().pipe(Effect.orDie)
+        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
+        yield* db
+          .transaction((tx) =>
+            tx
+              .insert(ScheduleTable)
+              .values({
+                id: scheduleID,
+                session_id: sessionID,
+                kind: schedule.kind,
+                expression: schedule.expression,
+                run_at: schedule.runAt,
+                message: schedule.message,
+                created_at: schedule.createdAt,
+              })
+              .run(),
+          )
+          .pipe(Effect.orDie)
+        yield* restoreStoredRun(schedule)
+      }
+      return { type: "found", directory: location.directory, schedule } as const
     })
 
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
@@ -788,7 +822,6 @@ export const layer = Layer.effect(
       if (!row) return
       const sessionID = row.session_id as SessionID
       const kind = (row.kind ?? "recurring") as Kind
-      const message = row.message
       const timerDirectory = timers.get(scheduleID)?.directory
       const scheduleState = yield* ensureScheduleStillExists(scheduleID, sessionID, timerDirectory)
       if (scheduleState.type === "missing" || scheduleState.type === "stale") return
@@ -800,12 +833,13 @@ export const layer = Layer.effect(
         }
         return
       }
+      const schedule = scheduleState.schedule
       yield* events.publish(
         Event.Triggered,
         {
           scheduleID,
           sessionID,
-          message,
+          message: schedule.message,
         },
         scheduleLocation(directoryHint),
       )
@@ -841,7 +875,7 @@ export const layer = Layer.effect(
           parts: [
             {
               type: "text",
-              text: message,
+              text: schedule.message,
               metadata: { source: "schedule", scheduleId: scheduleID },
             },
           ],
@@ -937,12 +971,13 @@ export const layer = Layer.effect(
         yield* clearArchivedScheduleState(sessionID, scheduleState.directory)
         return
       }
+      const schedule = scheduleState.schedule
       yield* events.publish(
         Event.Triggered,
         {
           scheduleID,
           sessionID,
-          message: row.message,
+          message: schedule.message,
         },
         scheduleLocation(scheduleState.directory),
       )
@@ -1077,7 +1112,8 @@ export const layer = Layer.effect(
         yield* clearArchivedScheduleState(sessionID, scheduleState.directory)
         continue
       }
-      const kind = (row.kind ?? "recurring") as Kind
+      const schedule = scheduleState.schedule
+      const kind = schedule.kind
       if (kind === "once") {
         const lastRun = yield* getLastRun(id)
         if (lastRun) {
@@ -1089,8 +1125,8 @@ export const layer = Layer.effect(
         id,
         sessionID,
         kind,
-        row.expression,
-        row.run_at ?? null,
+        schedule.expression,
+        schedule.runAt,
         serviceBridge,
         scheduleState.directory,
       )
