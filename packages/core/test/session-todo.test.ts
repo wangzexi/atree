@@ -297,7 +297,7 @@ describe("SessionTodo", () => {
     }),
   )
 
-  it.effect("prefers todo state from the persisted root copy over a still-valid SQLite directory row", () =>
+  it.effect("does not resolve persisted-root todo state when copied session ids are ambiguous", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
         Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-todo-data-"))),
@@ -374,7 +374,7 @@ describe("SessionTodo", () => {
         }),
       )
 
-      expect(yield* todos.get(fileSessionID)).toEqual(targetTodos)
+      expect(yield* todos.get(fileSessionID)).toEqual([])
     }),
   )
 
