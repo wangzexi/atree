@@ -312,6 +312,79 @@ describe("ToolOutputStore", () => {
     ),
   )
 
+  it.live("does not bypass SessionStore miss by scanning the persisted root directly", () =>
+    Effect.acquireUseRelease(
+      Effect.all({
+        data: Effect.promise(() => tmpdir()),
+        root: Effect.promise(() => tmpdir()),
+      }),
+      ({ data, root }) =>
+        Effect.gen(function* () {
+          const directory = path.join(root.path, "node")
+          const previousData = Global.Path.data
+          ;(Global.Path as { data: string }).data = data.path
+          yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+          yield* Effect.promise(() => mkdir(path.join(data.path, "atree"), { recursive: true }))
+          yield* Effect.promise(() =>
+            writeFile(
+              path.join(data.path, "atree", "state.json"),
+              JSON.stringify({ version: 1, rootDirectory: root.path, updatedAt: 1 }),
+            ),
+          )
+          yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              projectID: Project.ID.global,
+              title: "Directory-only tool output",
+              location: { directory: AbsolutePath.make(directory) },
+              time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            }),
+          )
+
+          const sessions = Layer.succeed(
+            SessionStore.Service,
+            SessionStore.Service.of({
+              get: () => Effect.succeed(undefined),
+              context: () => Effect.succeed([]),
+              runnerEntries: () => Effect.succeed([]),
+              runnerContext: () => Effect.succeed([]),
+              message: () => Effect.succeed(undefined),
+              hasPendingInput: () => Effect.succeed(undefined),
+              promoteInputs: () => Effect.succeed(undefined),
+            }),
+          )
+          const storeLayer = ToolOutputStore.layer.pipe(
+            Layer.provide(FSUtil.defaultLayer),
+            Layer.provide(Global.layerWith({ data: data.path })),
+            Layer.provide(sessions),
+          )
+          const result = yield* Effect.gen(function* () {
+            const store = yield* ToolOutputStore.Service
+            return yield* store.bound({
+              sessionID,
+              toolCallID: "call-session-store-miss",
+              output: { structured: {}, content: [{ type: "text", text: "m".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
+            })
+          }).pipe(Effect.provide(storeLayer))
+
+          expect(result.outputPaths).toEqual([])
+          expect(result.output.content[0]).toMatchObject({
+            type: "text",
+            text: expect.stringContaining("no session asset store available"),
+          })
+        }),
+      ({ data, root }) =>
+        Effect.all([
+          Effect.promise(() => data[Symbol.asyncDispose]()),
+          Effect.promise(() => root[Symbol.asyncDispose]()),
+        ]).pipe(Effect.ignore),
+    ),
+  )
+
   it.live("stores oversized output in the explicit directory when session ids overlap", () =>
     Effect.acquireUseRelease(
       Effect.all({

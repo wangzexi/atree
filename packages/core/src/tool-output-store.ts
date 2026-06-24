@@ -144,24 +144,23 @@ export const layer = Layer.effect(
           MANAGED_DIRECTORY,
         )
       }
-      const session = Option.isSome(sessions)
-        ? yield* sessions.value.get(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
-        : undefined
-      const cachedFileSession = session
-        ? yield* Effect.promise(() => readSessionStore(session.location.directory, sessionID)).pipe(
-            Effect.catchCause(() => Effect.succeed(undefined)),
-          )
-        : undefined
-      const root = cachedFileSession
-        ? undefined
-        : yield* Effect.promise(() => readWorkspaceRoot()).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
-      const fileSession =
-        cachedFileSession ??
-        (root
-          ? yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+      const fileSession = Option.isSome(sessions)
+        ? yield* Effect.gen(function* () {
+            const session = yield* sessions.value.get(sessionID).pipe(Effect.catch(() => Effect.succeed(undefined)))
+            if (!session) return undefined
+            return yield* Effect.promise(() => readSessionStore(session.location.directory, sessionID)).pipe(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
-          : undefined)
+          })
+        : yield* Effect.gen(function* () {
+            const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+            if (!root) return undefined
+            return yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
+              Effect.catchCause(() => Effect.succeed(undefined)),
+            )
+          })
       if (!fileSession) return
       yield* Effect.promise(() => ensureSessionPayloadFilesByID(fileSession.location.directory, sessionID))
       return path.join(fileSession.location.directory, ".agents", "atree", "sessions", sessionID, "assets", MANAGED_DIRECTORY)
