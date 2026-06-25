@@ -3,7 +3,7 @@ export * as SessionContextEpoch from "./context-epoch"
 import { and, eq, isNull, lt, or, sql } from "drizzle-orm"
 import { DateTime, Effect, Schema } from "effect"
 import { AgentV2 } from "../agent"
-import { readSessionPromptStatesByID, readSessionStore } from "../atree/session-store"
+import { readSessionPromptStatesByID, readSessionStore, readSessionStoresDeep } from "../atree/session-store"
 import type { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { Location } from "../location"
@@ -194,6 +194,7 @@ export const requestReplacement = Effect.fn("SessionContextEpoch.requestReplacem
   seq: number,
   location?: Location.Ref,
 ) {
+  if (!location && (yield* hasCopiedFileSessionAmbiguity(db, sessionID))) return 0
   if (location) {
     const placed = yield* db
       .select({
@@ -218,6 +219,37 @@ export const requestReplacement = Effect.fn("SessionContextEpoch.requestReplacem
     )
     .run()
     .pipe(Effect.orDie)
+})
+
+const hasCopiedFileSessionAmbiguity = Effect.fnUntraced(function* (db: DatabaseService, sessionID: SessionSchema.ID) {
+  const placed = yield* db
+    .select({
+      directory: SessionTable.directory,
+      projectID: SessionTable.project_id,
+    })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, sessionID))
+    .get()
+    .pipe(Effect.orDie)
+  if (!placed?.directory) return false
+  const current = yield* Effect.promise(() => readSessionStore(placed.directory, sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(undefined)),
+  )
+  if (!current) return false
+  const project = yield* db
+    .select({ worktree: ProjectTable.worktree })
+    .from(ProjectTable)
+    .where(eq(ProjectTable.id, placed.projectID))
+    .get()
+    .pipe(Effect.orDie)
+  if (!project?.worktree) return false
+  const sessions = yield* Effect.promise(() => readSessionStoresDeep(project.worktree)).pipe(
+    Effect.catchCause(() => Effect.succeed([])),
+  )
+  const directories = new Set(
+    sessions.filter((session) => session.id === sessionID).map((session) => session.location.directory),
+  )
+  return directories.size > 1
 })
 
 export const reset = Effect.fn("SessionContextEpoch.reset")(function* (
