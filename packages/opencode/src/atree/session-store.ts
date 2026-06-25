@@ -1398,9 +1398,17 @@ export async function findSessionStore(rootDirectory: string, sessionID: Session
 }
 
 export async function findWorkspaceSessionStore(sessionID: SessionID) {
-  const rootDirectory = await readWorkspaceRootDirectory()
-  if (!rootDirectory) return undefined
-  return findSessionStore(rootDirectory, sessionID)
+  const sessions = await readWorkspaceSessionStoresDeep()
+  let found: SessionInfo | undefined
+  for (const session of sessions) {
+    if (session.id !== sessionID) continue
+    if (!found) {
+      found = session
+      continue
+    }
+    if (found.directory !== session.directory) return undefined
+  }
+  return found
 }
 
 export async function readWorkspaceSessionStoresDeep() {
