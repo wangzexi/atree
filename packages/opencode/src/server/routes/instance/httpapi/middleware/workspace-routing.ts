@@ -179,7 +179,11 @@ function planRequest(
     }
 
     if (workspace !== undefined && !envWorkspaceID && !shouldStayOnControlPlane(request, url)) {
-      return yield* planWorkspaceRequest(request, url, workspace)
+      const target = yield* resolveTarget(workspace)
+      if (target.type === "remote") return RequestPlan.Remote({ request, workspace, target, url })
+      // For local workspace: the session owns its directory; workspace target is just workspace storage.
+      const directory = session?.directory || target.directory
+      return RequestPlan.Local({ directory, workspaceID: workspace.id })
     }
 
     return RequestPlan.Local({

@@ -1742,6 +1742,8 @@ describe("session HttpApi", () => {
           headers: { "x-opencode-directory": test.directory, "content-type": "application/json" },
           body: JSON.stringify({ title: "workspace session" }),
         })
+        // Set workspace root so workspace-wide scan can find the session
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
         const messages = yield* request(
           `${pathFor(SessionPaths.messages, { sessionID: created.id })}?workspace=${workspace.id}`,
           {},
