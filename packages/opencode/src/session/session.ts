@@ -823,61 +823,18 @@ export const layer: Layer.Layer<
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: DirectoryOption) {
-      const byID = new Map<string, Info>()
       const ctx = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
-
-      if (options?.directory) {
-        const fileSessions = yield* Effect.promise(() => readSessionStores(options.directory!))
-        for (const fileSession of fileSessions) {
-          const item = localizeFileSession(fileSession, ctx)
-          if (item.time.archived !== undefined) continue
-          if (item.parentID === parentID) byID.set(item.id, item)
-        }
-        return [...byID.values()]
-      }
 
       const parent = yield* getWithDirectory(parentID, options?.directory).pipe(
         Effect.catchCause(() => Effect.succeed<Info | undefined>(undefined)),
       )
       if (!parent) return []
-      const rows = yield* db
-        .select()
-        .from(SessionTable)
-        .where(and(eq(SessionTable.parent_id, parentID)))
-        .all()
-        .pipe(Effect.orDie)
-      const directory =
-        parent.directory ??
-        options?.directory ??
-        ctx?.directory ??
-        (yield* InstanceState.directory.pipe(Effect.catchCause(() => Effect.succeed<string | undefined>(undefined))))
-      if (directory) {
-        const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
-        const fileIDs = new Set(fileSessions.map((item) => item.id))
-        for (const row of rows) {
-          const item = fromRow(row)
-          if (!fileIDs.has(item.id)) continue
-          if (item.time.archived !== undefined) continue
-          byID.set(item.id, item)
-        }
-        for (const fileSession of fileSessions) {
-          const item = localizeFileSession(fileSession, ctx)
-          byID.delete(item.id)
-          if (item.parentID !== parentID) continue
-          if (item.time.archived !== undefined) continue
-          byID.set(item.id, item)
-        }
-      } else {
-        for (const row of rows) {
-          const item = fromRow(row)
-          if (item.time.archived !== undefined) continue
-          byID.set(item.id, item)
-        }
-      }
-
-      return [...byID.values()]
+      const fileSessions = yield* Effect.promise(() => readSessionStores(parent.directory))
+      return fileSessions
+        .map((fileSession) => localizeFileSession(fileSession, ctx))
+        .filter((item) => item.parentID === parentID && item.time.archived === undefined)
     })
 
     const remove: Interface["remove"] = Effect.fnUntraced(function* (sessionID: SessionID, options?: DirectoryOption) {

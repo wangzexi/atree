@@ -68,6 +68,7 @@
 - opencode 的 once schedule 完成态判断也已经切到目录投影：启动恢复、`cleanupCompletedOnceForSession()` 和单次 schedule hydration 都只认目录里的 `lastRanAt/lastRunStatus`，不会再因为旧 `ScheduleRunTable` 记录把还没真正执行过的目录 schedule 提前删掉。与此同时，fresh SQLite 基线 schema 也已补齐 `schedule/schedule_run`，保证内存库和新库行为一致。
 - opencode 的 `Session` 服务也已经把 file-backed session cache sync 收紧为“只补缺失、不覆盖旧行”：`session.get`、消息事件追加和普通 patch 不再因为解析到 copied target 会话就把 `SessionTable.directory` 改写到目标目录。显式 session patch 仍会通过现有 projector 更新运行投影；同时修正了 unarchive 时 `SessionTable.time_archived` 会残留旧值的问题。
 - opencode 的 `Session.get` 主读链路现在也不再把 `SessionTable` 里的 metadata/summary/workspace/path/revert/permission 合并回目录会话；目录里的 `meta.yaml + session.jsonl` 是唯一读取结果，读取本身也不再顺手重建 `SessionTable` 行。
+- opencode 的 `Session.children` 也已经切到纯目录事实源：父子会话关系直接从同目录 `.agents/atree/sessions/*/meta.yaml` 里的 `parentID` 推导，不再依赖 `SessionTable.parent_id` 缓存行决定子会话归属。
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。

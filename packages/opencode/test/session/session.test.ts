@@ -781,6 +781,32 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("lists file-backed children without SQLite cache rows", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const parent = yield* Effect.acquireRelease(session.create({ title: "file-child-no-cache-parent" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+      const child = yield* Effect.acquireRelease(
+        session.create({ parentID: parent.id, title: "file-child-no-cache-child" }),
+        (created) => session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, child.id)).run().pipe(Effect.orDie)
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, parent.id)).run().pipe(Effect.orDie)
+
+      const children = yield* session.children(parent.id)
+      expect(children).toHaveLength(1)
+      expect(children[0]).toMatchObject({
+        id: child.id,
+        parentID: parent.id,
+        directory: parent.directory,
+        title: "file-child-no-cache-child",
+      })
+    }),
+  )
+
   it.instance("prefers session.jsonl removals over stale cached messages when finding messages", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
