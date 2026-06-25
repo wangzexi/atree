@@ -156,7 +156,7 @@ export const layer = Layer.effect(
     ) {
       const session = directory
         ? yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
-            Effect.catchCause(() => sessions.get(sessionID)),
+            Effect.catchCause(() => Effect.succeed(undefined)),
           )
         : yield* sessions.get(sessionID)
       return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "question event")

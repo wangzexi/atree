@@ -366,6 +366,67 @@ describe("QuestionV2 atree state", () => {
     }),
   )
 
+  it.effect("does not fall through to another copied session when an explicit question directory is missing", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-question-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_question_missing_explicit")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: target,
+          sessionID,
+          title: "Question target",
+        }),
+      )
+
+      const service = yield* QuestionV2.Service
+      const fiber = yield* service
+        .ask({
+          sessionID,
+          directory: source,
+          questions: [
+            {
+              question: "Should not leak into target?",
+              header: "Missing",
+              options: [{ label: "No", description: "Do not append elsewhere" }],
+            },
+          ],
+        })
+        .pipe(Effect.forkScoped)
+
+      const pending = yield* service.list()
+      expect(pending).toHaveLength(1)
+      const requestID = pending[0]?.id
+      if (requestID) yield* service.reject(requestID as QuestionV2.ID)
+      const exit = yield* Fiber.await(fiber)
+      expect(Exit.isFailure(exit)).toBe(true)
+
+      const targetRaw = yield* Effect.promise(() =>
+        readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8").catch(
+          () => "",
+        ),
+      )
+      expect(targetRaw).not.toContain("question.v2.asked")
+      expect(targetRaw).not.toContain("question.v2.replied")
+      expect(targetRaw).not.toContain("question.v2.rejected")
+    }),
+  )
+
   it.effect("does not reject restored pending questions when the service scope closes", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(

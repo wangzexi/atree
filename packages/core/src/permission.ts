@@ -173,7 +173,7 @@ export const layer = Layer.effect(
     ) {
       const session = directory
         ? yield* EffectRuntime.promise(() => readSessionStore(directory, sessionID)).pipe(
-            EffectRuntime.catchCause(() => sessions.get(sessionID)),
+            EffectRuntime.catchCause(() => EffectRuntime.succeed(undefined)),
           )
         : yield* sessions.get(sessionID)
       return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "permission event")
@@ -219,8 +219,8 @@ export const layer = Layer.effect(
       directory?: string,
     ) {
       const session = directory
-        ? yield* EffectRuntime.promise(() => readSessionStore(directory, sessionID)).pipe(
-            EffectRuntime.catchCause(() => sessions.get(sessionID)),
+        ? yield* sessions.get(sessionID, { directory }).pipe(
+            EffectRuntime.catchCause(() => EffectRuntime.succeed(undefined)),
           )
         : yield* sessions.get(sessionID)
       if (!session) return yield* new SessionV2.NotFoundError({ sessionID })
