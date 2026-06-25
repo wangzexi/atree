@@ -815,24 +815,14 @@ export const layer: Layer.Layer<
       const sessions = [...byID.values()]
         .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
         .slice(0, input?.limit ?? 100)
-      const ids = [...new Set(sessions.map((row) => row.projectID))]
-      const projects = new Map<string, ProjectInfo>()
-      if (ids.length > 0) {
-        const items = yield* db
-          .select({ id: ProjectTable.id, name: ProjectTable.name, worktree: ProjectTable.worktree })
-          .from(ProjectTable)
-          .where(inArray(ProjectTable.id, ids))
-          .all()
-          .pipe(Effect.orDie)
-        for (const item of items) {
-          projects.set(item.id, {
-            id: item.id,
-            name: item.name ?? undefined,
-            worktree: item.worktree,
-          })
-        }
-      }
-      return sessions.map((session) => ({ ...session, project: projects.get(session.projectID) ?? null }))
+      return sessions.map((session) => ({
+        ...session,
+        project: {
+          id: session.projectID,
+          name: undefined,
+          worktree: session.directory,
+        } satisfies ProjectInfo,
+      }))
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: DirectoryOption) {

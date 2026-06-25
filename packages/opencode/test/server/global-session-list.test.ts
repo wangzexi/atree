@@ -9,11 +9,14 @@ import { testEffect } from "../lib/effect"
 import { writeSessionStore } from "@/atree/session-store"
 import { writeWorkspaceRoot } from "@/atree/state"
 import { InstanceState } from "@/effect/instance-state"
+import { Database } from "@opencode-ai/core/database/database"
+import { ProjectTable } from "@opencode-ai/core/project/sql"
+import { eq } from "drizzle-orm"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
 
-const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Project.defaultLayer, CrossSpawnSpawner.defaultLayer))
+const it = testEffect(Layer.mergeAll(SessionNs.defaultLayer, Project.defaultLayer, CrossSpawnSpawner.defaultLayer, Database.defaultLayer))
 const temps: string[] = []
 let previousData = Global.Path.data
 
@@ -183,6 +186,39 @@ describe("session.listGlobal", () => {
         const fileOnly = sessions.find((session) => String(session.id) === "ses_global_root_file_only")
         expect(fileOnly?.directory).toBe(test.directory)
         expect(fileOnly?.project?.id).toBe(ctx.project.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
+    "derives global file-backed project info without a ProjectTable row",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const { db } = yield* Database.Service
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_global_projectless_file",
+            slug: "global-projectless-file",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "Global projectless file",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 10, updated: Date.now() },
+          } as any),
+        )
+        yield* db.delete(ProjectTable).where(eq(ProjectTable.id, ctx.project.id)).run().pipe(Effect.orDie)
+
+        const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200 }))
+        const fileOnly = sessions.find((session) => String(session.id) === "ses_global_projectless_file")
+        expect(fileOnly?.project?.id).toBe(ctx.project.id)
+        expect(fileOnly?.project?.worktree).toBe(test.directory)
       }),
     { git: true },
   )
