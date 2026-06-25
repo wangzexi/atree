@@ -2555,6 +2555,111 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("reuses file-backed prompt lifecycle state when retrying an existing prompt", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_retry_state")
+      const messageID = SessionMessage.ID.make("msg_core_prompt_retry_state")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID,
+          title: "Core prompt retry state",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, sessionID, [
+          {
+            type: "session.next.prompt.admitted",
+            sessionID,
+            messageID,
+            timestamp: 40,
+            timeCreated: 30,
+            delivery: "queue",
+            prompt: { text: "already queued" },
+          },
+          {
+            type: "session.next.prompt.promoted",
+            sessionID,
+            messageID,
+            timestamp: 45,
+            timeCreated: 30,
+            prompt: { text: "already queued" },
+          },
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_prompt_retry_state",
+              messageID,
+              type: "text",
+              text: "already queued",
+            },
+          },
+        ]),
+      )
+
+      const { db } = yield* Database.Service
+      yield* db
+        .insert(ProjectTable)
+        .values({ id: Project.ID.global, worktree: AbsolutePath.make(node), sandboxes: [] })
+        .onConflictDoNothing()
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: Project.ID.global,
+          slug: "prompt-retry-state",
+          directory: AbsolutePath.make(node),
+          title: "Prompt retry state",
+          version: "test",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sessions = yield* SessionV2.Service
+      const admitted = yield* sessions.prompt({
+        sessionID,
+        id: messageID,
+        prompt: new Prompt({ text: "already queued" }),
+        resume: false,
+      })
+
+      expect(admitted).toMatchObject({
+        id: messageID,
+        delivery: "queue",
+        admittedSeq: 1,
+        promotedSeq: 2,
+      })
+      expect(DateTime.toEpochMillis(admitted.timeCreated)).toBe(30)
+      const inputRow = yield* db
+        .select({ id: SessionInputTable.id })
+        .from(SessionInputTable)
+        .where(eq(SessionInputTable.id, messageID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(inputRow).toBeUndefined()
+    }),
+  )
+
   it.effect("materializes v2 prompt files into file-backed session assets", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

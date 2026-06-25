@@ -35,6 +35,7 @@ import {
   appendPromptJsonl,
   readSessionJsonlEntries,
   readSessionJsonlMessages,
+  readSessionPromptStates,
   readSessionStore,
   readWorkspaceRoot,
   writeSessionStore,
@@ -577,6 +578,9 @@ export const layer = Layer.effect(
             if (existingFileMessage && (existingFileMessage.type !== "user" || !promptsMatch(input.prompt, existingFileMessage)))
               return yield* new PromptConflictError({ sessionID: input.sessionID, messageID })
             if (fileBacked) {
+              const promptStates = yield* Effect.promise(() => readSessionPromptStates(fileBacked)).pipe(
+                Effect.catchCause(() => Effect.succeed(new Map())),
+              )
               if (!existingFileMessage) {
                 const admitted = new SessionInput.Admitted({
                   admittedSeq: 0,
@@ -589,13 +593,21 @@ export const layer = Layer.effect(
                 yield* Effect.promise(() => appendPromptJsonl(session, admitted)).pipe(Effect.orDie)
                 return yield* returnPrompt(admitted)
               }
+              const existingState = promptStates.get(messageID)
+              const timeCreated: DateTime.Utc =
+                existingState?.timeCreated !== undefined
+                  ? (DateTime.makeUnsafe(existingState.timeCreated) as DateTime.Utc)
+                  : existingFileMessage
+                    ? (DateTime.makeUnsafe(DateTime.toEpochMillis(existingFileMessage.time.created)) as DateTime.Utc)
+                    : (yield* DateTime.now)
               const admitted = new SessionInput.Admitted({
-                admittedSeq: 0,
+                admittedSeq: existingState?.admittedSeq ?? 0,
                 id: messageID,
                 sessionID: input.sessionID,
                 prompt: input.prompt,
-                delivery: input.delivery ?? "steer",
-                timeCreated: existingFileMessage?.time.created ?? (yield* DateTime.now),
+                delivery: input.delivery ?? existingState?.delivery ?? "steer",
+                timeCreated,
+                ...(existingState?.promotedSeq === undefined ? {} : { promotedSeq: existingState.promotedSeq }),
               })
               return yield* returnPrompt(admitted)
             }
