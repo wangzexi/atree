@@ -1,11 +1,13 @@
 export * as SessionStore from "./store"
 
-import { Context, Effect, Layer } from "effect"
+import { Context, Effect, Layer, Option } from "effect"
 import { MessageDecodeError } from "./error"
 import { SessionInput } from "./input"
 import { SessionMessage } from "./message"
 import { SessionSchema } from "./schema"
+import { Location } from "../location"
 import {
+  findSessionJsonlMessage,
   findWorkspaceSessionJsonlMessage,
   findWorkspaceSessionStore,
   findSessionStore,
@@ -14,6 +16,7 @@ import {
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
+  readSessionStoresDeep,
   readWorkspaceSessionStoresDeep,
 } from "../atree/session-store"
 
@@ -61,6 +64,12 @@ export class Service extends Context.Service<Service, Interface>()("@opencode/v2
 export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
+    const initialLocation = yield* Effect.serviceOption(Location.Service)
+    const initialDirectory = Option.getOrUndefined(initialLocation)?.directory
+    const currentDirectory = Effect.gen(function* () {
+      const location = yield* Effect.serviceOption(Location.Service)
+      return Option.getOrUndefined(location)?.directory ?? initialDirectory
+    })
     const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (
       sessionID: SessionSchema.ID,
       directory?: string,
@@ -74,6 +83,16 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
       }
+      const localDirectory = yield* currentDirectory
+      if (localDirectory) {
+        const localSession = yield* Effect.promise(() => readSessionStore(localDirectory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (localSession) return localSession
+        return yield* Effect.promise(() => findSessionStore(localDirectory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+      }
       return yield* Effect.promise(() => findWorkspaceSessionStore(sessionID)).pipe(
         Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
       )
@@ -82,6 +101,21 @@ export const layer = Layer.effect(
     const findFileBackedMessage = Effect.fn("SessionStore.findFileBackedMessage")(function* (
       messageID: SessionMessage.ID,
     ) {
+      const localDirectory = yield* currentDirectory
+      if (localDirectory) {
+        const local = yield* Effect.promise(() => findSessionJsonlMessage(localDirectory, messageID)).pipe(
+          Effect.catchCause(() =>
+            Effect.succeed<
+              | {
+                  session: SessionSchema.Info
+                  message: SessionMessage.Message
+                }
+              | undefined
+            >(undefined),
+          ),
+        )
+        if (local) return { sessionID: local.session.id, message: local.message }
+      }
       const found = yield* Effect.promise(() => findWorkspaceSessionJsonlMessage(messageID)).pipe(
         Effect.catchCause(() =>
           Effect.succeed<
@@ -100,6 +134,12 @@ export const layer = Layer.effect(
       const directory = options?.directory
       if (directory) {
         return yield* Effect.promise(() => readSessionStores(directory)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+        )
+      }
+      const localDirectory = yield* currentDirectory
+      if (localDirectory) {
+        return yield* Effect.promise(() => readSessionStoresDeep(localDirectory)).pipe(
           Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
         )
       }

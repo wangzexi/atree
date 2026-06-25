@@ -1539,6 +1539,115 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("prefers the current Location directory over persisted root copies for unscoped SessionStore reads", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-location-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-location-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_location_scoped")
+      const messageID = SessionMessage.ID.make("msg_core_store_location_scoped")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source current location session",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target current location session",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 50 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_location_source",
+              messageID,
+              type: "text",
+              text: "source current location context",
+            },
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 60 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_location_target",
+              messageID,
+              type: "text",
+              text: "target current location context",
+            },
+          },
+        ]),
+      )
+
+      const location = Location.Service.of({
+        directory: AbsolutePath.make(target),
+        project: { id: Project.ID.global, directory: AbsolutePath.make(target) },
+      })
+      const scopedStore = SessionStore.layer.pipe(Layer.provide(database))
+
+      const result = yield* Effect.gen(function* () {
+        const store = yield* SessionStore.Service
+        return {
+          listed: yield* store.list(),
+          session: yield* store.get(sessionID),
+          context: yield* store.context(sessionID),
+          runner: yield* store.runnerContext(sessionID, 0),
+          message: yield* store.message(messageID),
+        }
+      })
+        .pipe(Effect.provide(scopedStore))
+        .pipe(Effect.provideService(Location.Service, location))
+
+      expect(result.listed.map((item) => path.resolve(item.location.directory))).toEqual([
+        path.resolve(yield* Effect.promise(() => realpath(target))),
+      ])
+      expect(result.session?.title).toBe("Target current location session")
+      expect(result.context.map((message) => message.id)).toEqual([messageID])
+      expect(result.runner.map((message) => message.id)).toEqual([messageID])
+      expect(result.message?.sessionID).toBe(sessionID)
+      expect(result.message?.message).toMatchObject({
+        id: messageID,
+        type: "user",
+        text: "target current location context",
+      })
+    }),
+  )
+
   storeIt.effect("does not resolve a cached child session from explicit directories without file stores", () =>
     Effect.gen(function* () {
       const parent = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-parent-")))

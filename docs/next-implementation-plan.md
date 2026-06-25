@@ -86,6 +86,7 @@
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。
 - core 的 `SessionStore` 现在开始承担目录会话列表读取，`V2Session.list` 不再自己直接读 persisted root / deep session store；会话发现规则继续收口到同一层。
+- core 的 `SessionStore` 对“无显式目录”的解析也继续收紧到当前 `Location` 作用域：只要调用链已经带着当前目录，它的 `list/get/context/runnerContext/message` 就会优先读取该目录树下的 file-backed session / message，不再把 persisted root 下的 copied sibling 会话混进当前目录结果里。
 - core 的 persisted root 深度扫描入口也继续收口：`SessionStore.list`、`QuestionV2`、`PermissionV2` 现在共享 `readWorkspaceSessionStoresDeep()`，不再各自重复拼 `readWorkspaceRoot() + readSessionStoresDeep()`。
 - core `SessionStore.get/message` 对 persisted root 的未限定查找也开始共用 `atree/session-store` helper 了，不再在 store 层各自手写 `readWorkspaceRoot() + find*` 组合。
 - opencode `resolveFileSession(...)` 对 persisted root 的未限定查找也同步收口到 `atree/session-store` helper，不再在 resolver 里自己手写 `readWorkspaceState() + findSessionStore(...)`。
