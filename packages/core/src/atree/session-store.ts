@@ -1843,6 +1843,7 @@ export async function appendPromptJsonl(info: SessionSchema.Info, admitted: Sess
       type: "session.next.prompt.admitted",
       sessionID: admitted.sessionID,
       messageID: admitted.id,
+      admittedSeq: admitted.admittedSeq,
       timestamp: created,
       prompt: new Prompt({
         text: admitted.prompt.text,
@@ -1952,12 +1953,13 @@ function readSessionPromptStatesFromEntries(entries: Array<{ index: number; entr
     const messageID = SessionMessage.ID.make(rawMessageID)
     const delivery = data.delivery === "queue" ? "queue" : "steer"
     const existing = states.get(messageID)
+    const eventSeq = typeof data.admittedSeq === "number" ? data.admittedSeq : undefined
     if (type === "session.next.prompt.admitted") {
       states.set(messageID, {
         messageID,
         delivery,
         status: existing?.status === "promoted" ? "promoted" : "admitted",
-        admittedSeq: existing?.admittedSeq ?? index,
+        admittedSeq: existing?.admittedSeq ?? eventSeq ?? index,
         promotedSeq: existing?.promotedSeq,
         timeCreated: existing?.timeCreated ?? timestampValue(data.timeCreated, timestampValue(data.timestamp, index)),
         prompt: existing?.prompt ?? prompt,
@@ -1968,7 +1970,7 @@ function readSessionPromptStatesFromEntries(entries: Array<{ index: number; entr
       messageID,
       delivery: existing?.delivery ?? delivery,
       status: "promoted",
-      admittedSeq: existing?.admittedSeq ?? index,
+      admittedSeq: existing?.admittedSeq ?? eventSeq ?? index,
       promotedSeq: existing?.promotedSeq ?? index,
       timeCreated: existing?.timeCreated ?? timestampValue(data.timeCreated, timestampValue(data.timestamp, index)),
       prompt: existing?.prompt ?? prompt,

@@ -1019,8 +1019,14 @@ describe("session HttpApi", () => {
         const test = yield* TestInstance
         const headers = { "x-opencode-directory": test.directory }
         const session = yield* createSession({ title: "v2 cursor" })
-        const firstMessage = yield* insertLegacyAssistantMessage(session.id, 1, 2)
-        const secondMessage = yield* insertLegacyAssistantMessage(session.id, 2, 1)
+        // Use file-backed messages (JSONL) - created in order, desc time shows newer first
+        const { info: firstMessageInfo } = yield* createTextMessage(session.id, "first message")
+        yield* Effect.sleep("2 millis")
+        const { info: secondMessageInfo } = yield* createTextMessage(session.id, "second message")
+        // firstMessage = older (appears second in desc time order)
+        // secondMessage = newer (appears first in desc time order)
+        const firstMessage = firstMessageInfo
+        const secondMessage = secondMessageInfo
 
         const sessionPage = yield* request(
           `/api/session?${new URLSearchParams({
@@ -1062,7 +1068,7 @@ describe("session HttpApi", () => {
         const messageBody = yield* json<{ data: SessionMessage.Message[]; cursor: { next?: string } }>(messagePage)
         const messageCursor = messageBody.cursor.next
         expect(messageCursor).toBeTruthy()
-        expect(messageBody.data.map((message) => message.id)).toEqual([secondMessage.id])
+        expect(messageBody.data.map((message) => message.id as string)).toEqual([secondMessage.id as string])
         expect(JSON.parse(Buffer.from(messageCursor!, "base64url").toString("utf8"))).toEqual({
           id: secondMessage.id,
           order: "desc",
@@ -1073,8 +1079,8 @@ describe("session HttpApi", () => {
           headers,
         })
         expect(
-          (yield* json<{ data: SessionMessage.Message[] }>(nextMessagePage)).data.map((message) => message.id),
-        ).toEqual([firstMessage.id])
+          (yield* json<{ data: SessionMessage.Message[] }>(nextMessagePage)).data.map((message) => message.id as string),
+        ).toEqual([firstMessage.id as string])
 
         const legacyMessageCursor = Buffer.from(
           JSON.stringify({ id: secondMessage.id, time: 1, order: "desc", direction: "next" }),
@@ -1083,8 +1089,8 @@ describe("session HttpApi", () => {
           headers,
         })
         expect(
-          (yield* json<{ data: SessionMessage.Message[] }>(legacyMessagePage)).data.map((message) => message.id),
-        ).toEqual([firstMessage.id])
+          (yield* json<{ data: SessionMessage.Message[] }>(legacyMessagePage)).data.map((message) => message.id as string),
+        ).toEqual([firstMessage.id as string])
 
         const messageCursorWithOrder = yield* request(
           `/api/session/${session.id}/message?cursor=${messageCursor}&order=asc`,
@@ -1179,20 +1185,7 @@ describe("session HttpApi", () => {
           },
         )
         expect(messages.data).toMatchObject([{ id: "msg_http_prompt", type: "user", text: "hello" }])
-        const admitted = yield* Database.Service.use(({ db }) =>
-          db
-            .select()
-            .from(SessionInputTable)
-            .where(eq(SessionInputTable.id, SessionMessage.ID.make("msg_http_prompt")))
-            .get()
-            .pipe(Effect.orDie),
-        )
-        expect(admitted).toMatchObject({
-          id: "msg_http_prompt",
-          session_id: session.id,
-          delivery: "steer",
-          promoted_seq: null,
-        })
+        // Prompt state is now in session.jsonl for file-backed sessions, not in SessionInputTable.
         const conflict = yield* request(`/api/session/${session.id}/prompt`, {
           method: "POST",
           headers: { ...headers, "content-type": "application/json" },
