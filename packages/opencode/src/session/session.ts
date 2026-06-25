@@ -27,7 +27,6 @@ import {
   writeSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
-import { readWorkspaceRootDirectory } from "@/atree/state"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -807,20 +806,12 @@ export const layer: Layer.Layer<
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
       const directoryInput = input?.directory ? input : undefined
-      const rootDirectory = directoryInput
-        ? undefined
-        : yield* Effect.promise(() => readWorkspaceRootDirectory()).pipe(
-            Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-          )
-      if (!directoryInput && !rootDirectory) return []
       const fileSessions = directoryInput
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
-        : rootDirectory
-          ? yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
-              Effect.catchCause(() => Effect.succeed([] as Info[])),
-            )
-          : undefined
-      const rootScopedFileIndex = !directoryInput && rootDirectory !== undefined && fileSessions !== undefined
+        : yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+            Effect.catchCause(() => Effect.succeed([] as Info[])),
+          )
+      const rootScopedFileIndex = !directoryInput
       const itemKey = (item: Pick<Info, "directory" | "id">) =>
         rootScopedFileIndex ? `${path.resolve(item.directory)}\n${item.id}` : item.id
       const byID = new Map<string, Info>()
