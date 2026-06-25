@@ -70,7 +70,9 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (fileSession) return fileSession
-        return undefined
+        return yield* Effect.promise(() => findSessionStore(directory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
       }
       const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
         Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),

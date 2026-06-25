@@ -258,6 +258,60 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("loads a nested file-backed session from an explicit root directory hint", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-nested-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-nested-root-")))
+      const nested = path.join(root, "projects", "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_nested_explicit")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: nested,
+          sessionID,
+          title: "Nested explicit root session",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(nested, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_store_nested_explicit",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_nested_explicit",
+              messageID: "msg_core_store_nested_explicit",
+              type: "text",
+              text: "nested explicit root context",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      const loaded = yield* store.get(sessionID, { directory: root })
+      expect(loaded?.title).toBe("Nested explicit root session")
+      expect(yield* Effect.promise(() => realpath(loaded?.location.directory ?? ""))).toBe(
+        yield* Effect.promise(() => realpath(nested)),
+      )
+      expect((yield* store.context(sessionID, { directory: root })).map((item) => String(item.id))).toEqual([
+        "msg_core_store_nested_explicit",
+      ])
+    }),
+  )
+
   it.effect("merges file-backed sessions into directory-scoped v2 lists", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

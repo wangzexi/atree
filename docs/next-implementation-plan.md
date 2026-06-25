@@ -490,6 +490,9 @@ Playwright 护栏
   - file-backed session 在未显式传 `directory` 时，会优先尝试当前 `Location.directory` 下的会话日志。
   - 一旦显式传了 `directory`，不会再回退到 persisted root 里的其他 copied 副本。
   - 这让交互型状态的写入与恢复都更符合“当前目录是边界，跨目录必须显式指定”的模型。
+- core `SessionStore` 的显式目录解析也继续与 opencode 对齐：
+  - `get/context/runnerContext/hasPendingInput/promoteInputs` 在显式传入目录时，若浅层 `readSessionStore(directory, sessionID)` 未命中，会把该目录当作根提示继续向下深搜 nested session。
+  - 这让 atree 根目录可以直接作为显式 session 解析入口，而不是只能命中“当前目录本身”的浅层会话。
 
 对应新增护栏测试：
 
@@ -501,6 +504,8 @@ Playwright 护栏
   - `does not restore ambiguous copied pending permissions across directories`
 - `packages/core/test/question-atree.test.ts`
   - `does not fall through to another copied session when an explicit question directory is missing`
+- `packages/core/test/atree-session-store.test.ts`
+  - `loads a nested file-backed session from an explicit root directory hint`
 
 ## 还剩的硬问题
 
