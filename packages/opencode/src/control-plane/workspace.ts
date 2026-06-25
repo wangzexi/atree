@@ -895,13 +895,9 @@ export const layer = Layer.effect(
         parentID: sessionInfo.parentID,
         directory: sessionInfo.directory,
       }))
-      const sessionKey = (sessionInfo: { id: SessionID; directory: string | null | undefined }) =>
-        `${sessionInfo.id}\n${sessionInfo.directory ?? ""}`
       const sessions = [
-        ...databaseSessions,
-        ...directorySessions.filter(
-          (sessionInfo) => !databaseSessions.some((existing) => sessionKey(existing) === sessionKey(sessionInfo)),
-        ),
+        ...directorySessions,
+        ...databaseSessions.filter((sessionInfo) => !directorySessions.some((existing) => existing.id === sessionInfo.id)),
       ]
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
       yield* Effect.forEach(

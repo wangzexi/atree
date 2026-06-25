@@ -843,6 +843,35 @@ describe("workspace CRUD", () => {
   )
 
   it.instance(
+    "remove prefers directory-backed workspace ownership over stale SQLite rows for the same session id",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const sessionSvc = yield* SessionNs.Service
+        const type = unique("remove-stale-copied")
+        const recorded = localAdapter(path.join(dir, "remove-stale-copied"))
+        const target = path.join(dir, "remove-stale-copied-target")
+        registerAdapter(instance.project.id, type, recorded.adapter)
+        const info = yield* workspace.create({ type, branch: null, projectID: instance.project.id, extra: null })
+        const source = yield* sessionSvc.create({ title: "source survives" })
+
+        yield* attachSessionToWorkspace(source.id, info.id)
+        yield* Effect.promise(() => fs.cp(path.join(dir, ".agents"), path.join(target, ".agents"), { recursive: true }))
+        yield* sessionSvc.setWorkspace({ sessionID: source.id, directory: target, workspaceID: info.id })
+
+        const removed = yield* workspace.remove(info.id)
+
+        expect(removed).toEqual(info)
+        expect(yield* Effect.promise(() => readSessionStore(target, source.id))).toBeUndefined()
+        expect((yield* Effect.promise(() => readSessionStore(dir, source.id)))?.title).toBe("source survives")
+      })
+    },
+    { git: true },
+  )
+
+  it.instance(
     "remove still deletes the row when the adapter cannot remove resources",
     () =>
       Effect.gen(function* () {
