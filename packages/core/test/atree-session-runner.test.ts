@@ -26,6 +26,7 @@ import { SessionMessage } from "@opencode-ai/core/session/message"
 import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionRunCoordinator } from "@opencode-ai/core/session/run-coordinator"
+import { SessionRunner } from "@opencode-ai/core/session/runner"
 import * as SessionRunnerLLM from "@opencode-ai/core/session/runner/llm"
 import { SessionRunnerModel } from "@opencode-ai/core/session/runner/model"
 import { SessionStore } from "@opencode-ai/core/session/store"
@@ -34,7 +35,7 @@ import { SystemContext } from "@opencode-ai/core/system-context"
 import { SystemContextRegistry } from "@opencode-ai/core/system-context/registry"
 import { ToolOutputStore } from "@opencode-ai/core/tool-output-store"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
-import { Effect, Layer, Schema, Stream } from "effect"
+import { Cause, Effect, Exit, Layer, Schema, Stream } from "effect"
 import { mkdtemp } from "node:fs/promises"
 import { access } from "node:fs/promises"
 import os from "node:os"
@@ -209,6 +210,104 @@ describe("atree SessionRunner", () => {
 
       expect(requests).toHaveLength(1)
       expect(userTexts(requests[0]!)).toEqual(["Start working"])
+    })
+      .pipe(Effect.scoped, Effect.provide(layer), Effect.runPromise)
+  })
+
+  test("does not resume a same-id session from another directory", async () => {
+    const currentDirectory = AbsolutePath.make(await mkdtemp(path.join(os.tmpdir(), "atree-runner-current-")))
+    const otherDirectory = AbsolutePath.make(await mkdtemp(path.join(os.tmpdir(), "atree-runner-other-")))
+    const location = Layer.effect(
+      Location.Service,
+      Effect.gen(function* () {
+        const project = yield* Project.Service
+        const resolved = yield* project.resolve(currentDirectory)
+        return Location.Service.of({
+          directory: currentDirectory,
+          project: { id: resolved.id, directory: resolved.directory },
+          vcs: resolved.vcs,
+        })
+      }),
+    ).pipe(Layer.provide(Project.defaultLayer))
+    const runner = SessionRunnerLLM.layer.pipe(
+      Layer.provide(database),
+      Layer.provide(store),
+      Layer.provide(events),
+      Layer.provide(client),
+      Layer.provide(registry),
+      Layer.provide(models),
+      Layer.provide(systemContext),
+      Layer.provide(location),
+      Layer.provide(agents),
+      Layer.provide(skillGuidance),
+      Layer.provide(referenceGuidance),
+      Layer.provide(config),
+    )
+    const coordinator = SessionRunCoordinator.layer.pipe(Layer.provide(runner))
+    const execution = Layer.effect(
+      SessionExecution.Service,
+      SessionRunCoordinator.Service.pipe(
+        Effect.map((coordinator) =>
+          SessionExecution.Service.of({
+            resume: coordinator.run,
+            wake: coordinator.wake,
+            interrupt: coordinator.interrupt,
+          }),
+        ),
+      ),
+    ).pipe(Layer.provide(coordinator))
+    const sessions = SessionV2.layer.pipe(
+      Layer.provide(events),
+      Layer.provide(database),
+      Layer.provide(store),
+      Layer.provide(Project.defaultLayer),
+      Layer.provide(execution),
+    )
+    const layer = Layer.mergeAll(
+      database,
+      events,
+      projector,
+      store,
+      client,
+      permission,
+      applications,
+      agents,
+      registry,
+      models,
+      systemContext,
+      location,
+      skillGuidance,
+      referenceGuidance,
+      config,
+      runner,
+      coordinator,
+      execution,
+      sessions,
+    )
+
+    await Effect.gen(function* () {
+      requests.length = 0
+      responses = [[LLMEvent.stepStart({ index: 0 }), LLMEvent.stepFinish({ index: 0, reason: "stop" }), LLMEvent.finish({ reason: "stop" })]]
+
+      const sessionService = yield* SessionV2.Service
+      const sessionID = SessionV2.ID.make("ses_atree_runner_other_directory")
+      const session = yield* sessionService.create({
+        id: sessionID,
+        location: Location.Ref.make({ directory: otherDirectory }),
+      })
+
+      yield* sessionService.prompt({
+        sessionID: session.id,
+        prompt: new Prompt({ text: "do not leak across directories" }),
+        resume: false,
+        directory: otherDirectory,
+      })
+
+      const runnerService = yield* SessionRunner.Service
+      const exit = yield* runnerService.run({ sessionID: session.id, force: true }).pipe(Effect.exit)
+
+      expect(Exit.isFailure(exit) && Cause.hasInterruptsOnly(exit.cause)).toBe(true)
+      expect(requests).toHaveLength(0)
     })
       .pipe(Effect.scoped, Effect.provide(layer), Effect.runPromise)
   })
