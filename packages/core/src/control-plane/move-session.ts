@@ -21,6 +21,7 @@ export type Destination = typeof Destination.Type
 
 export const Input = Schema.Struct({
   sessionID: SessionSchema.ID,
+  directory: Schema.optional(AbsolutePath),
   destination: Destination,
   moveChanges: Schema.optional(Schema.Boolean),
 }).annotate({ identifier: "MoveSession.Input" })
@@ -80,7 +81,7 @@ export const layer = Layer.effect(
     const session = yield* SessionV2.Service
 
     const moveSession = Effect.fn("MoveSession.moveSession")(function* (input: Input) {
-      const current = yield* session.get(input.sessionID)
+      const current = yield* session.get(input.sessionID, { directory: input.directory })
       const directory = AbsolutePath.make(input.destination.directory)
       if (sameDirectory(current.location.directory, directory)) return
 

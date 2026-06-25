@@ -2,7 +2,6 @@ import { describe, expect } from "bun:test"
 import { $ } from "bun"
 import fs from "fs/promises"
 import path from "path"
-import { eq } from "drizzle-orm"
 import { Effect, Layer } from "effect"
 import { MoveSession } from "@opencode-ai/core/control-plane/move-session"
 import { Database } from "@opencode-ai/core/database/database"
@@ -10,13 +9,11 @@ import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Git } from "@opencode-ai/core/git"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Project } from "@opencode-ai/core/project"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { ProjectDirectories } from "@opencode-ai/core/project/directories"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
-import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { tmpdir } from "./fixture/tmpdir"
 import { testEffect } from "./lib/effect"
@@ -85,31 +82,16 @@ describe("MoveSession", () => {
       yield* Effect.promise(() => fs.writeFile(path.join(source, "tracked.txt"), "changed\n"))
       yield* Effect.promise(() => fs.writeFile(path.join(source, "untracked.txt"), "new\n"))
 
-      const projectID = (yield* Project.Service.use((service) => service.resolve(source))).id
       const sessionID = SessionV2.ID.make("ses_move")
-      const { db } = yield* Database.Service
-      yield* db
-        .insert(ProjectTable)
-        .values({ id: projectID, worktree: source, sandboxes: [], time_created: 1, time_updated: 1 })
-        .run()
-        .pipe(Effect.orDie)
-      yield* db
-        .insert(SessionTable)
-        .values({
+      yield* SessionV2.Service.use((service) =>
+        service.create({
           id: sessionID,
-          project_id: projectID,
-          slug: "move",
-          directory: source,
-          title: "move",
-          version: "test",
-          time_created: 1,
-          time_updated: 1,
-        })
-        .run()
-        .pipe(Effect.orDie)
+          location: { directory: source },
+        }),
+      )
 
       yield* MoveSession.Service.use((service) =>
-        service.moveSession({ sessionID, destination: { directory: moved }, moveChanges: true }),
+        service.moveSession({ sessionID, directory: source, destination: { directory: moved }, moveChanges: true }),
       )
 
       expect(yield* Effect.promise(() => fs.readFile(path.join(moved, "tracked.txt"), "utf8"))).toBe("changed\n")
@@ -117,12 +99,8 @@ describe("MoveSession", () => {
       expect(yield* Effect.promise(() => fs.readFile(path.join(source, "tracked.txt"), "utf8"))).toBe("initial\n")
       expect(yield* Effect.promise(() => Bun.file(path.join(source, "untracked.txt")).exists())).toBe(false)
       expect(
-        yield* db
-          .select({ directory: SessionTable.directory, path: SessionTable.path })
-          .from(SessionTable)
-          .where(eq(SessionTable.id, sessionID))
-          .get(),
-      ).toEqual({ directory: moved, path: "" })
+        yield* SessionV2.Service.use((service) => service.get(sessionID, { directory: moved })),
+      ).toMatchObject({ location: { directory: moved } })
     }),
   )
 
@@ -139,42 +117,28 @@ describe("MoveSession", () => {
       yield* Effect.promise(() => fs.writeFile(path.join(source, "tracked.txt"), "changed\n"))
       yield* Effect.promise(() => fs.writeFile(path.join(source, "untracked.txt"), "new\n"))
 
-      const projectID = (yield* Project.Service.use((service) => service.resolve(source))).id
       const sessionID = SessionV2.ID.make("ses_move_nested")
-      const { db } = yield* Database.Service
-      yield* db
-        .insert(ProjectTable)
-        .values({ id: projectID, worktree: source, sandboxes: [], time_created: 1, time_updated: 1 })
-        .run()
-        .pipe(Effect.orDie)
-      yield* db
-        .insert(SessionTable)
-        .values({
+      yield* SessionV2.Service.use((service) =>
+        service.create({
           id: sessionID,
-          project_id: projectID,
-          slug: "move-nested",
-          directory: source,
-          title: "move nested",
-          version: "test",
-          time_created: 1,
-          time_updated: 1,
-        })
-        .run()
-        .pipe(Effect.orDie)
+          location: { directory: source },
+        }),
+      )
 
       yield* MoveSession.Service.use((service) =>
-        service.moveSession({ sessionID, destination: { directory: destination }, moveChanges: true }),
+        service.moveSession({
+          sessionID,
+          directory: source,
+          destination: { directory: destination },
+          moveChanges: true,
+        }),
       )
 
       expect(yield* Effect.promise(() => fs.readFile(path.join(source, "tracked.txt"), "utf8"))).toBe("changed\n")
       expect(yield* Effect.promise(() => fs.readFile(path.join(source, "untracked.txt"), "utf8"))).toBe("new\n")
       expect(
-        yield* db
-          .select({ directory: SessionTable.directory, path: SessionTable.path })
-          .from(SessionTable)
-          .where(eq(SessionTable.id, sessionID))
-          .get(),
-      ).toEqual({ directory: destination, path: "packages" })
+        yield* SessionV2.Service.use((service) => service.get(sessionID, { directory: destination })),
+      ).toMatchObject({ location: { directory: destination } })
     }),
   )
 
@@ -197,7 +161,12 @@ describe("MoveSession", () => {
       yield* Effect.promise(() => fs.writeFile(path.join(sourceStore, "assets", "note.txt"), "kept\n"))
 
       yield* MoveSession.Service.use((service) =>
-        service.moveSession({ sessionID: created.id, destination: { directory: destination }, moveChanges: false }),
+        service.moveSession({
+          sessionID: created.id,
+          directory: source,
+          destination: { directory: destination },
+          moveChanges: false,
+        }),
       )
 
       expect(yield* Effect.promise(() => Bun.file(sourceStore).exists())).toBe(false)
@@ -239,6 +208,7 @@ describe("MoveSession", () => {
       yield* MoveSession.Service.use((service) =>
         service.moveSession({
           sessionID: created.id,
+          directory: source,
           destination: { directory: AbsolutePath.make(`${source}/.`) },
           moveChanges: true,
         }),
@@ -283,31 +253,21 @@ describe("MoveSession", () => {
       yield* Effect.promise(() => fs.writeFile(path.join(source, "tracked.txt"), "unrelated\n"))
       yield* Effect.promise(() => fs.writeFile(path.join(source, "untracked.txt"), "unrelated\n"))
 
-      const projectID = (yield* Project.Service.use((service) => service.resolve(source))).id
       const sessionID = SessionV2.ID.make("ses_move_nested_checkout")
-      const { db } = yield* Database.Service
-      yield* db
-        .insert(ProjectTable)
-        .values({ id: projectID, worktree: source, sandboxes: [], time_created: 1, time_updated: 1 })
-        .run()
-        .pipe(Effect.orDie)
-      yield* db
-        .insert(SessionTable)
-        .values({
+      yield* SessionV2.Service.use((service) =>
+        service.create({
           id: sessionID,
-          project_id: projectID,
-          slug: "move-nested-checkout",
-          directory: sourceDirectory,
-          title: "move nested checkout",
-          version: "test",
-          time_created: 1,
-          time_updated: 1,
-        })
-        .run()
-        .pipe(Effect.orDie)
+          location: { directory: sourceDirectory },
+        }),
+      )
 
       yield* MoveSession.Service.use((service) =>
-        service.moveSession({ sessionID, destination: { directory: moved }, moveChanges: true }),
+        service.moveSession({
+          sessionID,
+          directory: sourceDirectory,
+          destination: { directory: moved },
+          moveChanges: true,
+        }),
       )
 
       expect(yield* Effect.promise(() => fs.readFile(path.join(moved, "tracked.txt"), "utf8"))).toBe("changed\n")

@@ -51,15 +51,16 @@ describe("public native OpenCode API", () => {
           yield* writeProvider(tmp.path)
           const opencode = yield* OpenCode.Service
           const sessionID = Session.ID.make("ses_public_switch_available")
+          const directory = AbsolutePath.make(tmp.path)
           const model = ref({ variant: "fast" })
           yield* opencode.sessions.create({
             id: sessionID,
-            location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
+            location: Location.Ref.make({ directory }),
           })
 
-          yield* opencode.sessions.switchModel({ sessionID, model })
+          yield* opencode.sessions.switchModel({ sessionID, directory, model })
 
-          expect((yield* opencode.sessions.get(sessionID)).model).toEqual(model)
+          expect((yield* opencode.sessions.get(sessionID, { directory })).model).toEqual(model)
         }),
       ),
     ),
@@ -77,27 +78,35 @@ describe("public native OpenCode API", () => {
           const opencode = yield* OpenCode.Service
           const availableID = Session.ID.make("ses_public_switch_exact_available")
           const disabledID = Session.ID.make("ses_public_switch_exact_disabled")
+          const availableDirectory = AbsolutePath.make(available.path)
+          const disabledDirectory = AbsolutePath.make(disabled.path)
           yield* opencode.sessions.create({
             id: availableID,
-            location: Location.Ref.make({ directory: AbsolutePath.make(available.path) }),
+            location: Location.Ref.make({ directory: availableDirectory }),
           })
           yield* opencode.sessions.create({
             id: disabledID,
-            location: Location.Ref.make({ directory: AbsolutePath.make(disabled.path) }),
+            location: Location.Ref.make({ directory: disabledDirectory }),
           })
 
-          yield* opencode.sessions.switchModel({ sessionID: availableID, model: ref({ variant: "default" }) })
+          yield* opencode.sessions.switchModel({
+            sessionID: availableID,
+            directory: availableDirectory,
+            model: ref({ variant: "default" }),
+          })
           const disabledError = yield* opencode.sessions
-            .switchModel({ sessionID: disabledID, model: ref() })
+            .switchModel({ sessionID: disabledID, directory: disabledDirectory, model: ref() })
             .pipe(Effect.flip)
           const missingError = yield* opencode.sessions
-            .switchModel({ sessionID: disabledID, model: ref({ id: "missing" }) })
+            .switchModel({ sessionID: disabledID, directory: disabledDirectory, model: ref({ id: "missing" }) })
             .pipe(Effect.flip)
 
           expect(disabledError).toBeInstanceOf(Session.ModelUnavailableError)
           expect(missingError).toBeInstanceOf(Session.ModelUnavailableError)
-          expect((yield* opencode.sessions.get(availableID)).model).toEqual(ref({ variant: "default" }))
-          expect((yield* opencode.sessions.get(disabledID)).model).toBeUndefined()
+          expect((yield* opencode.sessions.get(availableID, { directory: availableDirectory })).model).toEqual(
+            ref({ variant: "default" }),
+          )
+          expect((yield* opencode.sessions.get(disabledID, { directory: disabledDirectory })).model).toBeUndefined()
         }),
       ),
     ),
@@ -113,19 +122,20 @@ describe("public native OpenCode API", () => {
           yield* writeProvider(tmp.path)
           const opencode = yield* OpenCode.Service
           const sessionID = Session.ID.make("ses_public_switch_variant")
+          const directory = AbsolutePath.make(tmp.path)
           const selected = ref({ variant: "fast" })
           yield* opencode.sessions.create({
             id: sessionID,
-            location: Location.Ref.make({ directory: AbsolutePath.make(tmp.path) }),
+            location: Location.Ref.make({ directory }),
           })
-          yield* opencode.sessions.switchModel({ sessionID, model: selected })
+          yield* opencode.sessions.switchModel({ sessionID, directory, model: selected })
 
           const error = yield* opencode.sessions
-            .switchModel({ sessionID, model: ref({ variant: "unknown" }) })
+            .switchModel({ sessionID, directory, model: ref({ variant: "unknown" }) })
             .pipe(Effect.flip)
 
           expect(error).toBeInstanceOf(Session.VariantUnavailableError)
-          expect((yield* opencode.sessions.get(sessionID)).model).toEqual(selected)
+          expect((yield* opencode.sessions.get(sessionID, { directory })).model).toEqual(selected)
         }),
       ),
     ),
