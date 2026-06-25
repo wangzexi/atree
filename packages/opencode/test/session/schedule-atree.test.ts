@@ -3339,6 +3339,153 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not clear ambiguous copied schedules without an explicit directory hint",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-clear-ambiguous-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const { db } = yield* Database.Service
+      const sessionID = "ses_clear_ambiguous_copies" as SessionID
+      const scheduleID = "sch_clear_ambiguous_source"
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "clear-ambiguous-source",
+          version: "test",
+          projectID: "proj_clear_ambiguous_source",
+          directory: source,
+          path: ".",
+          title: "Clear ambiguous source",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "clear-ambiguous-target",
+          version: "test",
+          projectID: "proj_clear_ambiguous_target",
+          directory: target,
+          path: ".",
+          title: "Clear ambiguous target",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(source, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "source ambiguous schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(target, sessionID, [
+          {
+            id: "sch_clear_ambiguous_target",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "target ambiguous schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_clear_ambiguous_source",
+          worktree: source,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_clear_ambiguous_source",
+          slug: "clear-ambiguous-source",
+          directory: source,
+          title: "Clear ambiguous source",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "source ambiguous schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* Schedule.Service.use((schedule) => schedule.clear(sessionID))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(source, sessionID))).toEqual([
+        expect.objectContaining({ id: scheduleID, message: "source ambiguous schedule" }),
+      ])
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([
+        expect.objectContaining({ id: "sch_clear_ambiguous_target", message: "target ambiguous schedule" }),
+      ])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("source ambiguous schedule")
+    }),
+  )
+
+  it.effect(
     "clears schedules for an explicit directory without a database session row",
     Effect.gen(function* () {
       const directory = yield* tempdir
