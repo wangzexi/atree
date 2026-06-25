@@ -499,6 +499,10 @@ Playwright 护栏
   - core `SessionProjector` 在 `SessionTable` row 缺失时，会直接跳过 `MessageTable/PartTable` 的 SQLite 投影写入；目录内 `session.jsonl` 仍然照常作为事实源。
   - 这让 file-backed session 在缓存行被删掉之后，消息追加与删除也不会反向把会话补回数据库。
   - 这意味着“标题 / icon / archived / workspace / revert / permission / summary”这类目录元数据修改，在 file-backed session 丢失 SQLite row 后，也不会反向把会话补回数据库。
+- core `SessionV2.prompt` 的纯目录链路也已有直接护栏：
+  - 对纯 file-backed session（没有 `SessionTable` row）执行 `prompt` 时，只会向目录 `session.jsonl` 追加 `session.next.prompt.admitted`。
+  - 不会重建 `SessionTable`，也不会写入 `SessionInputTable` / `SessionMessageTable`。
+  - 这进一步确认 prompt 的 durable 事实源已经是目录日志，而不是 SQLite 队列表。
 
 对应新增护栏测试：
 
@@ -515,6 +519,8 @@ Playwright 护栏
 - `packages/opencode/test/session/session.test.ts`
   - `patches file-backed session metadata with an explicit directory and no instance without recreating cache rows`
   - `updates file-backed messages with an explicit directory and no instance without recreating cache rows`
+- `packages/core/test/session-interrupt-jsonl.test.ts`
+  - `prompts pure file-backed sessions without reviving SQLite projections`
 
 ## 还剩的硬问题
 

@@ -8,9 +8,13 @@ import { Location } from "@opencode-ai/core/location"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
+import { Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionStore } from "@opencode-ai/core/session/store"
+import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionMessage } from "@opencode-ai/core/session/message"
+import { eq } from "drizzle-orm"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -160,6 +164,58 @@ it.effect("resumes pure file-backed sessions through an explicit directory", () 
 
     expect(executionCalls).toEqual([sessionID])
     expect(executionDirectories).toEqual([path.resolve(tmp.path)])
+  }),
+)
+
+it.effect("prompts pure file-backed sessions without reviving SQLite projections", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const sessionID = SessionV2.ID.make("ses_file_prompt_only")
+    const messageID = SessionMessage.ID.make("msg_file_prompt_only")
+    const sessionRoot = yield* writePureFileSession(tmp.path, sessionID)
+    const sessions = yield* SessionV2.Service
+    const { db } = yield* Database.Service
+
+    const admitted = yield* sessions.prompt({
+      sessionID,
+      id: messageID,
+      prompt: new Prompt({ text: "pure file prompt" }),
+      resume: false,
+      directory: AbsolutePath.make(tmp.path),
+    })
+
+    expect(admitted).toMatchObject({ id: messageID, sessionID, prompt: { text: "pure file prompt" } })
+    expect(
+      yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+    ).toBeUndefined()
+    expect(
+      yield* db.select().from(SessionInputTable).where(eq(SessionInputTable.id, messageID)).get().pipe(Effect.orDie),
+    ).toBeUndefined()
+    expect(
+      yield* db
+        .select()
+        .from(SessionMessageTable)
+        .where(eq(SessionMessageTable.id, messageID))
+        .get()
+        .pipe(Effect.orDie),
+    ).toBeUndefined()
+
+    const entries = (
+      yield* Effect.promise(() => readFile(path.join(sessionRoot, "session.jsonl"), "utf8"))
+    )
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        type: "session.next.prompt.admitted",
+        sessionID,
+        messageID,
+      }),
+    )
   }),
 )
 
