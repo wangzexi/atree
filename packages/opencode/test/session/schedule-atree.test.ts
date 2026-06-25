@@ -4187,6 +4187,117 @@ describe("atree schedule restore", () => {
   )
 
   it.instance(
+    "prefers the current instance tree when listing and creating for an unscoped nested copied session",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const data = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const root = path.dirname(instance.directory)
+      const nested = path.join(instance.directory, "nested", "node")
+      const sibling = path.join(root, `atree-schedule-list-sibling-${randomUUID().replaceAll("-", "")}`)
+      const sessionID = "ses_list_create_instance_nested_scope" as SessionID
+      const now = Date.now()
+
+      yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdir(nested, { recursive: true })),
+        () => Effect.promise(() => fs.rm(nested, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdir(sibling, { recursive: true })),
+        () => Effect.promise(() => fs.rm(sibling, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "list-create-instance-nested-current",
+          version: "test",
+          projectID: "proj_list_create_instance_nested_current",
+          directory: nested,
+          path: "nested/node",
+          title: "List create instance nested current",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "list-create-instance-nested-sibling",
+          version: "test",
+          projectID: "proj_list_create_instance_nested_sibling",
+          directory: sibling,
+          path: ".",
+          title: "List create instance nested sibling",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(nested, sessionID, [
+          {
+            id: "sch_list_create_instance_nested_current",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "current nested schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(sibling, sessionID, [
+          {
+            id: "sch_list_create_instance_nested_sibling",
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "sibling schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+
+      const listed = yield* Schedule.Service.use((schedule) => schedule.list(sessionID))
+
+      expect(listed).toHaveLength(1)
+      expect(listed[0]).toMatchObject({ message: "current nested schedule" })
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule
+          .create({
+            sessionID,
+            kind: "once",
+            runAt: now + 180_000,
+            message: "should fail because current nested schedule already exists",
+          })
+          .pipe(Effect.exit),
+      )
+
+      expect(Exit.isFailure(created)).toBe(true)
+      expect(yield* Effect.promise(() => readSessionScheduleState(nested, sessionID))).toEqual([
+        expect.objectContaining({ message: "current nested schedule" }),
+      ])
+      expect(yield* Effect.promise(() => readSessionScheduleState(sibling, sessionID))).toEqual([
+        expect.objectContaining({ message: "sibling schedule" }),
+      ])
+    }),
+  )
+
+  it.instance(
     "prefers the current instance directory when ticking an unscoped copied schedule without a DB row",
     Effect.gen(function* () {
       const instance = yield* TestInstance
