@@ -2071,6 +2071,44 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("does not resolve a workspace session store when copied directories make the session id ambiguous", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-ambiguous-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-ambiguous-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID: "ses_core_workspace_store_ambiguous",
+          title: "Workspace store source",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID: "ses_core_workspace_store_ambiguous",
+          title: "Workspace store target",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+
+      const found = yield* Effect.promise(() =>
+        findWorkspaceSessionStore(SessionV2.ID.make("ses_core_workspace_store_ambiguous")),
+      )
+      expect(found).toBeUndefined()
+    }),
+  )
+
   it.effect("finds a workspace file-backed message through the persisted atree root", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-message-data-")))
@@ -2123,6 +2161,88 @@ describe("atree file-backed SessionV2 discovery", () => {
         type: "user",
         text: "workspace message through persisted root",
       })
+    }),
+  )
+
+  it.effect("does not resolve a workspace file-backed message when copied directories make the message id ambiguous", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-message-ambiguous-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-message-ambiguous-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = "ses_core_workspace_message_ambiguous"
+      const messageID = "msg_core_workspace_message_ambiguous"
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Workspace message source",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Workspace message target",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 50 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_workspace_message_ambiguous_source",
+              messageID,
+              type: "text",
+              text: "source workspace message",
+            },
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 60 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_workspace_message_ambiguous_target",
+              messageID,
+              type: "text",
+              text: "target workspace message",
+            },
+          },
+        ]),
+      )
+
+      const found = yield* Effect.promise(() =>
+        findWorkspaceSessionJsonlMessage(SessionMessage.ID.make(messageID)),
+      )
+      expect(found).toBeUndefined()
     }),
   )
 
