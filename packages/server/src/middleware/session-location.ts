@@ -54,6 +54,14 @@ export const sessionLocationLayer = Layer.effect(
             ? undefined
             : yield* Effect.promise(() => readSessionStore(requestDirectory, sessionID)).pipe(
                 Effect.catchCause(() => Effect.succeed(undefined)),
+              ).pipe(
+                Effect.flatMap((direct) =>
+                  direct !== undefined
+                    ? Effect.succeed(direct)
+                    : Effect.promise(() => findSessionStore(requestDirectory, sessionID)).pipe(
+                        Effect.catchCause(() => Effect.succeed(undefined)),
+                      ),
+                ),
               )
         const rootFileSession = requestDirectory
           ? undefined
