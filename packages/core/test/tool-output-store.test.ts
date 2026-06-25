@@ -112,6 +112,7 @@ describe("ToolOutputStore", () => {
           const sessions = Layer.succeed(
             SessionStore.Service,
             SessionStore.Service.of({
+              list: () => Effect.succeed([]),
               get: () => Effect.succeed(info),
               context: () => Effect.succeed([]),
               runnerEntries: () => Effect.succeed([]),
@@ -351,6 +352,7 @@ describe("ToolOutputStore", () => {
           const sessions = Layer.succeed(
             SessionStore.Service,
             SessionStore.Service.of({
+              list: () => Effect.succeed([]),
               get: () => Effect.succeed(undefined),
               context: () => Effect.succeed([]),
               runnerEntries: () => Effect.succeed([]),

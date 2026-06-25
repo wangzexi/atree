@@ -207,9 +207,54 @@ describe("atree file-backed SessionV2 discovery", () => {
       )
 
       const store = yield* SessionStore.Service
+      const listedTitles = (yield* store.list()).map((item) => item.title)
+      expect(listedTitles).toHaveLength(2)
+      expect(listedTitles).toEqual(expect.arrayContaining(["Source ambiguous session", "Target ambiguous session"]))
       expect(yield* store.get(sessionID)).toBeUndefined()
       expect(yield* store.context(sessionID)).toEqual([])
       expect(yield* store.runnerContext(sessionID, 0)).toEqual([])
+    }),
+  )
+
+  storeIt.effect("lists file-backed sessions from an explicit directory before persisted root scans", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-list-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-list-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_list_overlap")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source list session",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target list session",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+
+      const store = yield* SessionStore.Service
+      expect((yield* store.list({ directory: target })).map((item) => path.resolve(item.location.directory))).toEqual([
+        path.resolve(target),
+      ])
+      const listedTitles = (yield* store.list()).map((item) => item.title)
+      expect(listedTitles).toHaveLength(2)
+      expect(listedTitles).toEqual(expect.arrayContaining(["Source list session", "Target list session"]))
     }),
   )
 

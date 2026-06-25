@@ -36,8 +36,6 @@ import {
   readSessionJsonlEntries,
   readSessionJsonlMessages,
   readSessionStore,
-  readSessionStores,
-  readSessionStoresDeep,
   readWorkspaceRoot,
   writeSessionStore,
 } from "./atree/session-store"
@@ -446,21 +444,7 @@ export const layer = Layer.effect(
         const direction = input.anchor?.direction ?? "next"
         const requestedOrder = input.order ?? "desc"
         const order = direction === "previous" ? (requestedOrder === "asc" ? "desc" : "asc") : requestedOrder
-        const fileSessions =
-          "directory" in input
-            ? yield* Effect.promise(() => readSessionStores(input.directory)).pipe(
-                Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
-              )
-            : yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-                Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-                Effect.flatMap((root) =>
-                  root
-                    ? Effect.promise(() => readSessionStoresDeep(root)).pipe(
-                        Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
-                      )
-                    : Effect.succeed([] as SessionSchema.Info[]),
-                ),
-              )
+        const fileSessions = yield* store.list("directory" in input ? { directory: input.directory } : undefined)
         if (!("directory" in input) && fileSessions.length === 0) return []
         const rootScopedFileIndex = !("directory" in input)
         const itemKey = (item: Pick<SessionSchema.Info, "location" | "id">) =>

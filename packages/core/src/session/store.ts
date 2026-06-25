@@ -12,10 +12,13 @@ import {
   readSessionPromptStates,
   readSessionJsonlMessages,
   readSessionStore,
+  readSessionStores,
+  readSessionStoresDeep,
   readWorkspaceRoot,
 } from "../atree/session-store"
 
 export interface Interface {
+  readonly list: (options?: { directory?: string }) => Effect.Effect<SessionSchema.Info[]>
   readonly get: (
     sessionID: SessionSchema.ID,
     options?: { directory?: string },
@@ -102,6 +105,22 @@ export const layer = Layer.effect(
       return found ? { sessionID: found.session.id, message: found.message } : undefined
     })
 
+    const list = Effect.fn("SessionStore.list")(function* (options?: { directory?: string }) {
+      const directory = options?.directory
+      if (directory) {
+        return yield* Effect.promise(() => readSessionStores(directory)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+        )
+      }
+      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
+        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      )
+      if (!root) return [] as SessionSchema.Info[]
+      return yield* Effect.promise(() => readSessionStoresDeep(root)).pipe(
+        Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+      )
+    })
+
     const runnerEntries = Effect.fn("SessionStore.runnerEntries")(function* (
       sessionID: SessionSchema.ID,
       baselineSeq: number,
@@ -127,6 +146,7 @@ export const layer = Layer.effect(
     })
 
     return Service.of({
+      list,
       get: Effect.fn("SessionStore.get")(function* (sessionID, options) {
         return yield* resolveFileSession(sessionID, options?.directory)
       }),
