@@ -1561,6 +1561,22 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("lists file-backed directory sessions without SQLite cache rows", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const instance = yield* TestInstance
+      const info = yield* Effect.acquireRelease(session.create({ title: "file-list-no-cache" }), (created) =>
+        session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, info.id)).run().pipe(Effect.orDie)
+
+      const listed = yield* session.list({ directory: instance.directory })
+      expect(listed.find((item) => item.id === info.id)?.title).toBe("file-list-no-cache")
+    }),
+  )
+
   it.instance("does not list directory sessions that only exist in the stale SQLite cache", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

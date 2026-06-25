@@ -762,6 +762,14 @@ export const layer: Layer.Layer<
 
     const list = Effect.fn("Session.list")(function* (input?: ListInput) {
       const ctx = yield* InstanceState.context
+      if (input?.directory) {
+        const directory = input.directory
+        return (yield* Effect.promise(() => readSessionStores(directory)))
+          .map((fileSession) => localizeFileSession(fileSession, ctx))
+          .filter((item) => matchesListInput(item, input))
+          .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+          .slice(0, input.limit ?? 100)
+      }
       const items = yield* listByProject(db, {
         projectID: ctx.project.id,
         experimentalWorkspaces: flags.experimentalWorkspaces,
