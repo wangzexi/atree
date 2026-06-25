@@ -34,7 +34,7 @@ import { InstanceStore } from "@/project/instance-store"
 import { InstanceBootstrap } from "@/project/bootstrap"
 import { WorkspaceAdapterRuntime } from "./workspace-adapter-runtime"
 import { resolveFileSession } from "@/atree/session-resolver"
-import { appendSessionJsonl, readSessionStore, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionStore, readWorkspaceSessionStoresDeep, writeSessionStore } from "@/atree/session-store"
 
 export const Info = Schema.Struct({
   ...WorkspaceInfoSchema.fields,
@@ -361,6 +361,15 @@ export const layer = Layer.effect(
       )
     })
 
+    const listWorkspaceDirectorySessions = Effect.fn("Workspace.listWorkspaceDirectorySessions")(function* (
+      workspaceID: WorkspaceV2.ID,
+    ) {
+      return yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+        Effect.map((sessions) => sessions.filter((sessionInfo) => sessionInfo.workspaceID === workspaceID)),
+        Effect.catchCause(() => Effect.succeed([])),
+      )
+    })
+
     const syncHistory = Effect.fn("Workspace.syncHistory")(function* (
       space: Info,
       url: URL | string,
@@ -372,9 +381,7 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.workspace_id, space.id))
         .all()
         .pipe(Effect.orDie)).map((row) => row.id)
-      const directorySessionIDs = (yield* session.listGlobal({ archived: true, limit: 1_000_000 }))
-        .filter((sessionInfo) => sessionInfo.workspaceID === space.id)
-        .map((sessionInfo) => sessionInfo.id)
+      const directorySessionIDs = (yield* listWorkspaceDirectorySessions(space.id)).map((sessionInfo) => sessionInfo.id)
       const sessionIDs = [...new Set([...databaseSessionIDs, ...directorySessionIDs])]
       const state = sessionIDs.length
         ? Object.fromEntries(
@@ -873,19 +880,35 @@ export const layer = Layer.effect(
     })
 
     const remove = Effect.fn("Workspace.remove")(function* (id: WorkspaceV2.ID) {
-      const sessions = (yield* session.listGlobal({ archived: true, limit: 1_000_000 }))
-        .filter((sessionInfo) => sessionInfo.workspaceID === id)
-        .map((sessionInfo) => ({
-          id: sessionInfo.id,
-          parentID: sessionInfo.parentID,
-          directory: sessionInfo.directory,
-        }))
+      const databaseSessions = yield* db
+        .select({
+          id: SessionTable.id,
+          parentID: SessionTable.parent_id,
+          directory: SessionTable.directory,
+        })
+        .from(SessionTable)
+        .where(eq(SessionTable.workspace_id, id))
+        .all()
+        .pipe(Effect.orDie)
+      const directorySessions = (yield* listWorkspaceDirectorySessions(id)).map((sessionInfo) => ({
+        id: sessionInfo.id,
+        parentID: sessionInfo.parentID,
+        directory: sessionInfo.directory,
+      }))
+      const sessionKey = (sessionInfo: { id: SessionID; directory: string | null | undefined }) =>
+        `${sessionInfo.id}\n${sessionInfo.directory ?? ""}`
+      const sessions = [
+        ...databaseSessions,
+        ...directorySessions.filter(
+          (sessionInfo) => !databaseSessions.some((existing) => sessionKey(existing) === sessionKey(sessionInfo)),
+        ),
+      ]
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
       yield* Effect.forEach(
         sessions.filter((sessionInfo) => !sessionInfo.parentID || !sessionIDs.has(sessionInfo.parentID)),
         (sessionInfo) =>
           session
-            .remove(sessionInfo.id, { directory: sessionInfo.directory })
+            .remove(sessionInfo.id, sessionInfo.directory ? { directory: sessionInfo.directory } : undefined)
             .pipe(Effect.catchIf(NotFoundError.isInstance, () => Effect.void)),
         { discard: true },
       )

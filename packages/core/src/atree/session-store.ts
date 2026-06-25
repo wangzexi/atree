@@ -326,42 +326,6 @@ export async function readWorkspaceSessionStoresDeep() {
   return readSessionStoresDeep(root)
 }
 
-export async function findWorkspaceSessionStore(sessionID: SessionSchema.ID) {
-  const sessions = await readWorkspaceSessionStoresDeep()
-  let found: SessionSchema.Info | undefined
-  for (const session of sessions) {
-    if (session.id !== sessionID) continue
-    if (!found) {
-      found = session
-      continue
-    }
-    if (found.location.directory !== session.location.directory) return undefined
-  }
-  return found
-}
-
-export async function findWorkspaceSessionJsonlMessage(messageID: SessionMessage.ID) {
-  const sessions = await readWorkspaceSessionStoresDeep()
-  let found:
-    | {
-        session: SessionSchema.Info
-        message: SessionMessage.Message
-      }
-    | undefined
-  const sessionKey = (session: SessionSchema.Info) => `${session.location.directory}\n${session.id}`
-  for (const session of sessions) {
-    const messages = await readSessionJsonlMessages(session)
-    const message = messages.find((item) => item.id === messageID)
-    if (!message) continue
-    if (!found) {
-      found = { session, message }
-      continue
-    }
-    if (sessionKey(found.session) !== sessionKey(session)) return undefined
-  }
-  return found
-}
-
 export async function hasSessionJsonlMessageEvents(info: SessionSchema.Info) {
   const raw = await fs.readFile(sessionJsonl(info), "utf8").catch((error: unknown) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
