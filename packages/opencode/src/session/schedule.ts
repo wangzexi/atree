@@ -1229,58 +1229,10 @@ export const layer = Layer.effect(
       }
       const deletedStored = yield* deleteStoredSchedule(scheduleID, undefined)
       if (deletedStored) return
-      const row = yield* db
-        .select()
-        .from(ScheduleTable)
-        .where(eq(ScheduleTable.id, scheduleID))
-        .get()
-        .pipe(Effect.orDie)
-      if (!options?.directory && row) {
-        const directory = yield* sessionDirectory(row.session_id as SessionID)
-        if (!directory) {
-          const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-            Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-          )
-          if (state.rootDirectory) {
-            const matches = yield* Effect.promise(() => readSessionStoresDeep(state.rootDirectory!)).pipe(
-              Effect.map((sessions) => sessions.filter((session) => session.id === (row.session_id as SessionID))),
-              Effect.catchCause(() => Effect.succeed([])),
-            )
-            if (matches.length > 0) return yield* Effect.fail(new NotFound({ scheduleID }))
-          }
-        }
-      }
-      if (!row) {
-        const timer = timers.get(scheduleID)
-        const deleted = yield* deleteStoredSchedule(scheduleID, options?.directory ?? timer?.directory)
-        if (deleted) return
-        return yield* Effect.fail(new NotFound({ scheduleID }))
-      }
-      yield* appendScheduleSessionEventBestEffort(
-        row.session_id as SessionID,
-        {
-          type: "schedule.deleted",
-          scheduleID,
-          sessionID: row.session_id,
-          reason: "deleted",
-        },
-        options?.directory,
-      )
-      yield* db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID)).run().pipe(Effect.orDie)
       const timer = timers.get(scheduleID)
-      if (timer) {
-        stopTimer(timer)
-        timers.delete(scheduleID)
-      }
-      yield* events.publish(
-        Event.Deleted,
-        {
-          scheduleID,
-          sessionID: row.session_id as SessionID,
-        },
-        scheduleLocation(options?.directory ?? timer?.directory),
-      )
-      yield* syncScheduleState(row.session_id as SessionID, options?.directory)
+      const deleted = yield* deleteStoredSchedule(scheduleID, options?.directory ?? timer?.directory)
+      if (deleted) return
+      return yield* Effect.fail(new NotFound({ scheduleID }))
     })
 
     const clear: Interface["clear"] = Effect.fn("Schedule.clear")(function* (
@@ -1338,28 +1290,7 @@ export const layer = Layer.effect(
         yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
         return
       }
-      const rows = yield* db
-        .select({ id: ScheduleTable.id })
-        .from(ScheduleTable)
-        .where(eq(ScheduleTable.session_id, sessionID))
-        .all()
-        .pipe(Effect.orDie)
-      const rowIDs = new Set(rows.map((row) => row.id))
-      for (const row of rows) {
-        const id = row.id as ID
-        yield* appendScheduleSessionEventBestEffort(
-          sessionID,
-          {
-            type: "schedule.deleted",
-            scheduleID: id,
-            sessionID,
-            reason: "cleared",
-          },
-          options?.directory,
-        )
-      }
       for (const schedule of stored) {
-        if (rowIDs.has(schedule.id)) continue
         yield* appendScheduleSessionEventBestEffort(
           sessionID,
           {
@@ -1370,19 +1301,22 @@ export const layer = Layer.effect(
           },
           directory,
         )
-      }
-      stopSessionTimers(timers, sessionID)
-      if (rows.length > 0) {
-        yield* db.delete(ScheduleTable).where(eq(ScheduleTable.session_id, sessionID)).run().pipe(Effect.orDie)
-      }
-      for (const row of rows) {
+        const timer = timers.get(schedule.id as ID)
+        if (timer) {
+          stopTimer(timer)
+          timers.delete(schedule.id as ID)
+        }
+        yield* clearScheduleProjection(schedule.id as ID, directory)
         yield* events.publish(
           Event.Deleted,
-          { scheduleID: row.id as ID, sessionID },
-          scheduleLocation(directory ?? options?.directory),
+          { scheduleID: schedule.id as ID, sessionID },
+          scheduleLocation(directory ?? options?.directory ?? timer?.directory),
         )
       }
-      yield* syncScheduleState(sessionID, options?.directory)
+      if (directory) {
+        yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, []))
+        yield* syncScheduleState(sessionID, options?.directory)
+      }
     })
 
     return Service.of({

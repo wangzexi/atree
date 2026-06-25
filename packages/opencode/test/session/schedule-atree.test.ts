@@ -792,6 +792,143 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not delete a database-only schedule when no directory schedule state exists",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_db_only_delete_schedule" as SessionID
+      const scheduleID = "sch_db_only_delete_schedule" as Schedule.ID
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_db_only_delete_schedule",
+          worktree: directory,
+          vcs: "git",
+          name: "db only delete schedule",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_db_only_delete_schedule",
+          slug: "db-only-delete-schedule",
+          directory,
+          title: "DB only delete schedule",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "database only delete schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const deleted = yield* Schedule.Service.use((schedule) => schedule.delete(scheduleID).pipe(Effect.exit))
+      expect(Exit.isFailure(deleted)).toBe(true)
+
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("database only delete schedule")
+    }),
+  )
+
+  it.effect(
+    "does not clear database-only schedules when no directory schedule state exists",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_db_only_clear_schedule" as SessionID
+      const scheduleID = "sch_db_only_clear_schedule"
+      const now = Date.now()
+
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_db_only_clear_schedule",
+          worktree: directory,
+          vcs: "git",
+          name: "db only clear schedule",
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_db_only_clear_schedule",
+          slug: "db-only-clear-schedule",
+          directory,
+          title: "DB only clear schedule",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "database only clear schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* Schedule.Service.use((schedule) => schedule.clear(sessionID))
+
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("database only clear schedule")
+    }),
+  )
+
+  it.effect(
     "does not create a database-only schedule for a missing explicit directory session",
     Effect.gen(function* () {
       const source = yield* tempdir
