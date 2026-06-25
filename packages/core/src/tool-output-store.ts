@@ -5,7 +5,7 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 import { Config } from "./config"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
-import { ensureSessionPayloadFilesByID, findSessionStore, readSessionStore, readWorkspaceRoot } from "./atree/session-store"
+import { ensureSessionPayloadFilesByID, readSessionStore } from "./atree/session-store"
 import { SessionSchema } from "./session/schema"
 import { SessionStore } from "./session/store"
 import { Identifier } from "./util/identifier"
@@ -152,15 +152,7 @@ export const layer = Layer.effect(
               Effect.catchCause(() => Effect.succeed(undefined)),
             )
           })
-        : yield* Effect.gen(function* () {
-            const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-              Effect.catchCause(() => Effect.succeed(undefined)),
-            )
-            if (!root) return undefined
-            return yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
-              Effect.catchCause(() => Effect.succeed(undefined)),
-            )
-          })
+        : undefined
       if (!fileSession) return
       yield* Effect.promise(() => ensureSessionPayloadFilesByID(fileSession.location.directory, sessionID))
       return path.join(fileSession.location.directory, ".agents", "atree", "sessions", sessionID, "assets", MANAGED_DIRECTORY)

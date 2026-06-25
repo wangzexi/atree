@@ -69,6 +69,7 @@
 - opencode 的 `Session.get` 主读链路现在也不再把 `SessionTable` 里的 metadata/summary/workspace/path/revert/permission 合并回目录会话；目录里的 `meta.yaml + session.jsonl` 是唯一读取结果，读取本身也不再顺手重建 `SessionTable` 行。
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
+- core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。
 - opencode 的 `session.listGlobal` 现在也已经改成纯目录事实源读取：不再先查 `SessionTable` 再用目录元数据覆盖，global/directory 作用域的会话列表直接由 `.agents/atree/sessions/*` 扫描结果决定。
 - core `SessionV2.list` 也已经改成目录扫描优先且不再混入 `SessionTable` 结果；无论是显式目录还是 persisted root，全局/目录列表都直接从 `.agents/atree/sessions/*` 推导。
 - file-backed session resolver 当前只按显式目录、当前 instance、持久化 atree root 解析目录事实源；它已经不再把 SQLite 中的目录缓存当作最终兜底 hint，但 core/opencode 两侧在“复制目录歧义”上的实现和测试仍需继续统一。

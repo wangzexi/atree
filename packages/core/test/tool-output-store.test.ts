@@ -285,9 +285,12 @@ describe("ToolOutputStore", () => {
             }),
           )
 
+          const database = Database.layerFromPath(":memory:")
+          const sessions = SessionStore.layer.pipe(Layer.provide(database))
           const storeLayer = ToolOutputStore.layer.pipe(
             Layer.provide(FSUtil.defaultLayer),
             Layer.provide(Global.layerWith({ data: data.path })),
+            Layer.provide(sessions),
           )
           const result = yield* Effect.gen(function* () {
             const store = yield* ToolOutputStore.Service
@@ -296,7 +299,7 @@ describe("ToolOutputStore", () => {
               toolCallID: "call-directory-only-session-assets",
               output: { structured: {}, content: [{ type: "text", text: "z".repeat(ToolOutputStore.MAX_BYTES + 1) }] },
             })
-          }).pipe(Effect.provide(storeLayer))
+          }).pipe(Effect.provide(Layer.mergeAll(database, storeLayer)))
 
           expect(result.outputPaths).toHaveLength(1)
           expect(result.outputPaths[0]).toContain(
