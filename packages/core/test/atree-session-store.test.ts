@@ -1648,6 +1648,89 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  storeIt.effect("does not resolve unscoped SessionStore reads when copied directories make the session id ambiguous", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-ambiguous-read-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-ambiguous-read-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_store_ambiguous_read")
+      const messageID = SessionMessage.ID.make("msg_core_store_ambiguous_read")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source ambiguous read",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target ambiguous read",
+          createdAt: 30,
+          updatedAt: 40,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(source, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 50 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_ambiguous_read_source",
+              messageID,
+              type: "text",
+              text: "source ambiguous read",
+            },
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(target, sessionID, [
+          {
+            type: "message.updated",
+            message: {
+              id: messageID,
+              role: "user",
+              time: { created: 60 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_store_ambiguous_read_target",
+              messageID,
+              type: "text",
+              text: "target ambiguous read",
+            },
+          },
+        ]),
+      )
+
+      const store = yield* SessionStore.Service
+      expect(yield* store.get(sessionID)).toBeUndefined()
+      expect(yield* store.context(sessionID)).toEqual([])
+      expect(yield* store.runnerEntries(sessionID, 0)).toEqual([])
+      expect(yield* store.runnerContext(sessionID, 0)).toEqual([])
+    }),
+  )
+
   storeIt.effect("does not resolve a cached child session from explicit directories without file stores", () =>
     Effect.gen(function* () {
       const parent = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-store-parent-")))

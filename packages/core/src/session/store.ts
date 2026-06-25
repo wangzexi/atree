@@ -8,8 +8,6 @@ import { SessionSchema } from "./schema"
 import { Location } from "../location"
 import {
   findSessionJsonlMessage,
-  findWorkspaceSessionJsonlMessage,
-  findWorkspaceSessionStore,
   findSessionStore,
   promoteSessionPrompts,
   readSessionPromptStates,
@@ -70,6 +68,25 @@ export const layer = Layer.effect(
       const location = yield* Effect.serviceOption(Location.Service)
       return Option.getOrUndefined(location)?.directory ?? initialDirectory
     })
+
+    const findWorkspaceFileSession = Effect.fn("SessionStore.findWorkspaceFileSession")(function* (
+      sessionID: SessionSchema.ID,
+    ) {
+      const sessions = yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+        Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+      )
+      let found: SessionSchema.Info | undefined
+      for (const session of sessions) {
+        if (session.id !== sessionID) continue
+        if (!found) {
+          found = session
+          continue
+        }
+        if (found.location.directory !== session.location.directory) return undefined
+      }
+      return found
+    })
+
     const resolveFileSession = Effect.fn("SessionStore.resolveFileSession")(function* (
       sessionID: SessionSchema.ID,
       directory?: string,
@@ -93,9 +110,35 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
       }
-      return yield* Effect.promise(() => findWorkspaceSessionStore(sessionID)).pipe(
-        Effect.catchCause(() => Effect.succeed<SessionSchema.Info | undefined>(undefined)),
+      return yield* findWorkspaceFileSession(sessionID)
+    })
+
+    const findWorkspaceFileBackedMessage = Effect.fn("SessionStore.findWorkspaceFileBackedMessage")(function* (
+      messageID: SessionMessage.ID,
+    ) {
+      const sessions = yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+        Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
       )
+      let found:
+        | {
+            session: SessionSchema.Info
+            message: SessionMessage.Message
+          }
+        | undefined
+      const sessionKey = (session: SessionSchema.Info) => `${session.location.directory}\n${session.id}`
+      for (const session of sessions) {
+        const messages = yield* Effect.promise(() => readSessionJsonlMessages(session)).pipe(
+          Effect.catchCause(() => Effect.succeed([] as SessionMessage.Message[])),
+        )
+        const message = messages.find((item) => item.id === messageID)
+        if (!message) continue
+        if (!found) {
+          found = { session, message }
+          continue
+        }
+        if (sessionKey(found.session) !== sessionKey(session)) return undefined
+      }
+      return found
     })
 
     const findFileBackedMessage = Effect.fn("SessionStore.findFileBackedMessage")(function* (
@@ -116,17 +159,7 @@ export const layer = Layer.effect(
         )
         if (local) return { sessionID: local.session.id, message: local.message }
       }
-      const found = yield* Effect.promise(() => findWorkspaceSessionJsonlMessage(messageID)).pipe(
-        Effect.catchCause(() =>
-          Effect.succeed<
-            | {
-                session: SessionSchema.Info
-                message: SessionMessage.Message
-              }
-            | undefined
-          >(undefined),
-        ),
-      )
+      const found = yield* findWorkspaceFileBackedMessage(messageID)
       return found ? { sessionID: found.session.id, message: found.message } : undefined
     })
 
