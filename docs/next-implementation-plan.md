@@ -71,6 +71,7 @@
 - opencode 的 `Session.children` 也已经切到纯目录事实源：父子会话关系直接从同目录 `.agents/atree/sessions/*/meta.yaml` 里的 `parentID` 推导，不再依赖 `SessionTable.parent_id` 缓存行决定子会话归属。
 - opencode 的显式目录会话列表 `Session.list({ directory })` 也已经不再先查 `SessionTable` 再 merge；它现在直接扫描目标目录下的 session store，并用目录里的 `archived/path/parentID/title/time` 过滤、排序和分页。
 - opencode 的 path-scoped 会话列表 `Session.list({ path })` 也已经切到目录扫描：它直接深度读取当前 worktree 下的 file-backed session store，再按目录里的 `path`/legacy directory 语义过滤，不再需要 `SessionTable` 参与 path list 的发现或去重。
+- opencode 的普通当前项目会话列表 `Session.list()` 也已经开始直接从当前 worktree 深扫目录会话；`roots/start/search/limit/metadata` 这些过滤和展示现在都可以在不依赖 `SessionTable` 行存在的前提下工作。
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。

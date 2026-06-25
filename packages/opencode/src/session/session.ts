@@ -777,13 +777,11 @@ export const layer: Layer.Layer<
           .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
           .slice(0, input.limit ?? 100)
       }
-      const items = yield* listByProject(db, {
-        projectID: ctx.project.id,
-        experimentalWorkspaces: flags.experimentalWorkspaces,
-        ...input,
-      })
-      const withDirectory = yield* mergeAtreeDirectoryIndex(items, input, ctx)
-      return yield* mergeAtreePathIndex(withDirectory, input, ctx)
+      return (yield* Effect.promise(() => readSessionStoresDeep(ctx.worktree)))
+        .map((fileSession) => localizeFileSession(fileSession, ctx))
+        .filter((item) => matchesListInput(item, input ?? {}))
+        .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
+        .slice(0, input?.limit ?? 100)
     })
 
     const listGlobal = Effect.fn("Session.listGlobal")(function* (input?: GlobalListInput) {

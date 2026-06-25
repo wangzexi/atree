@@ -227,6 +227,26 @@ export default {
           CONSTRAINT \`fk_todo_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
         );
       `)
+      yield* tx.run(`
+        CREATE TABLE \`schedule\` (
+          \`id\` text PRIMARY KEY NOT NULL,
+          \`session_id\` text NOT NULL,
+          \`kind\` text DEFAULT 'recurring' NOT NULL,
+          \`expression\` text NOT NULL,
+          \`run_at\` integer,
+          \`message\` text NOT NULL,
+          \`created_at\` integer NOT NULL
+        );
+      `)
+      yield* tx.run(`
+        CREATE TABLE \`schedule_run\` (
+          \`id\` text PRIMARY KEY NOT NULL,
+          \`schedule_id\` text NOT NULL,
+          \`ran_at\` integer NOT NULL,
+          \`status\` text NOT NULL,
+          CONSTRAINT \`fk_schedule_run_schedule_id_schedule_id_fk\` FOREIGN KEY (\`schedule_id\`) REFERENCES \`schedule\`(\`id\`) ON DELETE CASCADE
+        );
+      `)
       yield* tx.run(`CREATE UNIQUE INDEX \`event_aggregate_seq_idx\` ON \`event\` (\`aggregate_id\`,\`seq\`);`)
       yield* tx.run(`CREATE INDEX \`event_aggregate_type_seq_idx\` ON \`event\` (\`aggregate_id\`,\`type\`,\`seq\`);`)
       yield* tx.run(`CREATE UNIQUE INDEX \`permission_project_action_resource_idx\` ON \`permission\` (\`project_id\`,\`action\`,\`resource\`);`)
@@ -243,6 +263,8 @@ export default {
       yield* tx.run(`CREATE INDEX \`session_project_idx\` ON \`session\` (\`project_id\`);`)
       yield* tx.run(`CREATE INDEX \`session_workspace_idx\` ON \`session\` (\`workspace_id\`);`)
       yield* tx.run(`CREATE INDEX \`session_parent_idx\` ON \`session\` (\`parent_id\`);`)
+      yield* tx.run(`CREATE INDEX \`schedule_session_idx\` ON \`schedule\` (\`session_id\`);`)
+      yield* tx.run(`CREATE INDEX \`schedule_run_idx\` ON \`schedule_run\` (\`schedule_id\`,\`ran_at\`);`)
       yield* tx.run(`CREATE INDEX \`todo_session_idx\` ON \`todo\` (\`session_id\`);`)
     })
   },

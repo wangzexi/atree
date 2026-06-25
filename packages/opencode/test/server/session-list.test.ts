@@ -83,6 +83,25 @@ describe("session.list", () => {
   )
 
   it.instance(
+    "lists current-worktree sessions without SQLite cache rows",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const { db } = yield* Database.Service
+        yield* Effect.promise(() => mkdir(path.join(test.directory, "packages", "opencode"), { recursive: true }))
+
+        const created = yield* withSession({ title: "current-worktree-no-cache" }).pipe(
+          provideInstance(path.join(test.directory, "packages", "opencode")),
+        )
+        yield* db.delete(SessionTable).where(eq(SessionTable.id, created.id)).run().pipe(Effect.orDie)
+
+        const ids = (yield* SessionNs.use.list()).map((session) => session.id)
+        expect(ids).toContain(created.id)
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "filters by directory when directory is provided",
     () =>
       Effect.gen(function* () {
