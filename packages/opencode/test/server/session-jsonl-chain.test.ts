@@ -24,7 +24,7 @@ import { Session } from "@/session/session"
 import { Project } from "../../src/project/project"
 import { InstanceStore } from "../../src/project/instance-store"
 import { InstanceBootstrap } from "../../src/project/bootstrap-service"
-import { disposeAllInstances, provideInstanceEffect, tmpdirScoped } from "../fixture/fixture"
+import { disposeAllInstances, provideInstanceEffect, TestInstance, tmpdirScoped } from "../fixture/fixture"
 import { TestLLMServer } from "../lib/llm-server"
 import { testProviderConfig } from "../lib/test-provider"
 import { testEffect } from "../lib/effect"
@@ -158,4 +158,34 @@ it.live(
       expect(messages.some((m) => m.info.role === "user")).toBe(true)
       expect(messages.some((m) => m.info.role === "assistant")).toBe(true)
     }).pipe(Effect.provide(TestLLMServer.layer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
+)
+
+it.instance(
+  "archived session loads from directory files without SQLite",
+  () =>
+    Effect.gen(function* () {
+      const test = yield* TestInstance
+      const headers = { "x-opencode-directory": test.directory }
+
+      // Create and archive a session
+      const session = yield* Session.use.create({ title: "will be archived" })
+      yield* request(pathFor(SessionPaths.update, { sessionID: session.id }), {
+        method: "PATCH",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ time: { archived: Date.now() } }),
+      })
+
+      // Wipe SQLite — archived list must still work from meta.yaml
+      yield* Effect.promise(resetDatabase)
+
+      const archivedList = yield* requestJson<Array<{ id: string; time: { archived?: number } }>>(
+        `${SessionPaths.list}?archived=true`,
+        { headers },
+      )
+
+      const found = archivedList.find((s) => s.id === session.id)
+      expect(found).toBeDefined()
+      expect(found?.time.archived).toBeDefined()
+    }),
+  { git: true, config: { formatter: false, lsp: false } },
 )
