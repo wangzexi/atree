@@ -392,6 +392,38 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("keeps the runtime projection minimal when creating a file-backed session", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+
+      const created = yield* Effect.acquireRelease(
+        session.create({
+          title: "Created file-backed",
+          metadata: { icon: "🧭" },
+          permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+        }),
+        (info) => session.remove(info.id).pipe(Effect.ignore),
+      )
+
+      const stored = yield* Effect.promise(() => readSessionStore(created.directory, created.id))
+      expect(stored?.title).toBe("Created file-backed")
+      expect(stored?.metadata).toEqual({ icon: "🧭" })
+      expect(stored?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
+
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, created.id)).get().pipe(Effect.orDie)
+      expect(row?.title).toBe("Created file-backed")
+      expect(row?.metadata).toBeNull()
+      expect(row?.permission).toBeNull()
+      expect(row?.time_archived).toBeNull()
+      expect(row?.summary_additions).toBeNull()
+      expect(row?.summary_deletions).toBeNull()
+      expect(row?.summary_files).toBeNull()
+      expect(row?.summary_diffs).toBeNull()
+      expect(row?.revert).toBeNull()
+    }),
+  )
+
   it.effect("reads file-backed messages with an explicit directory and no instance", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

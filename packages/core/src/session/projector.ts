@@ -258,9 +258,14 @@ export const layer = Layer.effectDiscard(
     yield* events.beforeCommit((event) => SessionInput.guardReservedID(db, event))
     yield* events.project(SessionV1.Event.Created, (event) =>
       Effect.gen(function* () {
+        const fileBacked = yield* Effect.promise(() => readSessionStore(event.data.info.directory, event.data.sessionID))
+          .pipe(
+            Effect.map((stored) => stored !== undefined),
+            Effect.catchCause(() => Effect.succeed(false)),
+          )
         const stored = yield* db
           .insert(SessionTable)
-          .values(sessionRow(event.data.info))
+          .values(fileBacked ? runtimeSessionRow(event.data.info) : sessionRow(event.data.info))
           .onConflictDoNothing()
           .returning({ sessionID: SessionTable.id })
           .get()
