@@ -335,4 +335,49 @@ describe("QuestionV2", () => {
       expect(yield* Effect.promise(() => readQuestionStateEntries(target))).toMatchObject([{ request, directory: target }])
     }),
   )
+
+  it.effect("does not read pending questions from archived sessions", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const directory = AbsolutePath.make(tmp.path)
+      const archivedSessionID = SessionV2.ID.make("ses_question_archived_pending")
+      yield* Effect.promise(() =>
+        writeSessionStore(
+          SessionV2.Info.make({
+            id: archivedSessionID,
+            projectID: ProjectV2.ID.global,
+            title: "Question archived",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(2), archived: DateTime.makeUnsafe(3) },
+            location: Location.Ref.make({ directory }),
+          }),
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          SessionV2.Info.make({
+            id: archivedSessionID,
+            projectID: ProjectV2.ID.global,
+            title: "Question archived",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(2), archived: DateTime.makeUnsafe(3) },
+            location: Location.Ref.make({ directory }),
+          }),
+          {
+            type: QuestionV2.Event.Asked.type,
+            id: QuestionV2.ID.ascending("que_archived_pending"),
+            sessionID: archivedSessionID,
+            questions: [question],
+          },
+        ),
+      )
+
+      expect(yield* Effect.promise(() => readQuestionStateEntries(tmp.path))).toEqual([])
+    }),
+  )
 })

@@ -135,6 +135,7 @@
 - core `SessionV2` 已经能恢复文本、reasoning、文件资产、event-backed prompted 用户消息、event-backed assistant step/text/reasoning/tool、agent/model/context/synthetic 直接事件、pending/running/completed 工具调用、shell 事件和 compaction 事件。
 - core `QuestionV2` 和 `PermissionV2` 已能从目录 `session.jsonl` 恢复 pending question/permission，并把 reply 继续写回对应会话日志；但 permission/question 的更完整 UI 状态和历史展示还没有统一成 typed session view model。
 - `QuestionV2` / `PermissionV2` 这一层的目录闭环已经比较明确：恢复 pending、外部 reply/reject、以及 source/target 复制目录下同 session id 的 overlap 场景，都已经有测试覆盖，reply/reject 会回写到各自所属目录的 `session.jsonl`，不会再按同一个 session id 互相串写。
+- core 的 pending 恢复现在也会显式跳过已归档目录会话；归档目录里遗留的 question/permission asked 事件不会再重新出现在待处理列表里。
 - 真正模型输出链路仍主要由 OpenCode 原有 projector/runtime 推动，目录 JSONL 目前是事实源化过程中的镜像与恢复层。
 
 ### 运行层边界审查

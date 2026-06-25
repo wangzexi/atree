@@ -34,6 +34,7 @@ export async function readPermissionStateEntries(rootDirectory?: string) {
   const ambiguous = new Set<string>()
 
   for (const session of sessions) {
+    if (session.time.archived !== undefined) continue
     const raw = await fs.readFile(sessionJsonlPath(session.location.directory, session.id), "utf8").catch((error: unknown) => {
       if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""
       throw error

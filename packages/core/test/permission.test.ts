@@ -496,4 +496,37 @@ describe("PermissionV2", () => {
       expect(yield* Effect.promise(() => readPermissionStateEntries(target))).toMatchObject([{ request, directory: target }])
     }),
   )
+
+  it.effect("does not read pending permissions from archived sessions", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const directory = AbsolutePath.make(tmp.path)
+      const archivedSessionID = SessionV2.ID.make("ses_permission_archived_pending")
+      const archivedSession = SessionV2.Info.make({
+        id: archivedSessionID,
+        projectID: Project.ID.global,
+        title: "Permission archived",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(2), archived: DateTime.makeUnsafe(3) },
+        location: Location.Ref.make({ directory }),
+        agent: AgentV2.ID.make("test"),
+      })
+      yield* Effect.promise(() => writeSessionStore(archivedSession))
+      yield* Effect.promise(() =>
+        appendSessionJsonl(archivedSession, {
+          type: PermissionV2.Event.Asked.type,
+          id: PermissionV2.ID.create("per_archived_pending"),
+          sessionID: archivedSessionID,
+          action: "read",
+          resources: ["src/index.ts"],
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readPermissionStateEntries(tmp.path))).toEqual([])
+    }),
+  )
 })
