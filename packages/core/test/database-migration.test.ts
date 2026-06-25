@@ -15,6 +15,7 @@ import eventSourcedSessionInputMigration from "@opencode-ai/core/database/migrat
 import contextEpochAgentMigration from "@opencode-ai/core/database/migration/20260605042240_add_context_epoch_agent"
 import simplifyIntegrationCredentialsMigration from "@opencode-ai/core/database/migration/20260611192811_lush_chimera"
 import scheduleWithoutSessionFKMigration from "@opencode-ai/core/database/migration/20260625030000_schedule_without_session_fk"
+import removeSessionShareMigration from "@opencode-ai/core/database/migration/20260625030332_remove_session_share"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -203,6 +204,24 @@ describe("DatabaseMigration", () => {
           ran_at: 2,
           status: "completed",
         })
+      }),
+    )
+  })
+
+  test("removes session_share only when the legacy table or column still exists", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE session (id text PRIMARY KEY, title text NOT NULL)`)
+
+        yield* DatabaseMigration.applyOnly(db, [removeSessionShareMigration])
+
+        expect(
+          yield* db.get(sql`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_share'`),
+        ).toBeUndefined()
+        expect(
+          (yield* db.all<{ name: string }>(sql`PRAGMA table_info(session)`)).map((column) => column.name),
+        ).toEqual(["id", "title"])
       }),
     )
   })

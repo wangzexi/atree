@@ -144,6 +144,7 @@
 - core `SessionContextEpoch` 用于重建运行态时，已经继续收紧到“只补 placement 必需字段”：它不会再把目录里的 archived/path/model/cost/tokens 等业务元数据整批镜像回 `SessionTable`，从而减少旧 SQLite 行重新长成业务事实副本的机会。
 - core `SessionProjector` 现在也已经继续收紧：对仍存在目录事实源的 file-backed session，`session.updated` 只保留最小运行投影，并显式清空 `metadata / permission / revert / archived / summary` 这些目录业务字段；旧纯 SQLite 会话仍保留原有完整投影路径。
 - core 的 schedule rebuild migration 也已经补上护栏：`20260625030000_schedule_without_session_fk` 在重建 `schedule/schedule_run` 前会先清掉旧索引名，避免 SQLite 在 `ALTER TABLE ... RENAME TO ...` 之后因为残留的 `schedule_session_idx / schedule_run_idx` 名称冲突而中断迁移。
+- 同一批数据库迁移噪音里，`20260625030332_remove_session_share` 也已经收紧为“有才删”：只有旧 `session_share` 表或 `session.share_url` 列仍然存在时才执行清理，避免 fresh/in-memory 测试库因为历史对象缺失而在迁移阶段提前失败。
 - `ScheduleTable` / `ScheduleRunTable` 也应该逐步降级为运行投影，最终由目录内 schedule 状态和 `session.jsonl` 恢复。
 - 后续如果某个运行表无法自然重建，就说明它仍然混入了业务事实，应该继续拆。
 
