@@ -8,6 +8,8 @@ export default {
       yield* tx.run("PRAGMA foreign_keys = OFF;")
       yield* tx.run("ALTER TABLE `schedule_run` RENAME TO `schedule_run_old`;")
       yield* tx.run("ALTER TABLE `schedule` RENAME TO `schedule_old`;")
+      yield* tx.run("DROP INDEX IF EXISTS `schedule_run_idx`;")
+      yield* tx.run("DROP INDEX IF EXISTS `schedule_session_idx`;")
       yield* tx.run(`
         CREATE TABLE \`schedule\` (
           \`id\` text PRIMARY KEY NOT NULL,

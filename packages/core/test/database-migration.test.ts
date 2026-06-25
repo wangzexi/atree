@@ -14,6 +14,7 @@ import sessionMessageProjectionOrderMigration from "@opencode-ai/core/database/m
 import eventSourcedSessionInputMigration from "@opencode-ai/core/database/migration/20260604172448_event_sourced_session_input"
 import contextEpochAgentMigration from "@opencode-ai/core/database/migration/20260605042240_add_context_epoch_agent"
 import simplifyIntegrationCredentialsMigration from "@opencode-ai/core/database/migration/20260611192811_lush_chimera"
+import scheduleWithoutSessionFKMigration from "@opencode-ai/core/database/migration/20260625030000_schedule_without_session_fk"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { AbsolutePath } from "@opencode-ai/core/schema"
@@ -146,6 +147,62 @@ describe("DatabaseMigration", () => {
         expect(yield* db.get(sql`SELECT connector_id, method_id, active FROM credential WHERE id = 'current'`)).toEqual(
           { connector_id: null, method_id: null, active: null },
         )
+      }),
+    )
+  })
+
+  test("rebuilds schedule tables without colliding with legacy index names", async () => {
+    await run(
+      Effect.gen(function* () {
+        const db = yield* makeDb
+        yield* db.run(sql`CREATE TABLE schedule (
+          id text PRIMARY KEY NOT NULL,
+          session_id text NOT NULL,
+          kind text DEFAULT 'recurring' NOT NULL,
+          expression text NOT NULL,
+          run_at integer,
+          message text NOT NULL,
+          created_at integer NOT NULL
+        )`)
+        yield* db.run(sql`CREATE INDEX schedule_session_idx ON schedule (session_id)`)
+        yield* db.run(sql`CREATE TABLE schedule_run (
+          id text PRIMARY KEY NOT NULL,
+          schedule_id text NOT NULL,
+          ran_at integer NOT NULL,
+          status text NOT NULL,
+          CONSTRAINT fk_schedule_run_schedule_id_schedule_id_fk FOREIGN KEY (schedule_id) REFERENCES schedule(id) ON DELETE CASCADE
+        )`)
+        yield* db.run(sql`CREATE INDEX schedule_run_idx ON schedule_run (schedule_id, ran_at)`)
+        yield* db.run(
+          sql`INSERT INTO schedule (id, session_id, kind, expression, run_at, message, created_at) VALUES ('sch_1', 'ses_1', 'recurring', '* * * * *', null, 'hello', 1)`,
+        )
+        yield* db.run(
+          sql`INSERT INTO schedule_run (id, schedule_id, ran_at, status) VALUES ('run_1', 'sch_1', 2, 'completed')`,
+        )
+
+        yield* DatabaseMigration.applyOnly(db, [scheduleWithoutSessionFKMigration])
+
+        expect(
+          yield* db.get(
+            sql`SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'schedule_session_idx'`,
+          ),
+        ).toEqual({ name: "schedule_session_idx" })
+        expect(
+          yield* db.get(sql`SELECT id, kind, run_at, message FROM schedule WHERE id = 'sch_1'`),
+        ).toEqual({
+          id: "sch_1",
+          kind: "recurring",
+          run_at: null,
+          message: "hello",
+        })
+        expect(
+          yield* db.get(sql`SELECT id, schedule_id, ran_at, status FROM schedule_run WHERE id = 'run_1'`),
+        ).toEqual({
+          id: "run_1",
+          schedule_id: "sch_1",
+          ran_at: 2,
+          status: "completed",
+        })
       }),
     )
   })
