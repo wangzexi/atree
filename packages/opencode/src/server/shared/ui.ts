@@ -106,7 +106,7 @@ export function serveUIEffect(
   services: { fs: FSUtil.Interface; client: HttpClient.HttpClient; disableEmbeddedWebUi: boolean },
 ) {
   return Effect.gen(function* () {
-    const localWebUI = yield* Effect.promise(() => localUI())
+    const localWebUI = services.disableEmbeddedWebUi ? null : yield* Effect.promise(() => localUI())
     const embeddedWebUI =
       localWebUI ?? (yield* Effect.promise(() => embeddedUI(services.disableEmbeddedWebUi)))
     const path = new URL(request.url, "http://localhost").pathname
