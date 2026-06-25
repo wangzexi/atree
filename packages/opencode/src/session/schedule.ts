@@ -23,7 +23,7 @@ import {
 } from "@/atree/schedule-store"
 import {
   appendSessionJsonl,
-  findSessionStore,
+  findWorkspaceSessionStores,
   readSessionStore,
   readSessionStores,
   readSessionStoresDeep,
@@ -306,17 +306,9 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
       const hasAlternateFileSession =
         directory !== undefined
-          ? yield* Effect.promise(() => readWorkspaceState()).pipe(
-              Effect.flatMap((state) =>
-                state.rootDirectory
-                  ? Effect.promise(() => readSessionStoresDeep(state.rootDirectory!))
-                  : Effect.succeed([]),
-              ),
+          ? yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
               Effect.map((sessions) =>
-                sessions.some(
-                  (session) =>
-                    session.id === sessionID && path.resolve(session.directory) !== path.resolve(directory),
-                ),
+                sessions.some((session) => path.resolve(session.directory) !== path.resolve(directory)),
               ),
               Effect.catchCause(() => Effect.succeed(false)),
             )
@@ -910,12 +902,9 @@ export const layer = Layer.effect(
       schedules: ReadonlyArray<Info>,
     ) {
       const wantedIDs = new Set(schedules.filter(canRestoreStoredSchedule).map((schedule) => schedule.id))
-      const hasAlternateFileSession = yield* Effect.promise(() => readWorkspaceState()).pipe(
-        Effect.flatMap((state) =>
-          state.rootDirectory ? Effect.promise(() => readSessionStoresDeep(state.rootDirectory!)) : Effect.succeed([]),
-        ),
+      const hasAlternateFileSession = yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
         Effect.map((sessions) =>
-          sessions.some((session) => session.id === sessionID && path.resolve(session.directory) !== path.resolve(directory)),
+          sessions.some((session) => path.resolve(session.directory) !== path.resolve(directory)),
         ),
         Effect.catchCause(() => Effect.succeed(false)),
       )
@@ -1224,16 +1213,10 @@ export const layer = Layer.effect(
       const directory = yield* sessionDirectory(sessionID, options?.directory)
       if (options?.directory && !directory) return
       if (!options?.directory && !directory) {
-        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+        const matches = yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed([])),
         )
-        if (state.rootDirectory) {
-          const matches = yield* Effect.promise(() => readSessionStoresDeep(state.rootDirectory!)).pipe(
-            Effect.map((sessions) => sessions.filter((session) => session.id === sessionID)),
-            Effect.catchCause(() => Effect.succeed([])),
-          )
-          if (matches.length > 0) return
-        }
+        if (matches.length > 0) return
       }
       const stored = directory ? yield* Effect.promise(() => readSessionScheduleState(directory, sessionID)) : []
       if (options?.directory && directory) {

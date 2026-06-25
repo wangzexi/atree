@@ -5,12 +5,15 @@ import path from "path"
 import {
   appendSessionJsonl,
   findSessionStore,
+  findWorkspaceSessionStores,
   readSessionJsonlMessages,
   readSessionJsonlProjection,
   readSessionStore,
   readSessionStores,
   writeSessionStore,
 } from "../../src/atree/session-store"
+import { writeWorkspaceRoot } from "../../src/atree/state"
+import { Global } from "@opencode-ai/core/global"
 
 const temps: string[] = []
 
@@ -465,6 +468,53 @@ describe("atree session store", () => {
     } as any)
 
     expect(await findSessionStore(root, "ses_ambiguous_lookup" as any)).toBeUndefined()
+  })
+
+  test("lists copied workspace session stores for one session id under the persisted root", async () => {
+    const data = await tempdir()
+    const previousData = Global.Path.data
+    ;(Global.Path as { data: string }).data = data
+    try {
+      const root = await tempdir()
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      await fs.mkdir(source, { recursive: true })
+      await fs.mkdir(target, { recursive: true })
+      await writeWorkspaceRoot(root)
+
+      await writeSessionStore({
+        id: "ses_workspace_copies",
+        slug: "workspace-copy-source",
+        version: "test",
+        projectID: "proj_test",
+        directory: source,
+        path: "source",
+        title: "Workspace copy source",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 2 },
+      } as any)
+      await writeSessionStore({
+        id: "ses_workspace_copies",
+        slug: "workspace-copy-target",
+        version: "test",
+        projectID: "proj_test",
+        directory: target,
+        path: "target",
+        title: "Workspace copy target",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 3 },
+      } as any)
+
+      const matches = await findWorkspaceSessionStores("ses_workspace_copies" as any)
+      expect(matches.map((session) => session.directory)).toEqual([
+        await fs.realpath(target),
+        await fs.realpath(source),
+      ])
+    } finally {
+      ;(Global.Path as { data: string }).data = previousData
+    }
   })
 
   test("treats the containing directory as authoritative when a session store is copied", async () => {

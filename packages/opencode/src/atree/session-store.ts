@@ -1403,6 +1403,12 @@ export async function findWorkspaceSessionStore(sessionID: SessionID) {
   return findSessionStore(state.rootDirectory, sessionID)
 }
 
+export async function findWorkspaceSessionStores(sessionID: SessionID) {
+  const state = await readWorkspaceState()
+  if (!state.rootDirectory) return [] as SessionInfo[]
+  return (await readSessionStoresDeep(state.rootDirectory)).filter((session) => session.id === sessionID)
+}
+
 export async function touchSessionStore(directory: string, sessionID: SessionID, updatedAt = Date.now()) {
   const current = await readSessionStore(directory, sessionID)
   if (!current) return
