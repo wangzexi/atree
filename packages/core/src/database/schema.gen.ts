@@ -223,8 +223,7 @@ export default {
           \`expression\` text NOT NULL,
           \`run_at\` integer,
           \`message\` text NOT NULL,
-          \`created_at\` integer NOT NULL,
-          CONSTRAINT \`fk_schedule_session_id_session_id_fk\` FOREIGN KEY (\`session_id\`) REFERENCES \`session\`(\`id\`) ON DELETE CASCADE
+          \`created_at\` integer NOT NULL
         );
       `)
       yield* tx.run(`

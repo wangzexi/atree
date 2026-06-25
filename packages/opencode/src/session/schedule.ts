@@ -15,8 +15,6 @@ import { Location } from "@opencode-ai/core/location"
 import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
-import { SessionTable } from "@opencode-ai/core/session/sql"
-import { ProjectTable } from "@opencode-ai/core/project/sql"
 import {
   findSessionScheduleState,
   readSessionScheduleProjection,
@@ -468,76 +466,6 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
     })
 
-    const ensureFileSessionProject = Effect.fn("Schedule.ensureFileSessionProject")(function* (session: FileSession) {
-      const existing = yield* db
-        .select({ id: ProjectTable.id })
-        .from(ProjectTable)
-        .where(eq(ProjectTable.id, session.projectID))
-        .get()
-        .pipe(Effect.orDie)
-      if (existing) return
-      const now = Date.now()
-      yield* db
-        .insert(ProjectTable)
-        .values({
-          id: session.projectID,
-          worktree: AbsolutePath.make(session.directory),
-          vcs: null,
-          name: null,
-          time_created: now,
-          time_updated: now,
-          sandboxes: [],
-        } as typeof ProjectTable.$inferInsert)
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.orDie)
-    })
-
-    const ensureFileSessionCache = Effect.fn("Schedule.ensureFileSessionCache")(function* (session: FileSession) {
-      const existing = yield* db
-        .select({ id: SessionTable.id })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, session.id))
-        .get()
-        .pipe(Effect.orDie)
-      if (existing) return
-      const ctx = yield* currentInstance
-      const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
-      const projectID = ctx?.project.id ?? session.projectID
-      yield* ensureFileSessionProject({ ...session, projectID })
-      const row = {
-        id: session.id,
-        project_id: projectID,
-        workspace_id: session.workspaceID ?? null,
-        parent_id: session.parentID ?? null,
-        slug: session.slug,
-        directory: session.directory,
-        path: session.path ?? null,
-        title: session.title,
-        agent: session.agent ?? null,
-        model: session.model ?? null,
-        version: session.version,
-        summary_additions: session.summary?.additions ?? null,
-        summary_deletions: session.summary?.deletions ?? null,
-        summary_files: session.summary?.files ?? null,
-        summary_diffs: session.summary?.diffs ?? null,
-        revert: session.revert ?? null,
-        metadata: session.metadata ?? null,
-        permission: session.permission ?? null,
-        cost: session.cost,
-        tokens_input: tokens.input,
-        tokens_output: tokens.output,
-        tokens_reasoning: tokens.reasoning,
-        tokens_cache_read: tokens.cache.read,
-        tokens_cache_write: tokens.cache.write,
-        time_created: session.time.created,
-        time_updated: session.time.updated,
-        time_compacting: session.time.compacting ?? null,
-        time_archived: session.time.archived ?? null,
-      } as typeof SessionTable.$inferInsert
-      yield* db.insert(SessionTable).values(row).onConflictDoNothing().run().pipe(Effect.orDie)
-    })
-
     const resolveSessionLocation = Effect.fn("Schedule.resolveSessionLocation")(function* (
       sessionID: SessionID,
       fallbackDirectory?: string,
@@ -549,7 +477,6 @@ export const layer = Layer.effect(
         instanceDirectory: directory,
       })
       if (session) {
-        yield* ensureFileSessionCache(session)
         return {
           type: "found",
           directory: session.directory,

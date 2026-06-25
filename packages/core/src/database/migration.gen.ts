@@ -39,5 +39,6 @@ export const migrations = (
     import("./migration/20260612174303_project_dir_strategy"),
     import("./migration/20260613150000_schedule"),
     import("./migration/20260614093000_schedule_once"),
+    import("./migration/20260625030000_schedule_without_session_fk"),
   ])
 ).map((module) => module.default) satisfies DatabaseMigration.Migration[]

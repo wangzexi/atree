@@ -1920,7 +1920,7 @@ describe("atree schedule restore", () => {
       const row = yield* Database.Service.use(({ db }) =>
         db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
       )
-      expect(row?.directory).toBe(instance.directory)
+      expect(row).toBeUndefined()
     }),
   )
 
