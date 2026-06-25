@@ -28,6 +28,37 @@ const current = Layer.succeed(
 const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store), Layer.provide(current))
 const it = testEffect(Layer.mergeAll(database, events, store, current, questions))
 
+function currentLocationLayer(directory: string) {
+  return Layer.succeed(
+    Location.Service,
+    Location.Service.of({
+      directory: AbsolutePath.make(directory),
+      project: { id: ProjectV2.ID.global, directory: AbsolutePath.make(directory) },
+      vcs: undefined,
+    }),
+  )
+}
+
+function questionLayerForDirectory(directory: string) {
+  const scopedCurrent = currentLocationLayer(directory)
+  const scopedQuestions = QuestionV2.layer.pipe(
+    Layer.provide(events),
+    Layer.provide(store),
+    Layer.provide(scopedCurrent),
+  )
+  return Layer.mergeAll(database, events, store, scopedCurrent, scopedQuestions)
+}
+
+function questionServiceForDirectory(directory: string) {
+  return Effect.gen(function* () {
+    const scope = yield* Scope.make()
+    const context = yield* Layer.buildWithScope(Layer.fresh(questionLayerForDirectory(directory)), scope)
+    const service = Context.get(context, QuestionV2.Service)
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+    return service
+  })
+}
+
 async function writeAtreeSession(input: {
   data: string
   root: string
@@ -104,7 +135,7 @@ describe("QuestionV2 atree state", () => {
         }),
       )
 
-      const service = yield* QuestionV2.Service
+      const service = yield* questionServiceForDirectory(node)
       const fiber = yield* service
         .ask({
           sessionID,
@@ -207,7 +238,7 @@ describe("QuestionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* QuestionV2.Service
+      const service = yield* questionServiceForDirectory(node)
       const restored = yield* service.list()
       expect(restored.map((item) => item.id)).toEqual([pendingID])
       expect(restored[0]?.sessionID).toBe(sessionID)
@@ -277,7 +308,7 @@ describe("QuestionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* QuestionV2.Service
+      const service = yield* questionServiceForDirectory(node)
       expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
 
       yield* Effect.promise(() =>
@@ -361,7 +392,7 @@ describe("QuestionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* QuestionV2.Service
+      const service = yield* questionServiceForDirectory(target)
       expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
       yield* service.reply({ requestID: pendingID, answers: [["No"]] })
 
@@ -405,7 +436,7 @@ describe("QuestionV2 atree state", () => {
         }),
       )
 
-      const service = yield* QuestionV2.Service
+      const service = yield* questionServiceForDirectory(target)
       const fiber = yield* service
         .ask({
           sessionID,
@@ -542,7 +573,10 @@ describe("QuestionV2 atree state", () => {
       )
 
       const scope = yield* Scope.make()
-      const service = Context.get(yield* Layer.buildWithScope(Layer.fresh(questions), scope), QuestionV2.Service)
+      const service = Context.get(
+        yield* Layer.buildWithScope(Layer.fresh(questionLayerForDirectory(node)), scope),
+        QuestionV2.Service,
+      )
       expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
       yield* Scope.close(scope, Exit.void)
 

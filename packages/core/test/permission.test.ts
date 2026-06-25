@@ -1,4 +1,5 @@
 import { describe, expect } from "bun:test"
+import os from "os"
 import path from "path"
 import { readFile } from "fs/promises"
 import { DateTime, Deferred, Effect, Fiber, Layer } from "effect"
@@ -24,9 +25,10 @@ import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
 const database = Database.layerFromPath(":memory:")
+const testDirectory = AbsolutePath.make(path.join(os.tmpdir(), "atree-core-permission-project"))
 const current = Layer.succeed(
   Location.Service,
-  Location.Service.of(location({ directory: AbsolutePath.make("/project") })),
+  Location.Service.of(location({ directory: testDirectory })),
 )
 const events = EventV2.layer.pipe(Layer.provide(database))
 const store = SessionStore.layer.pipe(Layer.provide(database))
@@ -49,12 +51,12 @@ const layer = PermissionV2.locationLayer.pipe(
 )
 const it = testEffect(layer)
 
-function setup(rules: PermissionV2.Ruleset = []) {
+function setup(rules: PermissionV2.Ruleset = [], sessionAgent: AgentV2.ID | null = AgentV2.ID.make("test")) {
   return Effect.gen(function* () {
     const { db } = yield* Database.Service
     yield* db
       .insert(ProjectTable)
-      .values({ id: Project.ID.global, worktree: AbsolutePath.make("/project"), sandboxes: [] })
+      .values({ id: Project.ID.global, worktree: testDirectory, sandboxes: [] })
       .onConflictDoNothing()
       .run()
       .pipe(Effect.orDie)
@@ -64,14 +66,28 @@ function setup(rules: PermissionV2.Ruleset = []) {
         id: SessionV2.ID.make("ses_test"),
         project_id: Project.ID.global,
         slug: "test",
-        directory: "/project",
+        directory: testDirectory,
         title: "test",
         version: "test",
-        agent: "test",
+        agent: sessionAgent,
       })
       .onConflictDoNothing()
       .run()
       .pipe(Effect.orDie)
+    yield* Effect.promise(() =>
+      writeSessionStore(
+        SessionV2.Info.make({
+          id: SessionV2.ID.make("ses_test"),
+          projectID: Project.ID.global,
+          title: "test",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          location: Location.Ref.make({ directory: testDirectory }),
+          ...(sessionAgent ? { agent: sessionAgent } : {}),
+        }),
+      ),
+    ).pipe(Effect.orDie)
     yield* setRules(rules)
   })
 }
@@ -265,14 +281,7 @@ describe("PermissionV2", () => {
 
   it.effect("uses build permissions when the Session agent is omitted", () =>
     Effect.gen(function* () {
-      yield* setup()
-      const { db } = yield* Database.Service
-      yield* db
-        .update(SessionTable)
-        .set({ agent: null })
-        .where(eq(SessionTable.id, SessionV2.ID.make("ses_test")))
-        .run()
-        .pipe(Effect.orDie)
+      yield* setup([], null)
       const agents = yield* AgentV2.Service
       const update = yield* agents.transform()
       yield* update((editor) =>
@@ -292,14 +301,7 @@ describe("PermissionV2", () => {
 
   it.effect("denies omitted-agent permissions when no primary default agent exists", () =>
     Effect.gen(function* () {
-      yield* setup()
-      const { db } = yield* Database.Service
-      yield* db
-        .update(SessionTable)
-        .set({ agent: null })
-        .where(eq(SessionTable.id, SessionV2.ID.make("ses_test")))
-        .run()
-        .pipe(Effect.orDie)
+      yield* setup([], null)
       const agents = yield* AgentV2.Service
       yield* agents.update((editor) => {
         editor.remove(AgentV2.ID.make("test"))

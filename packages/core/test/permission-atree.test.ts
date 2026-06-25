@@ -44,6 +44,36 @@ const permissions = PermissionV2.locationLayer.pipe(
 )
 const it = testEffect(permissions)
 
+function currentLocationLayer(directory: string) {
+  return Layer.succeed(
+    Location.Service,
+    Location.Service.of(location({ directory: AbsolutePath.make(directory) })),
+  )
+}
+
+function permissionLayerForDirectory(directory: string) {
+  const scopedCurrent = currentLocationLayer(directory)
+  return PermissionV2.locationLayer.pipe(
+    Layer.provideMerge(database),
+    Layer.provideMerge(store),
+    Layer.provideMerge(events),
+    Layer.provideMerge(scopedCurrent),
+    Layer.provideMerge(sessions),
+    Layer.provideMerge(SessionExecution.noopLayer),
+    Layer.provideMerge(saved),
+  )
+}
+
+function permissionServiceForDirectory(directory: string) {
+  return Effect.gen(function* () {
+    const scope = yield* Scope.make()
+    const context = yield* Layer.buildWithScope(Layer.fresh(permissionLayerForDirectory(directory)), scope)
+    const service = Context.get(context, PermissionV2.Service)
+    yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
+    return service
+  })
+}
+
 function setRules(rules: PermissionV2.Ruleset) {
   return Effect.gen(function* () {
     const agents = yield* AgentV2.Service
@@ -223,7 +253,7 @@ describe("PermissionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* PermissionV2.Service
+      const service = yield* permissionServiceForDirectory(node)
       const restored = yield* service.list()
       expect(restored.map((item) => item.id)).toEqual([pendingID])
       expect(restored[0]?.sessionID).toBe(sessionID)
@@ -292,7 +322,7 @@ describe("PermissionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* PermissionV2.Service
+      const service = yield* permissionServiceForDirectory(node)
       expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
 
       yield* Effect.promise(() =>
@@ -375,7 +405,7 @@ describe("PermissionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* PermissionV2.Service
+      const service = yield* permissionServiceForDirectory(target)
       expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
       yield* service.reply({ requestID: pendingID, reply: "once" })
 
@@ -545,7 +575,7 @@ describe("PermissionV2 atree state", () => {
         ]),
       )
 
-      const service = yield* PermissionV2.Service
+      const service = yield* permissionServiceForDirectory(node)
       expect((yield* service.list()).map((item) => item.id)).toEqual([firstID, secondID])
       yield* Effect.exit(service.reply({ requestID: firstID, reply: "reject" }))
       expect(yield* service.list()).toEqual([])
@@ -618,7 +648,10 @@ describe("PermissionV2 atree state", () => {
       )
 
       const scope = yield* Scope.make()
-      const service = Context.get(yield* Layer.buildWithScope(Layer.fresh(permissions), scope), PermissionV2.Service)
+      const service = Context.get(
+        yield* Layer.buildWithScope(Layer.fresh(permissionLayerForDirectory(node)), scope),
+        PermissionV2.Service,
+      )
       expect((yield* service.list()).map((item) => item.id)).toEqual([pendingID])
       yield* Scope.close(scope, Exit.void)
 
