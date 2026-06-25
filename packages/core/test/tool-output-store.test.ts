@@ -616,13 +616,33 @@ describe("ToolOutputStore", () => {
     ),
   )
 
-  it.live("cleans expired managed files and preserves unrelated files", () =>
+  it.live("cleans expired session asset files and preserves unrelated files", () =>
     withStore(({ root, store, fs }) =>
       Effect.gen(function* () {
-        const old = path.join(root, "tool-output", "tool_old")
-        const recent = path.join(root, "tool-output", "tool_recent")
-        const unrelated = path.join(root, "tool-output", "keep.txt")
-        yield* fs.ensureDir(path.join(root, "tool-output"))
+        const directory = yield* Effect.promise(() => tmpdir())
+        yield* Effect.addFinalizer(() => Effect.promise(() => directory[Symbol.asyncDispose]()).pipe(Effect.ignore))
+        yield* fs.ensureDir(path.join(root, "atree"))
+        yield* Effect.promise(() => writeFile(path.join(root, "atree", "state.json"), JSON.stringify({
+          version: 1,
+          rootDirectory: directory.path,
+          updatedAt: 1,
+        })))
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            projectID: Project.ID.global,
+            title: "Cleanup tool output",
+            location: { directory: AbsolutePath.make(directory.path) },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }),
+        )
+        const managed = path.join(directory.path, ".agents", "atree", "sessions", sessionID, "assets", "tool-output")
+        const old = path.join(managed, "tool_old")
+        const recent = path.join(managed, "tool_recent")
+        const unrelated = path.join(managed, "keep.txt")
+        yield* fs.ensureDir(managed)
         yield* fs.writeFileString(old, "old")
         yield* fs.writeFileString(recent, "recent")
         yield* fs.writeFileString(unrelated, "keep")

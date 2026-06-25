@@ -81,6 +81,7 @@
 - `listGlobal()` 对嵌套目录 file-backed session 的 project 展示也继续纠偏了：即使 `ProjectTable` 缓存行缺失，它现在也会重新解析真实 git root，而不是把 session 节点目录误当成 project worktree。
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。
 - core 的 `QuestionV2` / `PermissionV2` 在“无显式目录但当前 `Location.directory` 缺席该会话”时也已经继续收紧：它们不会再退回到 persisted root / `SessionStore.get(sessionID)` 去猜别的 copied session，隐式目录路径现在同样服从“只认当前目录”的规则。
+- core 的 `ToolOutputStore` 现在也不再围绕全局 `data/tool-output` 做 retention；超长工具输出仍然只写当前会话的 `.agents/atree/sessions/<id>/assets/tool-output/`，而定期清理也改成基于 workspace root 深扫这些会话资产目录，删除过期 `tool_*` 文件，不再依赖任何全局输出目录。
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。
 - core 的 `SessionStore` 现在开始承担目录会话列表读取，`V2Session.list` 不再自己直接读 persisted root / deep session store；会话发现规则继续收口到同一层。

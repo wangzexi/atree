@@ -5,7 +5,7 @@ import { Context, Duration, Effect, Layer, Option, Schedule, Schema } from "effe
 import { Config } from "./config"
 import { FSUtil } from "./fs-util"
 import { Global } from "./global"
-import { ensureSessionPayloadFilesByID, readSessionStore } from "./atree/session-store"
+import { ensureSessionPayloadFilesByID, readSessionStore, readSessionStoresDeep } from "./atree/session-store"
 import { SessionSchema } from "./session/schema"
 import { SessionStore } from "./session/store"
 import { Identifier } from "./util/identifier"
@@ -113,7 +113,6 @@ export const layer = Layer.effect(
     const global = yield* Global.Service
     const config = yield* Effect.serviceOption(Config.Service)
     const sessions = yield* Effect.serviceOption(SessionStore.Service)
-    const globalDirectory = path.join(global.data, MANAGED_DIRECTORY)
     const limits = Effect.fn("ToolOutputStore.limits")(function* () {
       if (Option.isNone(config)) return { maxLines: MAX_LINES, maxBytes: MAX_BYTES }
       const entries = yield* config.value.entries().pipe(Effect.catch(() => Effect.succeed([] as Config.Entry[])))
@@ -213,18 +212,43 @@ export const layer = Layer.effect(
       }
     })
 
+    const workspaceSessions = Effect.fn("ToolOutputStore.workspaceSessions")(function* () {
+      const statePath = path.join(global.data, "atree", "state.json")
+      const state = yield* fs.readJson(statePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
+      const rootDirectory =
+        state && typeof state === "object" && "rootDirectory" in state && typeof state.rootDirectory === "string"
+          ? state.rootDirectory
+          : undefined
+      if (!rootDirectory) return [] as SessionSchema.Info[]
+      return yield* Effect.promise(() => readSessionStoresDeep(rootDirectory)).pipe(
+        Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
+      )
+    })
+
     const cleanup = Effect.fn("ToolOutputStore.cleanup")(function* () {
-      const entries = yield* fs.readDirectory(globalDirectory).pipe(Effect.catch(() => Effect.succeed([])))
       const cutoff = Date.now() - Duration.toMillis(RETENTION)
-      for (const entry of entries) {
-        if (!entry.startsWith("tool_")) continue
-        const file = path.join(globalDirectory, entry)
-        const info = yield* fs.stat(file).pipe(Effect.catch(() => Effect.void))
-        const modified = info?.mtime.pipe(
-          Option.map((date) => date.getTime()),
-          Option.getOrElse(() => 0),
+      const fileSessions = yield* workspaceSessions()
+      for (const session of fileSessions) {
+        const directory = path.join(
+          session.location.directory,
+          ".agents",
+          "atree",
+          "sessions",
+          session.id,
+          "assets",
+          MANAGED_DIRECTORY,
         )
-        if (modified !== undefined && modified < cutoff) yield* fs.remove(file).pipe(Effect.catch(() => Effect.void))
+        const entries = yield* fs.readDirectory(directory).pipe(Effect.catch(() => Effect.succeed([])))
+        for (const entry of entries) {
+          if (!entry.startsWith("tool_")) continue
+          const file = path.join(directory, entry)
+          const info = yield* fs.stat(file).pipe(Effect.catch(() => Effect.void))
+          const modified = info?.mtime.pipe(
+            Option.map((date) => date.getTime()),
+            Option.getOrElse(() => 0),
+          )
+          if (modified !== undefined && modified < cutoff) yield* fs.remove(file).pipe(Effect.catch(() => Effect.void))
+        }
       }
     })
 
