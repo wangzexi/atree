@@ -173,4 +173,68 @@ describe("atree session resolver", () => {
       expect(resolved).toBeUndefined()
     }),
   )
+
+  it.effect("resolves a nested file-backed session from an explicit root directory hint", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-explicit-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const nested = path.join(root, "projects", "daily")
+      yield* Effect.promise(() => fs.mkdir(nested, { recursive: true }))
+
+      const sessionID = "ses_resolver_explicit_root_nested" as never
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "resolver-explicit-root-nested",
+          version: "test",
+          projectID: "global" as never,
+          path: "projects/daily",
+          directory: nested,
+          title: "Explicit root nested",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: 1, updated: 1 },
+        } as never),
+      )
+
+      const resolved = yield* resolveFileSession({ sessionID, directory: root })
+      const expected = yield* Effect.promise(() => fs.realpath(nested))
+
+      expect(resolved?.directory).toBe(expected)
+      expect(resolved?.title).toBe("Explicit root nested")
+    }),
+  )
+
+  it.effect("does not resolve an explicit root directory when nested copies make the session id ambiguous", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-explicit-root-ambiguous-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+
+      const sessionID = "ses_resolver_explicit_root_ambiguous" as never
+      const base = {
+        id: sessionID,
+        slug: "resolver-explicit-root-ambiguous",
+        version: "test",
+        projectID: "global" as never,
+        path: ".",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 1 },
+      }
+      yield* Effect.promise(() => writeSessionStore({ ...base, directory: source, title: "Explicit root source" } as never))
+      yield* Effect.promise(() => writeSessionStore({ ...base, directory: target, title: "Explicit root target" } as never))
+
+      const resolved = yield* resolveFileSession({ sessionID, directory: root })
+
+      expect(resolved).toBeUndefined()
+    }),
+  )
 })
