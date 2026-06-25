@@ -5,7 +5,6 @@ import path from "path"
 import {
   appendSessionJsonl,
   findSessionStore,
-  findWorkspaceSessionStores,
   readWorkspaceSessionStoresDeep,
   readSessionJsonlMessages,
   readSessionJsonlProjection,
@@ -508,7 +507,7 @@ describe("atree session store", () => {
         time: { created: 1, updated: 3 },
       } as any)
 
-      const matches = await findWorkspaceSessionStores("ses_workspace_copies" as any)
+      const matches = (await readWorkspaceSessionStoresDeep()).filter((session) => session.id === ("ses_workspace_copies" as any))
       expect(matches.map((session) => session.directory)).toEqual([
         await fs.realpath(target),
         await fs.realpath(source),

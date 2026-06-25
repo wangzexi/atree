@@ -1403,10 +1403,6 @@ export async function readWorkspaceSessionStoresDeep() {
   return readSessionStoresDeep(rootDirectory)
 }
 
-export async function findWorkspaceSessionStores(sessionID: SessionID) {
-  return (await readWorkspaceSessionStoresDeep()).filter((session) => session.id === sessionID)
-}
-
 export async function touchSessionStore(directory: string, sessionID: SessionID, updatedAt = Date.now()) {
   const current = await readSessionStore(directory, sessionID)
   if (!current) return
