@@ -12,7 +12,8 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { appendSessionJsonl, writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { readQuestionStateEntries } from "@opencode-ai/core/atree/question-store"
 import { testEffect } from "./lib/effect"
 import { tmpdir } from "./fixture/tmpdir"
 
@@ -122,10 +123,19 @@ describe("QuestionV2", () => {
       )
         .trim()
         .split("\n")
+        .filter((line) => line.trim().length > 0)
         .map((line) => JSON.parse(line) as Record<string, unknown>)
-      expect(entries.some((entry) => entry.type === QuestionV2.Event.Asked.type && entry.id === request.id)).toBe(true)
       expect(
-        entries.some((entry) => entry.type === QuestionV2.Event.Replied.type && entry.requestID === request.id),
+        entries.some((entry) => {
+          const data = typeof entry.data === "object" && entry.data !== null ? (entry.data as Record<string, unknown>) : entry
+          return entry.type === QuestionV2.Event.Asked.type && data.id === request.id
+        }),
+      ).toBe(true)
+      expect(
+        entries.some((entry) => {
+          const data = typeof entry.data === "object" && entry.data !== null ? (entry.data as Record<string, unknown>) : entry
+          return entry.type === QuestionV2.Event.Replied.type && data.requestID === request.id
+        }),
       ).toBe(true)
     }),
   )
@@ -179,6 +189,72 @@ describe("QuestionV2", () => {
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) expect(exit.cause.toString()).toContain("QuestionV2.RejectedError")
       yield* Scope.close(secondScope, Exit.void)
+    }),
+  )
+
+  it.effect("does not restore ambiguous copied pending questions across directories", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const source = AbsolutePath.make(path.join(tmp.path, "source"))
+      const target = AbsolutePath.make(path.join(tmp.path, "target"))
+      const copiedSessionID = SessionV2.ID.make("ses_question_copied")
+      const requestID = QuestionV2.ID.ascending("que_copied")
+
+      const writeSession = (directory: AbsolutePath, title: string) =>
+        writeSessionStore(
+          SessionV2.Info.make({
+            id: copiedSessionID,
+            projectID: ProjectV2.ID.global,
+            title,
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            location: Location.Ref.make({ directory }),
+          }),
+        )
+
+      yield* Effect.promise(() => writeSession(source, "Question source"))
+      yield* Effect.promise(() => writeSession(target, "Question target"))
+
+      const request: QuestionV2.Request = {
+        id: requestID,
+        sessionID: copiedSessionID,
+        questions: [question],
+      }
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          SessionV2.Info.make({
+            id: copiedSessionID,
+            projectID: ProjectV2.ID.global,
+            title: "Question source",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            location: Location.Ref.make({ directory: source }),
+          }),
+          { type: QuestionV2.Event.Asked.type, ...request },
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          SessionV2.Info.make({
+            id: copiedSessionID,
+            projectID: ProjectV2.ID.global,
+            title: "Question target",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            location: Location.Ref.make({ directory: target }),
+          }),
+          { type: QuestionV2.Event.Asked.type, ...request },
+        ),
+      )
+
+      expect(yield* Effect.promise(() => readQuestionStateEntries(tmp.path))).toEqual([])
     }),
   )
 })

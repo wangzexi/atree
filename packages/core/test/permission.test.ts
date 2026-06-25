@@ -16,7 +16,8 @@ import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionExecution } from "@opencode-ai/core/session/execution"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { appendSessionJsonl, writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import { readPermissionStateEntries } from "@opencode-ai/core/atree/permission-store"
 import { eq } from "drizzle-orm"
 import { location } from "./fixture/location"
 import { testEffect } from "./lib/effect"
@@ -195,12 +196,19 @@ describe("PermissionV2", () => {
       )
         .trim()
         .split("\n")
+        .filter((line) => line.trim().length > 0)
         .map((line) => JSON.parse(line) as Record<string, unknown>)
-      expect(entries.some((entry) => entry.type === PermissionV2.Event.Asked.type && entry.id === request.id)).toBe(
-        true,
-      )
       expect(
-        entries.some((entry) => entry.type === PermissionV2.Event.Replied.type && entry.requestID === request.id),
+        entries.some((entry) => {
+          const data = typeof entry.data === "object" && entry.data !== null ? (entry.data as Record<string, unknown>) : entry
+          return entry.type === PermissionV2.Event.Asked.type && data.id === request.id
+        }),
+      ).toBe(true)
+      expect(
+        entries.some((entry) => {
+          const data = typeof entry.data === "object" && entry.data !== null ? (entry.data as Record<string, unknown>) : entry
+          return entry.type === PermissionV2.Event.Replied.type && data.requestID === request.id
+        }),
       ).toBe(true)
     }),
   )
@@ -380,6 +388,59 @@ describe("PermissionV2", () => {
       yield* service.assert(assertion({ id: PermissionV2.ID.create("per_next"), resources: ["src/next.ts"] }))
       yield* saved.remove(id)
       expect(yield* saved.list()).toEqual([])
+    }),
+  )
+
+  it.effect("does not restore ambiguous copied pending permissions across directories", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const source = AbsolutePath.make(path.join(tmp.path, "source"))
+      const target = AbsolutePath.make(path.join(tmp.path, "target"))
+      const copiedSessionID = SessionV2.ID.make("ses_permission_copied")
+      const requestID = PermissionV2.ID.create("per_copied")
+
+      const sourceSession = SessionV2.Info.make({
+        id: copiedSessionID,
+        projectID: Project.ID.global,
+        title: "Permission source",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        location: Location.Ref.make({ directory: source }),
+        agent: AgentV2.ID.make("test"),
+      })
+      const targetSession = SessionV2.Info.make({
+        ...sourceSession,
+        title: "Permission target",
+        location: Location.Ref.make({ directory: target }),
+      })
+      yield* Effect.promise(() => writeSessionStore(sourceSession))
+      yield* Effect.promise(() => writeSessionStore(targetSession))
+
+      const request: PermissionV2.Request = {
+        id: requestID,
+        sessionID: copiedSessionID,
+        action: "read",
+        resources: ["src/index.ts"],
+      }
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(sourceSession, {
+          type: PermissionV2.Event.Asked.type,
+          ...request,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(targetSession, {
+          type: PermissionV2.Event.Asked.type,
+          ...request,
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readPermissionStateEntries(tmp.path))).toEqual([])
     }),
   )
 })

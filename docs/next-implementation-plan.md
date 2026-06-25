@@ -483,11 +483,18 @@ Playwright 护栏
   - 如果同一个 `session_id` 被显式切到另一个目录，会先把 `SessionTable` 缓存行重绑到当前目录。
   - 旧目录遗留的 `session_context_epoch` 会被丢弃，不再拿另一份副本的 snapshot 继续 reconcile。
   - 这让 context epoch 在 copied session 场景下退化为“当前目录的可丢弃缓存”，而不是跨目录共享的业务真相。
+- `question-store` / `permission-store` 现在在无显式目录作用域时，会把 copied session 中重复出现的 pending request id 视为歧义并直接忽略：
+  - 不再在两个目录副本之间随机恢复其中一个 pending question / permission。
+  - 这让 pending 交互状态在 copied session 场景下更接近“需要显式目录才能恢复”的行为。
 
 对应新增护栏测试：
 
 - `packages/core/test/session-context-epoch.test.ts`
   - `rebinds copied file-backed context epochs to the explicit directory instead of reusing another copy`
+- `packages/core/test/question.test.ts`
+  - `does not restore ambiguous copied pending questions across directories`
+- `packages/core/test/permission.test.ts`
+  - `does not restore ambiguous copied pending permissions across directories`
 
 ## 还剩的硬问题
 

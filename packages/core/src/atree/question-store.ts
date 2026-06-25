@@ -31,6 +31,7 @@ export async function readQuestionStateEntries(rootDirectory?: string) {
     : await readWorkspaceSessionStoresDeep()
   if (sessions.length === 0) return [] as QuestionStateEntry[]
   const questions = new Map<string, QuestionStateEntry>()
+  const ambiguous = new Set<string>()
 
   for (const session of sessions) {
     const raw = await fs.readFile(sessionJsonlPath(session.location.directory, session.id), "utf8").catch((error: unknown) => {
@@ -52,8 +53,16 @@ export async function readQuestionStateEntries(rootDirectory?: string) {
 
       if (type === "question.v2.asked") {
         const question = isRecord(data.question) ? data.question : data
-        if (typeof question.id === "string")
+        if (typeof question.id === "string") {
+          if (ambiguous.has(question.id)) continue
+          const existing = questions.get(question.id)
+          if (existing && existing.directory !== session.location.directory) {
+            questions.delete(question.id)
+            ambiguous.add(question.id)
+            continue
+          }
           questions.set(question.id, { request: question as QuestionV2.Request, directory: session.location.directory })
+        }
         continue
       }
       if (type === "question.v2.replied" || type === "question.v2.rejected") {

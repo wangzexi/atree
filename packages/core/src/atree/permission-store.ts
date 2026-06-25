@@ -31,6 +31,7 @@ export async function readPermissionStateEntries(rootDirectory?: string) {
     : await readWorkspaceSessionStoresDeep()
   if (sessions.length === 0) return [] as PermissionStateEntry[]
   const permissions = new Map<string, PermissionStateEntry>()
+  const ambiguous = new Set<string>()
 
   for (const session of sessions) {
     const raw = await fs.readFile(sessionJsonlPath(session.location.directory, session.id), "utf8").catch((error: unknown) => {
@@ -52,11 +53,19 @@ export async function readPermissionStateEntries(rootDirectory?: string) {
 
       if (type === "permission.v2.asked") {
         const permission = isRecord(data.permission) ? data.permission : data
-        if (typeof permission.id === "string")
+        if (typeof permission.id === "string") {
+          if (ambiguous.has(permission.id)) continue
+          const existing = permissions.get(permission.id)
+          if (existing && existing.directory !== session.location.directory) {
+            permissions.delete(permission.id)
+            ambiguous.add(permission.id)
+            continue
+          }
           permissions.set(permission.id, {
             request: permission as PermissionV2.Request,
             directory: session.location.directory,
           })
+        }
         continue
       }
       if (type === "permission.v2.replied") {
