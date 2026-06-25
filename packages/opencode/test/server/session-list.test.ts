@@ -323,6 +323,26 @@ describe("session.list", () => {
     { git: true },
   )
 
+  it.instance(
+    "lists file-backed path sessions without SQLite cache rows",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const { db } = yield* Database.Service
+        const directory = path.join(test.directory, "packages", "opencode", "src")
+        yield* Effect.promise(() => mkdir(directory, { recursive: true }))
+
+        const created = yield* withSession({ title: "path-no-cache-session" }).pipe(provideInstance(directory))
+        yield* db.delete(SessionTable).where(eq(SessionTable.id, created.id)).run().pipe(Effect.orDie)
+
+        const ids = (yield* SessionNs.Service.use((session) =>
+          session.list({ path: "packages/opencode/src" }),
+        )).map((session) => session.id)
+        expect(ids).toContain(created.id)
+      }),
+    { git: true },
+  )
+
   itWorkspaces.instance(
     "filters by directory when experimental workspaces are enabled",
     () =>
