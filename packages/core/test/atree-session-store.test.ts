@@ -2154,6 +2154,39 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("finds a workspace session store through a symlinked persisted atree root", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-symlink-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-symlink-root-")))
+      const alias = `${root}-alias`
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.addFinalizer(() => Effect.promise(() => rm(alias, { force: true })).pipe(Effect.ignore))
+      yield* Effect.promise(() => rm(alias, { force: true }))
+      yield* Effect.promise(() => symlink(root, alias, "dir"))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root: alias,
+          directory: node,
+          sessionID: "ses_core_workspace_store_symlink",
+          title: "Workspace store symlink lookup",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const found = yield* Effect.promise(() =>
+        findWorkspaceSessionStore(SessionV2.ID.make("ses_core_workspace_store_symlink")),
+      )
+      const canonicalNode = AbsolutePath.make(yield* Effect.promise(() => realpath(node)))
+      expect(found?.id).toBe(SessionV2.ID.make("ses_core_workspace_store_symlink"))
+      expect(found?.location.directory).toBe(canonicalNode)
+    }),
+  )
+
   it.effect("does not resolve a workspace session store when copied directories make the session id ambiguous", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-ambiguous-data-")))

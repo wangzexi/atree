@@ -34,6 +34,11 @@ function stateFile() {
   return path.join(Global.Path.data, "atree", "state.json")
 }
 
+async function isDirectory(target: string) {
+  const stat = await fs.stat(target)
+  return stat.isDirectory()
+}
+
 function parseValue(value: string) {
   const trimmed = value.trim()
   if (trimmed === "") return undefined
@@ -303,9 +308,14 @@ export async function readWorkspaceRoot() {
   try {
     const raw = await fs.readFile(stateFile(), "utf8")
     const parsed = JSON.parse(raw) as { rootDirectory?: unknown }
-    return typeof parsed.rootDirectory === "string" ? parsed.rootDirectory : undefined
+    if (typeof parsed.rootDirectory !== "string") return undefined
+    const real = await fs.realpath(parsed.rootDirectory)
+    if (!(await isDirectory(real))) return undefined
+    return real
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return
+    if (error && typeof error === "object" && "code" in error && (error.code === "ENOTDIR" || error.code === "ENOENT"))
+      return
     throw error
   }
 }
