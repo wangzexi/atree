@@ -39,6 +39,13 @@ export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function
     ? undefined
     : yield* tryDirectory(input.instanceDirectory)
   if (instance) return instance
+  const instanceDirectory = input.instanceDirectory
+  if (instanceDirectory && !sameDirectory(instanceDirectory, input.directory)) {
+    const found = yield* Effect.promise(() => findSessionStore(path.resolve(instanceDirectory), input.sessionID)).pipe(
+      Effect.catchCause(() => Effect.succeed(undefined)),
+    )
+    if (found) return found
+  }
 
   const found = yield* Effect.promise(() => findWorkspaceSessionStore(input.sessionID)).pipe(
     Effect.catchCause(() => Effect.succeed(undefined)),

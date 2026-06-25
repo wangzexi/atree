@@ -126,6 +126,56 @@ describe("atree session resolver", () => {
     }),
   )
 
+  it.effect("prefers a nested session under the current instance directory before persisted-root copies", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-instance-nested-root-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-resolver-instance-nested-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const instanceRoot = path.join(root, "instance-root")
+      const nested = path.join(instanceRoot, "nested", "target")
+      const sibling = path.join(root, "sibling-copy")
+      yield* Effect.promise(() => fs.mkdir(nested, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(sibling, { recursive: true }))
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          ;(Global.Path as { data: string }).data = previousData
+        }),
+      )
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+
+      const sessionID = "ses_resolver_instance_nested_priority" as never
+      const base = {
+        id: sessionID,
+        slug: "resolver-instance-nested-priority",
+        version: "test",
+        projectID: "global" as never,
+        path: ".",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 1 },
+      }
+      yield* Effect.promise(() =>
+        writeSessionStore({ ...base, directory: nested, title: "Nested instance copy" } as never),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({ ...base, directory: sibling, title: "Sibling persisted-root copy" } as never),
+      )
+
+      const resolved = yield* resolveFileSession({ sessionID, instanceDirectory: instanceRoot })
+      const expected = yield* Effect.promise(() => fs.realpath(nested))
+
+      expect(resolved?.directory).toBe(expected)
+      expect(resolved?.title).toBe("Nested instance copy")
+    }),
+  )
+
   it.effect("does not use a SQLite directory row as the final file-backed session hint", () =>
     Effect.gen(function* () {
       const directory = yield* Effect.acquireRelease(
