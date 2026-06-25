@@ -17,7 +17,6 @@ import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import {
   findSessionScheduleState,
-  findWorkspaceSessionScheduleState,
   readSessionScheduleProjection,
   readSessionScheduleState,
   writeSessionScheduleState,
@@ -663,9 +662,34 @@ export const layer = Layer.effect(
         )
         if (local) return local
       }
-      return yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
-        Effect.catchCause(() => Effect.succeed(undefined)),
+      const sessions = yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+        Effect.catchCause(() => Effect.succeed([] as FileSession[])),
       )
+      let found:
+        | {
+            directory: string
+            sessionID: string
+            schedules: Info[]
+          }
+        | undefined
+      for (const session of sessions) {
+        const schedules = (
+          yield* Effect.promise(() => readSessionScheduleState(session.directory, session.id)).pipe(
+            Effect.catchCause(() => Effect.succeed([] as Awaited<ReturnType<typeof readSessionScheduleState>>)),
+          )
+        ).map((schedule) => ({
+          ...schedule,
+          id: schedule.id as ID,
+          sessionID: schedule.sessionID as SessionID,
+        }))
+        if (!schedules.some((schedule) => schedule.id === scheduleID)) continue
+        if (!found) {
+          found = { directory: session.directory, sessionID: session.id, schedules }
+          continue
+        }
+        if (found.directory !== session.directory || found.sessionID !== session.id) return undefined
+      }
+      return found
     })
 
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
