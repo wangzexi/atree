@@ -138,6 +138,54 @@ describe("migrateFromGlobal", () => {
     }),
   )
 
+  it.live("migrates nested directory-backed global sessions without SQLite rows", () =>
+    Effect.gen(function* () {
+      const tmp = yield* tmpdirScoped()
+      const node = path.join(tmp, "node", "child")
+      yield* Effect.promise(() => fs.mkdir(node, { recursive: true }))
+      yield* Effect.promise(() => $`git init`.cwd(tmp).quiet())
+      yield* Effect.promise(() => $`git config user.name "Test"`.cwd(tmp).quiet())
+      yield* Effect.promise(() => $`git config user.email "test@opencode.test"`.cwd(tmp).quiet())
+      yield* Effect.promise(() => $`git config commit.gpgsign false`.cwd(tmp).quiet())
+      const projects = yield* Project.Service
+      const { project: pre } = yield* projects.fromDirectory(tmp)
+      expect(pre.id).toBe(ProjectV2.ID.global)
+
+      const now = Date.now()
+      const id = "ses_nested_directory_global_project_migration" as SessionID
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id,
+          slug: "nested-directory-global-project-migration",
+          version: "test",
+          projectID: ProjectV2.ID.global,
+          directory: node,
+          path: ".",
+          title: "nested directory global migration",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* Effect.promise(() => $`git commit --allow-empty -m "root"`.cwd(tmp).quiet())
+      const { project: real } = yield* projects.fromDirectory(tmp)
+      expect(real.id).not.toBe(ProjectV2.ID.global)
+
+      const stored = yield* Effect.promise(() => readSessionStore(node, id))
+      expect(stored?.projectID).toBe(real.id)
+      const row = yield* Database.Service.use(({ db }) =>
+        db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie),
+      )
+      expect(row).toBeUndefined()
+      const jsonl = yield* Effect.promise(() =>
+        fs.readFile(path.join(node, ".agents", "atree", "sessions", id, "session.jsonl"), "utf8"),
+      )
+      expect(jsonl).toContain('"type":"session.updated"')
+      expect(jsonl).toContain(`"projectID":"${real.id}"`)
+    }),
+  )
+
   it.live("migrates global sessions even when project row already exists", () =>
     Effect.gen(function* () {
       // 1. Create a repo with a commit — real project ID created immediately

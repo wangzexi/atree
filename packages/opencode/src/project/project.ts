@@ -21,7 +21,7 @@ import { serviceUse } from "@opencode-ai/core/effect/service-use"
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { EventV2 } from "@opencode-ai/core/event"
-import { appendSessionJsonl, readSessionStores, writeSessionStore } from "@/atree/session-store"
+import { appendSessionJsonl, readSessionStores, readSessionStoresDeep, writeSessionStore } from "@/atree/session-store"
 
 const ProjectVcs = Schema.Literal("git")
 
@@ -228,7 +228,7 @@ export const layer = Layer.effect(
       newID: ProjectV2.ID,
     ) {
       if (oldID === newID) return
-      const sessions = yield* Effect.promise(() => readSessionStores(directory)).pipe(
+      const sessions = yield* Effect.promise(() => readSessionStoresDeep(directory)).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("failed to read atree sessions for project migration", { directory, oldID, newID, cause }).pipe(
             Effect.as([]),
