@@ -39,6 +39,16 @@ export const appendAtreeSessionEventByID = (
       yield* Effect.promise(() => touchSessionStore(instanceSession.directory, instanceSession.id))
       return
     }
+    const instanceNestedSession = instanceDirectory
+      ? yield* Effect.promise(() => findSessionStore(instanceDirectory, sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+      : undefined
+    if (instanceNestedSession) {
+      yield* Effect.promise(() => appendSessionJsonl(instanceNestedSession, entry))
+      yield* Effect.promise(() => touchSessionStore(instanceNestedSession.directory, instanceNestedSession.id))
+      return
+    }
 
     const rootDirectory = yield* Effect.promise(() => readWorkspaceRootDirectory()).pipe(
       Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),

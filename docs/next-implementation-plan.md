@@ -91,6 +91,7 @@
 - core `SessionStore.get/message` 对 persisted root 的未限定查找也开始共用 `atree/session-store` helper 了，不再在 store 层各自手写 `readWorkspaceRoot() + find*` 组合。
 - opencode `resolveFileSession(...)` 对 persisted root 的未限定查找也同步收口到 `atree/session-store` helper，不再在 resolver 里自己手写 `readWorkspaceState() + findSessionStore(...)`。
 - opencode `resolveFileSession(...)` 现在也会把当前 `instanceDirectory` 当作一个目录树根来深搜 nested session，而不只是试一次顶层 `readSessionStore(...)`；这让“当前实例目录里存在 nested 会话，但 workspace root 下还有别的 copied 副本”的场景，会先命中当前实例而不是过早落入 persisted-root 歧义。
+- opencode `appendAtreeSessionEventByID(...)` 也同步收到了这条规则：当 question / permission / event-bridge 等调用方只给 `sessionID`、没有显式目录时，它现在会先在当前 `InstanceState.directory` 这棵树里深搜 nested session，再退到 persisted root，不会因为 sibling copied session 存在而把目录事件写丢。
 - opencode `schedule.tick/delete` 对 persisted root 的 schedule 定位也开始共用 `atree/schedule-store` helper，不再在业务层各自手写 `readWorkspaceState() + findSessionScheduleState(...)`。
 - opencode `schedule` 对 “workspace root 下是否存在同 id copied session / 当前 session 在 root 下有哪些副本” 的判断也开始共用 `atree/session-store` helper，不再在 `clearRuntimeState / reconcileDirectorySchedules / clear` 里重复手写 `readWorkspaceState() + readSessionStoresDeep(...).filter(...)`。
 - opencode 侧 persisted root 的基础读取入口也继续收口：`session.listGlobal`、`schedule` 启动恢复、`session-event`、workspace session/schedule helper 现在统一经由 `atree/state` 的 `readWorkspaceRootDirectory()` 取根目录，不再在多处重复解析 `state.json` 再手拆 `rootDirectory`。

@@ -10,6 +10,8 @@ import {
 } from "../../src/atree/session-event"
 import { readSessionJsonlMessages, writeSessionStore } from "../../src/atree/session-store"
 import { writeWorkspaceRoot } from "../../src/atree/state"
+import { InstanceRef } from "../../src/effect/instance-ref"
+import { withTmpdirInstance } from "../fixture/fixture"
 
 const temps: string[] = []
 
@@ -115,6 +117,82 @@ describe("atree session event routing", () => {
       )
 
       expect(await readSessionJsonlMessages({ id: sessionID, directory: target } as any)).toEqual([])
+    } finally {
+      ;(Global.Path as { data: string }).data = previousData
+    }
+  })
+
+  test("best-effort id routing prefers a nested session under the current instance tree before persisted-root copies", async () => {
+    const data = await tempdir()
+    const previousData = Global.Path.data
+    ;(Global.Path as { data: string }).data = data
+    try {
+      await Effect.runPromise(
+        Effect.gen(function* () {
+          const instance = yield* InstanceRef
+          const instanceRoot = instance!.directory
+          const root = path.dirname(instanceRoot)
+          const nested = path.join(instanceRoot, "nested", "target")
+          const sibling = path.join(root, "sibling-copy")
+          const sessionID = "ses_event_instance_nested_preference" as never
+
+          yield* Effect.promise(() => fs.mkdir(nested, { recursive: true }))
+          yield* Effect.acquireRelease(
+            Effect.promise(() => fs.mkdir(sibling, { recursive: true })),
+            () => Effect.promise(() => fs.rm(sibling, { recursive: true, force: true })).pipe(Effect.ignore),
+          )
+          yield* Effect.promise(() => writeWorkspaceRoot(root))
+
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              slug: "event-instance-nested-current",
+              version: "test",
+              projectID: "proj_event_instance_nested",
+              directory: nested,
+              path: "nested/target",
+              title: "Nested instance session",
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              time: { created: 1, updated: 1 },
+            } as any),
+          )
+          yield* Effect.promise(() =>
+            writeSessionStore({
+              id: sessionID,
+              slug: "event-instance-nested-sibling",
+              version: "test",
+              projectID: "proj_event_instance_nested",
+              directory: sibling,
+              path: ".",
+              title: "Sibling root session",
+              cost: 0,
+              tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+              time: { created: 1, updated: 1 },
+            } as any),
+          )
+
+          yield* appendAtreeSessionEventBestEffort(undefined, sessionID, {
+            type: "message.updated",
+            message: {
+              id: "msg_event_instance_nested_preference",
+              role: "user",
+              time: { created: 2 },
+            },
+          })
+
+          expect(
+            (yield* Effect.promise(() => readSessionJsonlMessages({ id: sessionID, directory: nested } as any))).map(
+              (item) => String(item.info.id),
+            ),
+          ).toEqual(["msg_event_instance_nested_preference"])
+          expect(
+            yield* Effect.promise(() => readSessionJsonlMessages({ id: sessionID, directory: sibling } as any)),
+          ).toEqual([])
+        })
+          .pipe(withTmpdirInstance())
+          .pipe(Effect.scoped),
+      )
     } finally {
       ;(Global.Path as { data: string }).data = previousData
     }
