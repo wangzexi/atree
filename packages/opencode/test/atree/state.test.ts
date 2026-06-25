@@ -3,7 +3,7 @@ import { Global } from "@opencode-ai/core/global"
 import fs from "fs/promises"
 import os from "os"
 import path from "path"
-import { readTree, readWorkspaceState, writeWorkspaceRoot } from "../../src/atree/state"
+import { readTree, readWorkspaceRootDirectory, readWorkspaceState, writeWorkspaceRoot } from "../../src/atree/state"
 
 const temps: string[] = []
 let previousData = Global.Path.data
@@ -63,5 +63,14 @@ describe("atree workspace state", () => {
     })
     expect(result.tree?.children.map((child) => child.name)).toEqual(["archive", "inbox"])
     expect(result.tree?.children.find((child) => child.name === "archive")?.children[0]?.path).toBe("archive/nested")
+  })
+
+  test("returns the persisted root directory through a dedicated helper", async () => {
+    expect(await readWorkspaceRootDirectory()).toBeUndefined()
+
+    const root = await tempdir("atree-state-root-helper-")
+    await writeWorkspaceRoot(root)
+
+    expect(await readWorkspaceRootDirectory()).toBe(await fs.realpath(root))
   })
 })

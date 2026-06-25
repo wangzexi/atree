@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { createHash, randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import { readWorkspaceState } from "./state"
+import { readWorkspaceRootDirectory } from "./state"
 import type { SessionID } from "@/session/schema"
 import type { Session } from "@/session/session"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
@@ -1398,15 +1398,15 @@ export async function findSessionStore(rootDirectory: string, sessionID: Session
 }
 
 export async function findWorkspaceSessionStore(sessionID: SessionID) {
-  const state = await readWorkspaceState()
-  if (!state.rootDirectory) return undefined
-  return findSessionStore(state.rootDirectory, sessionID)
+  const rootDirectory = await readWorkspaceRootDirectory()
+  if (!rootDirectory) return undefined
+  return findSessionStore(rootDirectory, sessionID)
 }
 
 export async function findWorkspaceSessionStores(sessionID: SessionID) {
-  const state = await readWorkspaceState()
-  if (!state.rootDirectory) return [] as SessionInfo[]
-  return (await readSessionStoresDeep(state.rootDirectory)).filter((session) => session.id === sessionID)
+  const rootDirectory = await readWorkspaceRootDirectory()
+  if (!rootDirectory) return [] as SessionInfo[]
+  return (await readSessionStoresDeep(rootDirectory)).filter((session) => session.id === sessionID)
 }
 
 export async function touchSessionStore(directory: string, sessionID: SessionID, updatedAt = Date.now()) {

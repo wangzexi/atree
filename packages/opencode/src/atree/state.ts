@@ -73,6 +73,11 @@ export async function readWorkspaceState(): Promise<WorkspaceState> {
   }
 }
 
+export async function readWorkspaceRootDirectory() {
+  const state = await readWorkspaceState()
+  return state.rootDirectory ?? undefined
+}
+
 export async function writeWorkspaceRoot(directory: string): Promise<WorkspaceState> {
   const rootDirectory = await normalizeRootDirectory(directory)
   const state: WorkspaceState = {

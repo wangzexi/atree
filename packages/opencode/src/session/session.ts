@@ -26,7 +26,7 @@ import {
   writeSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
-import { readWorkspaceState } from "@/atree/state"
+import { readWorkspaceRootDirectory } from "@/atree/state"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -808,8 +808,7 @@ export const layer: Layer.Layer<
       const directoryInput = input?.directory ? input : undefined
       const rootDirectory = directoryInput
         ? undefined
-        : yield* Effect.promise(() => readWorkspaceState()).pipe(
-            Effect.map((state) => state.rootDirectory ?? undefined),
+        : yield* Effect.promise(() => readWorkspaceRootDirectory()).pipe(
             Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
           )
       if (!directoryInput && !rootDirectory) return []

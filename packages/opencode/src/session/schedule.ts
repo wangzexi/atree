@@ -30,7 +30,7 @@ import {
   touchSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
-import { readWorkspaceState } from "@/atree/state"
+import { readWorkspaceRootDirectory } from "@/atree/state"
 import { InstanceRef } from "@/effect/instance-ref"
 
 export const MAX_PER_SESSION = 1
@@ -986,8 +986,7 @@ export const layer = Layer.effect(
         scheduleState.directory,
       )
     }
-    const rootDirectory = yield* Effect.promise(() => readWorkspaceState()).pipe(
-      Effect.map((state) => state.rootDirectory),
+    const rootDirectory = yield* Effect.promise(() => readWorkspaceRootDirectory()).pipe(
       Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
     )
     if (rootDirectory) yield* restoreFileBackedSchedules(rootDirectory)
