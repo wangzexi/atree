@@ -1763,6 +1763,99 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.instance(
+    "prefers the current instance directory when deleting an unscoped copied schedule",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-delete-instance-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const root = path.dirname(instance.directory)
+      const sibling = path.join(root, `atree-schedule-sibling-${randomUUID().replaceAll("-", "")}`)
+      const sessionID = "ses_delete_instance_scope" as SessionID
+      const scheduleID = "sch_delete_instance_scope"
+      const now = Date.now()
+
+      yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdir(sibling, { recursive: true })),
+        () => Effect.promise(() => fs.rm(sibling, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "delete-instance-scope-current",
+          version: "test",
+          projectID: "proj_delete_instance_scope_current",
+          directory: instance.directory,
+          path: ".",
+          title: "Delete instance scope current",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "delete-instance-scope-sibling",
+          version: "test",
+          projectID: "proj_delete_instance_scope_sibling",
+          directory: sibling,
+          path: ".",
+          title: "Delete instance scope sibling",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "current instance copied schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(sibling, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "sibling copied schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.delete(scheduleID as never))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(instance.directory, sessionID))).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(sibling, sessionID))).toEqual([
+        expect.objectContaining({ id: scheduleID, message: "sibling copied schedule" }),
+      ])
+    }),
+  )
+
   it.effect(
     "prefers deleting directory schedule state over a stale database row with the same id",
     Effect.gen(function* () {
@@ -4090,6 +4183,107 @@ describe("atree schedule restore", () => {
       const stored = yield* Effect.promise(() => readSessionScheduleState(nodeDirectory, sessionID))
       expect(stored).toHaveLength(1)
       expect(stored[0]).toMatchObject({ id: created.id, message: "created from nested file-backed session" })
+    }),
+  )
+
+  it.instance(
+    "prefers the current instance directory when ticking an unscoped copied schedule without a DB row",
+    Effect.gen(function* () {
+      const instance = yield* TestInstance
+      const events = yield* EventV2Bridge.Service
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-tick-instance-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const root = path.dirname(instance.directory)
+      const sibling = path.join(root, `atree-schedule-tick-sibling-${randomUUID().replaceAll("-", "")}`)
+      const sessionID = "ses_tick_instance_scope" as SessionID
+      const scheduleID = "sch_tick_instance_scope"
+      const now = Date.now()
+      const triggered: Array<{ sessionID?: string; message?: string }> = []
+
+      yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdir(sibling, { recursive: true })),
+        () => Effect.promise(() => fs.rm(sibling, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "tick-instance-scope-current",
+          version: "test",
+          projectID: "proj_tick_instance_scope_current",
+          directory: instance.directory,
+          path: ".",
+          title: "Tick instance scope current",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "tick-instance-scope-sibling",
+          version: "test",
+          projectID: "proj_tick_instance_scope_sibling",
+          directory: sibling,
+          path: ".",
+          title: "Tick instance scope sibling",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(instance.directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "current instance tick schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(sibling, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 120_000,
+            message: "sibling tick schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 120_000,
+          },
+        ]),
+      )
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === "schedule.triggered") {
+            const data = event.data as { sessionID?: string; message?: string }
+            triggered.push({ sessionID: data.sessionID, message: data.message })
+          }
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      yield* Schedule.Service.use((schedule) => schedule.tick(scheduleID as never))
+
+      expect(triggered).toEqual([{ sessionID, message: "current instance tick schedule" }])
     }),
   )
 

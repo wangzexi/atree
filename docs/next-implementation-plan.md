@@ -94,6 +94,7 @@
 - opencode `schedule` 对 “workspace root 下是否存在同 id copied session / 当前 session 在 root 下有哪些副本” 的判断也开始共用 `atree/session-store` helper，不再在 `clearRuntimeState / reconcileDirectorySchedules / clear` 里重复手写 `readWorkspaceState() + readSessionStoresDeep(...).filter(...)`。
 - opencode 侧 persisted root 的基础读取入口也继续收口：`session.listGlobal`、`schedule` 启动恢复、`session-event`、workspace session/schedule helper 现在统一经由 `atree/state` 的 `readWorkspaceRootDirectory()` 取根目录，不再在多处重复解析 `state.json` 再手拆 `rootDirectory`。
 - opencode 侧 “persisted root 下深扫全部目录会话” 也开始经由 `atree/session-store` 的 `readWorkspaceSessionStoresDeep()` 进入；`listGlobal()` 和按 session id 查找 workspace 副本不再各自拼 `readWorkspaceRootDirectory() + readSessionStoresDeep(...)`。
+- opencode 的 `schedule.delete/tick` 在“无显式目录”的路径上也已经先按当前 `InstanceRef.directory` 收口，再退到 persisted root；这让当前实例目录里的 copied schedule 不会因为 workspace root 下还存在别的副本，就在手动删除或手动触发时先落入全局歧义分支。
 - opencode 的 schedule 运行链路也继续去 DB 依赖：已经启动过 timer 的 schedule 即使 runtime `ScheduleTable` 行被删，`process()` 现在也会回到目录里的 `schedule.json/session.jsonl` 继续执行，不再因为运行投影丢失而让真实自动化消息失效。
 - core 的 `SessionContextEpoch.current(...)` 也开始接受目录作用域校验：当 copied source/target 会话发生 rebind 后，旧目录上的 runner 不会再把目标目录当前的 epoch 误判成自己的 current revision。它还没有把 epoch 表真正变成目录作用域键，但已经先补上一层运行护栏。
 - 同一条运行态护栏已经继续压到 `SessionContextEpoch.requestReplacement(...)`：projector 现在会把 event payload 自带的 `location` 传进来，因此 source 目录上滞后的 agent/model/context/compaction 事件，不会再去错误推进 target 目录当前 epoch 的 `replacement_seq`。

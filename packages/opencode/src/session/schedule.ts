@@ -656,6 +656,13 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
       }
+      const instanceDirectory = (yield* currentInstance)?.directory
+      if (instanceDirectory) {
+        const local = yield* Effect.promise(() => findSessionScheduleState(instanceDirectory, scheduleID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        if (local) return local
+      }
       return yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
         Effect.catchCause(() => Effect.succeed(undefined)),
       )
@@ -818,6 +825,7 @@ export const layer = Layer.effect(
         yield* Effect.promise(() => timer.bridge.promise(process(scheduleID)))
         return
       }
+      const timerDirectory = timers.get(scheduleID)?.directory
       const row = yield* db
         .select()
         .from(ScheduleTable)
@@ -825,9 +833,7 @@ export const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (!row) {
-        const found = yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
-          Effect.catchCause(() => Effect.succeed(undefined)),
-        )
+        const found = yield* findStoredScheduleByID(scheduleID, timerDirectory)
         if (!found) return
         const restored = yield* ensureScheduleRowFromDirectory(
           scheduleID,
@@ -1149,9 +1155,7 @@ export const layer = Layer.effect(
       directory: string | undefined,
     ) {
       if (!directory) {
-        const found = yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
-          Effect.catchCause(() => Effect.succeed(undefined)),
-        )
+        const found = yield* findStoredScheduleByID(scheduleID)
         if (!found) return false
         const remaining = found.schedules.filter((schedule) => schedule.id !== scheduleID)
         const timer = timers.get(scheduleID)
