@@ -928,6 +928,15 @@ export const layer = Layer.effect(
       schedules: ReadonlyArray<Info>,
     ) {
       const wantedIDs = new Set(schedules.filter(canRestoreStoredSchedule).map((schedule) => schedule.id))
+      const hasAlternateFileSession = yield* Effect.promise(() => readWorkspaceState()).pipe(
+        Effect.flatMap((state) =>
+          state.rootDirectory ? Effect.promise(() => readSessionStoresDeep(state.rootDirectory!)) : Effect.succeed([]),
+        ),
+        Effect.map((sessions) =>
+          sessions.some((session) => session.id === sessionID && path.resolve(session.directory) !== path.resolve(directory)),
+        ),
+        Effect.catchCause(() => Effect.succeed(false)),
+      )
       const rows = yield* db
         .select({ id: ScheduleTable.id })
         .from(ScheduleTable)
@@ -939,7 +948,8 @@ export const layer = Layer.effect(
         .filter((id) => {
           if (wantedIDs.has(id)) return false
           const timer = timers.get(id)
-          return timer ? timerBelongsToDirectory(timer, directory) : true
+          if (timer) return timerBelongsToDirectory(timer, directory)
+          return !hasAlternateFileSession
         })
       if (staleIDs.length > 0) {
         for (const id of staleIDs) {

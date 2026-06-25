@@ -790,6 +790,97 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not delete another copied directory runtime schedule row without a directory-scoped timer when both copies are inside the persisted root",
+    Effect.gen(function* () {
+      const schedules = yield* Schedule.Service
+      const root = yield* tempdir
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const { db } = yield* Database.Service
+      const sessionID = "ses_explicit_source_list_copied_runtime_row" as SessionID
+      const sourceScheduleID = "sch_explicit_source_list_source"
+      const targetScheduleID = "sch_explicit_source_list_target"
+      const now = Date.now()
+
+      const sourceSchedule = {
+        id: sourceScheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 60_000,
+        message: "source explicit source list schedule",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+      const targetSchedule = {
+        id: targetScheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 120_000,
+        message: "target explicit source list schedule",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 120_000,
+      }
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-source-list-source",
+          version: "test",
+          projectID: "proj_explicit_source_list_source",
+          directory: source,
+          path: ".",
+          title: "Explicit source list source",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(source, sessionID, [sourceSchedule]))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(target, sessionID, [targetSchedule]))
+
+      // Simulate a pre-existing target runtime row that currently has no timer ownership signal.
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: targetScheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: targetSchedule.runAt,
+          message: targetSchedule.message,
+          created_at: targetSchedule.createdAt,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const sourceListed = yield* schedules.list(sessionID, { directory: source })
+      expect(sourceListed).toEqual([
+        expect.objectContaining({ id: sourceScheduleID, message: sourceSchedule.message }),
+      ])
+
+      const targetRow = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, targetScheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(targetRow?.message).toBe(targetSchedule.message)
+    }),
+  )
+
+  it.effect(
     "does not read or mutate stale database schedules for a missing explicit directory session",
     Effect.gen(function* () {
       const source = yield* tempdir
