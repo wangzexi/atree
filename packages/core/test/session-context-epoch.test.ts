@@ -171,3 +171,77 @@ it.effect("prepares context epochs for file-backed sessions without SQLite rows"
     ).toBe(true)
   }),
 )
+
+it.effect("rebuilds file-backed context epochs after deleting SQLite cache rows", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const directory = AbsolutePath.make(tmp.path)
+    const sessionID = SessionV2.ID.make("ses_context_epoch_deleted_cache")
+    const agent = AgentV2.ID.make("build")
+    const location = Location.Ref.make({ directory })
+    const session = SessionV2.Info.make({
+      id: sessionID,
+      projectID: ProjectV2.ID.global,
+      title: "Context epoch deleted cache",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+      location,
+      agent,
+    })
+    yield* Effect.promise(() => writeSessionStore(session))
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+
+    let contextText = "Initial context"
+    const context = () =>
+      SystemContext.make({
+        key: SystemContext.Key.make("test/context/deleted-cache"),
+        codec: Schema.String,
+        load: Effect.sync(() => contextText),
+        baseline: (value) => value,
+        update: (_previous, current) => current,
+      })
+
+    const first = yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent)
+    expect(first.revision).toBe(0)
+
+    yield* db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+    expect(
+      yield* db
+        .select()
+        .from(SessionTable)
+        .where(eq(SessionTable.id, sessionID))
+        .get()
+        .pipe(Effect.orDie),
+    ).toBeUndefined()
+
+    contextText = "Changed context after cache delete"
+    const second = yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent)
+    expect(second.revision).toBe(0)
+    expect(second.baseline).toBe("Changed context after cache delete")
+
+    const rebuilt = yield* db
+      .select()
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    expect(rebuilt).toBeDefined()
+
+    const stored = yield* Effect.promise(() => readSessionStore(directory, sessionID))
+    expect(stored?.title).toBe("Context epoch deleted cache")
+
+    const raw = yield* Effect.promise(() =>
+      readFile(path.join(tmp.path, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+    )
+    const trimmed = raw.trim()
+    const entries = trimmed
+      ? trimmed.split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)
+      : []
+    expect(entries.some((entry) => entry.type === "session.next.context.updated")).toBe(false)
+  }),
+)

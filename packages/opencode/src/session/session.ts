@@ -1397,64 +1397,6 @@ const cancelBackgroundJobs = Effect.fn("Session.cancelBackgroundJobs")(function*
   )
 })
 
-function listByProject(
-  db: Database.Interface["db"],
-  input: ListInput & {
-    projectID: ProjectV2.ID
-    experimentalWorkspaces: boolean
-  },
-) {
-  const conditions = [eq(SessionTable.project_id, input.projectID)]
-
-  if (input.workspaceID) {
-    conditions.push(eq(SessionTable.workspace_id, input.workspaceID))
-  }
-  if (input.path !== undefined) {
-    if (input.path) {
-      const conds = [
-        eq(SessionTable.path, input.path),
-        like(SessionTable.path, sql.param(`${input.path}/%`, SessionTable.path)),
-      ]
-
-      conditions.push(
-        input.directory
-          ? or(...conds, and(isNull(SessionTable.path), eq(SessionTable.directory, input.directory))!)!
-          : or(...conds)!,
-      )
-    }
-  } else if (input.scope !== "project") {
-    if (input.directory) {
-      conditions.push(eq(SessionTable.directory, input.directory))
-    }
-  }
-  if (input.roots) {
-    conditions.push(isNull(SessionTable.parent_id))
-  }
-  if (input.start) {
-    conditions.push(gte(SessionTable.time_updated, input.start))
-  }
-  if (input.search) {
-    conditions.push(like(SessionTable.title, `%${input.search}%`))
-  }
-  if (!input.archived) {
-    conditions.push(isNull(SessionTable.time_archived))
-  }
-
-  const limit = input.limit ?? 100
-
-  return db
-    .select()
-    .from(SessionTable)
-    .where(and(...conditions))
-    .orderBy(desc(SessionTable.time_updated))
-    .limit(limit)
-    .all()
-    .pipe(
-      Effect.orDie,
-      Effect.map((rows) => rows.map(fromRow)),
-    )
-}
-
 function matchesListInput(item: Info, input: ListInput) {
   if (input.workspaceID && item.workspaceID !== input.workspaceID) return false
   if (input.path !== undefined && input.path) {

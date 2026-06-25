@@ -162,7 +162,7 @@ const requireAgentSelection = Effect.fnUntraced(function* (
     .where(eq(SessionTable.id, sessionID))
     .get()
     .pipe(Effect.orDie)
-  if (!selected || (selected.agent !== null && selected.agent !== agent)) return yield* Effect.die(new AgentMismatch())
+  if (selected && selected.agent !== null && selected.agent !== agent) return yield* Effect.die(new AgentMismatch())
 })
 
 const latestInputSeq = Effect.fnUntraced(function* (
@@ -387,7 +387,7 @@ const fence = Effect.fnUntraced(function* (
   const current = yield* db
     .select({ selected: SessionTable.agent, revision: SessionContextEpochTable.revision })
     .from(SessionContextEpochTable)
-    .innerJoin(SessionTable, eq(SessionTable.id, SessionContextEpochTable.session_id))
+    .leftJoin(SessionTable, eq(SessionTable.id, SessionContextEpochTable.session_id))
     .where(eq(SessionContextEpochTable.session_id, sessionID))
     .get()
     .pipe(Effect.orDie)
@@ -409,7 +409,7 @@ export const current = Effect.fn("SessionContextEpoch.current")(function* (
       revision: SessionContextEpochTable.revision,
     })
     .from(SessionContextEpochTable)
-    .innerJoin(SessionTable, eq(SessionTable.id, SessionContextEpochTable.session_id))
+    .leftJoin(SessionTable, eq(SessionTable.id, SessionContextEpochTable.session_id))
     .where(eq(SessionContextEpochTable.session_id, sessionID))
     .get()
     .pipe(Effect.orDie)
