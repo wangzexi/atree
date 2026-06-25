@@ -16,7 +16,7 @@ import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import {
-  findSessionScheduleState,
+  findWorkspaceSessionScheduleState,
   readSessionScheduleProjection,
   readSessionScheduleState,
   writeSessionScheduleState,
@@ -807,14 +807,9 @@ export const layer = Layer.effect(
         .get()
         .pipe(Effect.orDie)
       if (!row) {
-        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+        const found = yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
         )
-        const found = state.rootDirectory
-          ? yield* Effect.promise(() => findSessionScheduleState(state.rootDirectory!, scheduleID)).pipe(
-              Effect.catchCause(() => Effect.succeed(undefined)),
-            )
-          : undefined
         if (!found) return
         const restored = yield* ensureScheduleRowFromDirectory(
           scheduleID,
@@ -1138,11 +1133,7 @@ export const layer = Layer.effect(
       directory: string | undefined,
     ) {
       if (!directory) {
-        const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-          Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
-        )
-        if (!state.rootDirectory) return false
-        const found = yield* Effect.promise(() => findSessionScheduleState(state.rootDirectory!, scheduleID)).pipe(
+        const found = yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
           Effect.catchCause(() => Effect.succeed(undefined)),
         )
         if (!found) return false

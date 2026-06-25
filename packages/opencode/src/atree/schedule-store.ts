@@ -3,6 +3,7 @@ import path from "path"
 import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
 import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore } from "./session-store"
+import { readWorkspaceState } from "./state"
 import type { SessionID } from "@/session/schema"
 
 export type StoredSchedule = {
@@ -237,4 +238,10 @@ export async function findSessionScheduleState(rootDirectory: string, scheduleID
     if (found.directory !== session.directory || found.sessionID !== session.id) return
   }
   return found
+}
+
+export async function findWorkspaceSessionScheduleState(scheduleID: string) {
+  const state = await readWorkspaceState()
+  if (!state.rootDirectory) return undefined
+  return findSessionScheduleState(state.rootDirectory, scheduleID)
 }
