@@ -60,9 +60,11 @@ export async function readWorkspaceState(): Promise<WorkspaceState> {
   try {
     const raw = await fs.readFile(stateFile(), "utf8")
     const parsed = JSON.parse(raw) as Partial<WorkspaceState>
+    const rootDirectory =
+      typeof parsed.rootDirectory === "string" ? await normalizeRootDirectory(parsed.rootDirectory).catch(() => null) : null
     return {
       version: 1,
-      rootDirectory: typeof parsed.rootDirectory === "string" ? parsed.rootDirectory : null,
+      rootDirectory,
       updatedAt: typeof parsed.updatedAt === "number" ? parsed.updatedAt : null,
     }
   } catch (error) {

@@ -73,4 +73,22 @@ describe("atree workspace state", () => {
 
     expect(await readWorkspaceRootDirectory()).toBe(await fs.realpath(root))
   })
+
+  test("normalizes a symlinked persisted root when reading workspace state", async () => {
+    const root = await tempdir("atree-state-root-symlink-")
+    const alias = `${root}-alias`
+    await fs.rm(alias, { force: true })
+    await fs.symlink(root, alias, "dir")
+
+    const data = Global.Path.data
+    await fs.mkdir(path.join(data, "atree"), { recursive: true })
+    await fs.writeFile(
+      path.join(data, "atree", "state.json"),
+      JSON.stringify({ version: 1, rootDirectory: alias, updatedAt: 1 }),
+    )
+
+    const state = await readWorkspaceState()
+    expect(state.rootDirectory).toBe(await fs.realpath(root))
+    expect(await readWorkspaceRootDirectory()).toBe(await fs.realpath(root))
+  })
 })
