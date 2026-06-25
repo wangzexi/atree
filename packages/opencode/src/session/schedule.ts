@@ -1235,6 +1235,21 @@ export const layer = Layer.effect(
         .where(eq(ScheduleTable.id, scheduleID))
         .get()
         .pipe(Effect.orDie)
+      if (!options?.directory && row) {
+        const directory = yield* sessionDirectory(row.session_id as SessionID)
+        if (!directory) {
+          const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
+            Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+          )
+          if (state.rootDirectory) {
+            const matches = yield* Effect.promise(() => readSessionStoresDeep(state.rootDirectory!)).pipe(
+              Effect.map((sessions) => sessions.filter((session) => session.id === (row.session_id as SessionID))),
+              Effect.catchCause(() => Effect.succeed([])),
+            )
+            if (matches.length > 0) return yield* Effect.fail(new NotFound({ scheduleID }))
+          }
+        }
+      }
       if (!row) {
         const timer = timers.get(scheduleID)
         const deleted = yield* deleteStoredSchedule(scheduleID, options?.directory ?? timer?.directory)

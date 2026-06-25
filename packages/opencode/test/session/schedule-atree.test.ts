@@ -1311,6 +1311,150 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not delete ambiguous copied schedules without an explicit directory hint",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-delete-ambiguous-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const { db } = yield* Database.Service
+      const sessionID = "ses_delete_ambiguous_copies" as SessionID
+      const scheduleID = "sch_delete_ambiguous_copy"
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "delete-ambiguous-source",
+          version: "test",
+          projectID: "proj_delete_ambiguous_source",
+          directory: source,
+          path: ".",
+          title: "Delete ambiguous source",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "delete-ambiguous-target",
+          version: "test",
+          projectID: "proj_delete_ambiguous_target",
+          directory: target,
+          path: ".",
+          title: "Delete ambiguous target",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      const sourceSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 60_000,
+        message: "source ambiguous delete",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+      const targetSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 120_000,
+        message: "target ambiguous delete",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 120_000,
+      }
+      yield* Effect.promise(() => writeSessionScheduleState(source, sessionID, [sourceSchedule]))
+      yield* Effect.promise(() => writeSessionScheduleState(target, sessionID, [targetSchedule]))
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_delete_ambiguous_source",
+          worktree: source,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(SessionTable)
+        .values({
+          id: sessionID,
+          project_id: "proj_delete_ambiguous_source",
+          slug: "delete-ambiguous-source",
+          directory: source,
+          title: "Delete ambiguous source",
+          version: "test",
+          cost: 0,
+          tokens_input: 0,
+          tokens_output: 0,
+          tokens_reasoning: 0,
+          tokens_cache_read: 0,
+          tokens_cache_write: 0,
+          time_created: now,
+          time_updated: now,
+        } as typeof SessionTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "source ambiguous delete",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const deleted = yield* Schedule.Service.use((schedule) =>
+        schedule.delete(scheduleID as never).pipe(Effect.exit),
+      )
+
+      expect(Exit.isFailure(deleted)).toBe(true)
+      expect(yield* Effect.promise(() => readSessionScheduleState(source, sessionID))).toEqual([
+        expect.objectContaining({ id: scheduleID, message: "source ambiguous delete" }),
+      ])
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([
+        expect.objectContaining({ id: scheduleID, message: "target ambiguous delete" }),
+      ])
+      const row = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.message).toBe("source ambiguous delete")
+    }),
+  )
+
+  it.effect(
     "prefers deleting directory schedule state over a stale database row with the same id",
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
