@@ -872,6 +872,84 @@ describe("workspace CRUD", () => {
   )
 
   it.instance(
+    "remove ignores stale SQLite workspace ownership when the file-backed session moved elsewhere",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const sessionSvc = yield* SessionNs.Service
+        const type = unique("remove-stale-moved")
+        const recorded = localAdapter(path.join(dir, "remove-stale-moved"))
+        const target = path.join(dir, "remove-stale-moved-target")
+        registerAdapter(instance.project.id, type, recorded.adapter)
+        const info = yield* workspace.create({ type, branch: null, projectID: instance.project.id, extra: null })
+        const source = yield* sessionSvc.create({ title: "source moved away" })
+
+        yield* attachSessionToWorkspace(source.id, info.id)
+        yield* Effect.promise(() => fs.cp(path.join(dir, ".agents"), path.join(target, ".agents"), { recursive: true }))
+        yield* sessionSvc.setWorkspace({ sessionID: source.id, directory: target, workspaceID: undefined })
+
+        const removed = yield* workspace.remove(info.id)
+
+        expect(removed).toEqual(info)
+        expect((yield* Effect.promise(() => readSessionStore(dir, source.id)))?.title).toBe("source moved away")
+        expect((yield* Effect.promise(() => readSessionStore(target, source.id)))?.workspaceID).toBeUndefined()
+      })
+    },
+    { git: true },
+  )
+
+  it.live("sync history ignores stale SQLite workspace ownership when a file-backed session moved elsewhere", () => {
+    const historyBodies: unknown[] = []
+    return Effect.gen(function* () {
+      yield* HttpServer.serveEffect()(
+        Effect.gen(function* () {
+          const req = yield* HttpServerRequest.HttpServerRequest
+          const bodyText = yield* req.text
+          const url = new URL(req.url, "http://localhost")
+          if (url.pathname === "/stale-history/global/event") return HttpServerResponse.fromWeb(eventStreamResponse())
+          if (url.pathname === "/stale-history/sync/history") {
+            historyBodies.push(bodyText ? JSON.parse(bodyText) : undefined)
+            return HttpServerResponse.fromWeb(Response.json([]))
+          }
+          return HttpServerResponse.text("unexpected", { status: 500 })
+        }),
+      )
+      const url = yield* serverUrl()
+      yield* provideTmpdirInstance(
+        () =>
+          Effect.gen(function* () {
+            const workspace = yield* Workspace.Service
+            const sessionSvc = yield* SessionNs.Service
+            const instance = yield* requireInstance
+            const type = unique("stale-history")
+            const info = workspaceInfo(instance.project.id, type)
+            const target = path.join(instance.directory, "stale-history-target")
+            yield* insertWorkspace(info)
+            registerAdapter(instance.project.id, type, remoteAdapter(`${url}/stale-history`).adapter)
+            yield* Effect.promise(() => writeWorkspaceRoot(instance.directory))
+
+            const source = yield* sessionSvc.create({ title: "stale history source" })
+            yield* attachSessionToWorkspace(source.id, info.id)
+            yield* Effect.promise(() => fs.cp(path.join(instance.directory, ".agents"), path.join(target, ".agents"), { recursive: true }))
+            yield* sessionSvc.setWorkspace({ sessionID: source.id, directory: target, workspaceID: undefined })
+
+            yield* workspace.startWorkspaceSyncing(instance.project.id)
+
+            yield* eventuallyEffect(
+              Effect.sync(() => {
+                expect(historyBodies).toContainEqual({})
+              }),
+            )
+            yield* workspace.remove(info.id)
+          }),
+        { git: true },
+      )
+    })
+  })
+
+  it.instance(
     "remove still deletes the row when the adapter cannot remove resources",
     () =>
       Effect.gen(function* () {

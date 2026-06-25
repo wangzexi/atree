@@ -370,18 +370,30 @@ export const layer = Layer.effect(
       )
     })
 
+    const listAllDirectorySessions = Effect.fn("Workspace.listAllDirectorySessions")(function* () {
+      return yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+        Effect.catchCause(() => Effect.succeed([])),
+      )
+    })
+
     const syncHistory = Effect.fn("Workspace.syncHistory")(function* (
       space: Info,
       url: URL | string,
       headers: HeadersInit | undefined,
     ) {
+      const allDirectorySessions = yield* listAllDirectorySessions()
+      const fileSessionIDs = new Set(allDirectorySessions.map((sessionInfo) => sessionInfo.id))
       const databaseSessionIDs = (yield* db
         .select({ id: SessionTable.id })
         .from(SessionTable)
         .where(eq(SessionTable.workspace_id, space.id))
         .all()
-        .pipe(Effect.orDie)).map((row) => row.id)
-      const directorySessionIDs = (yield* listWorkspaceDirectorySessions(space.id)).map((sessionInfo) => sessionInfo.id)
+        .pipe(Effect.orDie))
+        .map((row) => row.id)
+        .filter((id) => !fileSessionIDs.has(id))
+      const directorySessionIDs = allDirectorySessions
+        .filter((sessionInfo) => sessionInfo.workspaceID === space.id)
+        .map((sessionInfo) => sessionInfo.id)
       const sessionIDs = [...new Set([...databaseSessionIDs, ...directorySessionIDs])]
       const state = sessionIDs.length
         ? Object.fromEntries(
@@ -880,6 +892,8 @@ export const layer = Layer.effect(
     })
 
     const remove = Effect.fn("Workspace.remove")(function* (id: WorkspaceV2.ID) {
+      const allDirectorySessions = yield* listAllDirectorySessions()
+      const allDirectorySessionIDs = new Set(allDirectorySessions.map((sessionInfo) => sessionInfo.id))
       const databaseSessions = yield* db
         .select({
           id: SessionTable.id,
@@ -890,14 +904,16 @@ export const layer = Layer.effect(
         .where(eq(SessionTable.workspace_id, id))
         .all()
         .pipe(Effect.orDie)
-      const directorySessions = (yield* listWorkspaceDirectorySessions(id)).map((sessionInfo) => ({
-        id: sessionInfo.id,
-        parentID: sessionInfo.parentID,
-        directory: sessionInfo.directory,
-      }))
+      const directorySessions = allDirectorySessions
+        .filter((sessionInfo) => sessionInfo.workspaceID === id)
+        .map((sessionInfo) => ({
+          id: sessionInfo.id,
+          parentID: sessionInfo.parentID,
+          directory: sessionInfo.directory,
+        }))
       const sessions = [
         ...directorySessions,
-        ...databaseSessions.filter((sessionInfo) => !directorySessions.some((existing) => existing.id === sessionInfo.id)),
+        ...databaseSessions.filter((sessionInfo) => !allDirectorySessionIDs.has(sessionInfo.id)),
       ]
       const sessionIDs = new Set(sessions.map((sessionInfo) => sessionInfo.id))
       yield* Effect.forEach(
