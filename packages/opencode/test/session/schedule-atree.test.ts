@@ -189,6 +189,96 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  baseIt.effect(
+    "ignores stale database run history when restoring a once schedule from directory state",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_once_schedule_stale_run" as SessionID
+      const scheduleID = "sch_once_schedule_stale_run"
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeWorkspaceRoot(directory),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "once-schedule-stale-run",
+          version: "test",
+          projectID: "proj_once_schedule_stale_run",
+          directory,
+          path: ".",
+          title: "Once schedule stale run",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "directory is authoritative",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: scheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "stale db once schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleRunTable)
+        .values({
+          id: randomUUID(),
+          schedule_id: scheduleID,
+          ran_at: now - 30_000,
+          status: "ran",
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      yield* Effect.gen(function* () {
+        yield* Schedule.Service
+      }).pipe(Effect.provide(schedule))
+
+      const schedules = yield* Schedule.Service.use((service) => service.list(sessionID, { directory })).pipe(Effect.provide(schedule))
+      expect(schedules).toHaveLength(1)
+      expect(schedules[0]).toMatchObject({
+        id: scheduleID,
+        kind: "once",
+        lastRanAt: null,
+        lastRunStatus: null,
+        message: "directory is authoritative",
+      })
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([
+        expect.objectContaining({
+          id: scheduleID,
+          lastRanAt: null,
+          lastRunStatus: null,
+          message: "directory is authoritative",
+        }),
+      ])
+    }),
+  )
+
   it.instance(
     "restores a schedule for a file-backed session without a DB session row",
     Effect.gen(function* () {

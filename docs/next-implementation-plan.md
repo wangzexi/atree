@@ -65,6 +65,7 @@
 - opencode 的 `Schedule` 服务仍保留 SQLite `ScheduleTable` / `ScheduleRunTable` 作为运行投影，但已经不再为了 schedule 去补 `SessionTable` / `ProjectTable` 缓存行。目录归档态和目录内自动化消息清理由文件事实源驱动，不再借 schedule 解析顺手制造或改写旧 session 元数据。
 - opencode 的 `Schedule` 触发链路已经增加目录事实校验：`tick()`、实际 `process()` 和服务启动时的 schedule hydration 都会先确认该 schedule 仍存在于目录内 `schedule.json/session.jsonl` 投影；缺失或已删除的 stale `ScheduleTable` 行会被清掉，不会再反向触发 phantom schedule。
 - opencode 的 `schedule.list` 读模型也继续收紧：列表里的 `lastRanAt/lastRunStatus` 默认取自目录投影，不再从 stale `ScheduleRunTable` 反向回填；只有当前进程里真实存在的 timer 会覆盖瞬时 `nextRun`。
+- opencode 的 once schedule 完成态判断也已经切到目录投影：启动恢复、`cleanupCompletedOnceForSession()` 和单次 schedule hydration 都只认目录里的 `lastRanAt/lastRunStatus`，不会再因为旧 `ScheduleRunTable` 记录把还没真正执行过的目录 schedule 提前删掉。与此同时，fresh SQLite 基线 schema 也已补齐 `schedule/schedule_run`，保证内存库和新库行为一致。
 - opencode 的 `Session` 服务也已经把 file-backed session cache sync 收紧为“只补缺失、不覆盖旧行”：`session.get`、消息事件追加和普通 patch 不再因为解析到 copied target 会话就把 `SessionTable.directory` 改写到目标目录。显式 session patch 仍会通过现有 projector 更新运行投影；同时修正了 unarchive 时 `SessionTable.time_archived` 会残留旧值的问题。
 - opencode 的 `Session.get` 主读链路现在也不再把 `SessionTable` 里的 metadata/summary/workspace/path/revert/permission 合并回目录会话；目录里的 `meta.yaml + session.jsonl` 是唯一读取结果，读取本身也不再顺手重建 `SessionTable` 行。
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。

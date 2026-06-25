@@ -8,7 +8,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cron } from "croner"
-import { desc, eq, inArray, sql as drizzleSql } from "drizzle-orm"
+import { eq, inArray, sql as drizzleSql } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Location } from "@opencode-ai/core/location"
@@ -428,44 +428,6 @@ export const layer = Layer.effect(
       yield* syncScheduleState(sessionID, directoryHint)
     })
 
-    const getLastRun = Effect.fn("Schedule.getLastRun")(function* (scheduleID: ID) {
-      return yield* db
-        .select({
-          ran_at: ScheduleRunTable.ran_at,
-          status: ScheduleRunTable.status,
-        })
-        .from(ScheduleRunTable)
-        .where(eq(ScheduleRunTable.schedule_id, scheduleID))
-        .orderBy(desc(ScheduleRunTable.ran_at))
-        .limit(1)
-        .get()
-        .pipe(Effect.orDie)
-    })
-
-    const restoreStoredRun = Effect.fn("Schedule.restoreStoredRun")(function* (schedule: {
-      id: string
-      lastRanAt: number | null
-      lastRunStatus: RunStatus | null
-    }) {
-      if (schedule.lastRanAt === null || schedule.lastRunStatus === null) return
-      const scheduleID = schedule.id as ID
-      const existing = yield* getLastRun(scheduleID)
-      if (existing && existing.ran_at >= schedule.lastRanAt) return
-      yield* db
-        .transaction((tx) =>
-          tx
-            .insert(ScheduleRunTable)
-            .values({
-              id: Identifier.create("shr", "ascending"),
-              schedule_id: scheduleID,
-              ran_at: schedule.lastRanAt,
-              status: schedule.lastRunStatus,
-            } as typeof ScheduleRunTable.$inferInsert)
-            .run(),
-        )
-        .pipe(Effect.orDie)
-    })
-
     const resolveSessionLocation = Effect.fn("Schedule.resolveSessionLocation")(function* (
       sessionID: SessionID,
       fallbackDirectory?: string,
@@ -693,7 +655,6 @@ export const layer = Layer.effect(
               .run(),
           )
           .pipe(Effect.orDie)
-        yield* restoreStoredRun(schedule)
       }
       return { type: "found", directory: location.directory, schedule } as const
     })
@@ -702,6 +663,9 @@ export const layer = Layer.effect(
       sessionID: SessionID,
       directoryHint?: string,
     ) {
+      const directory = yield* sessionDirectory(sessionID, directoryHint)
+      if (!directory) return
+      const projection = yield* Effect.promise(() => readSessionScheduleProjection(directory, sessionID))
       const rows = yield* db
         .select({
           id: ScheduleTable.id,
@@ -714,8 +678,8 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
       for (const row of rows) {
         if ((row.kind ?? "recurring") !== "once") continue
-        const lastRun = yield* getLastRun(row.id as ID)
-        if (lastRun) {
+        const schedule = projection.schedules.find((item) => item.id === row.id)
+        if (schedule?.lastRanAt !== null && schedule?.lastRunStatus !== null) {
           yield* completeOnce(row.id as ID, row.session_id as SessionID, directoryHint)
         }
       }
@@ -948,7 +912,6 @@ export const layer = Layer.effect(
           )
           .pipe(Effect.orDie)
         startTimer(id, sessionID, schedule.kind, schedule.expression, schedule.runAt, serviceBridge, directory)
-        yield* restoreStoredRun(schedule)
       }
 
       const schedules = yield* activeSchedules(sessionID, directory)
@@ -1024,8 +987,7 @@ export const layer = Layer.effect(
       const schedule = scheduleState.schedule
       const kind = schedule.kind
       if (kind === "once") {
-        const lastRun = yield* getLastRun(id)
-        if (lastRun) {
+        if (schedule.lastRanAt !== null && schedule.lastRunStatus !== null) {
           yield* completeOnce(id, sessionID, scheduleState.directory)
           continue
         }
