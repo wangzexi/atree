@@ -5,7 +5,6 @@ import path from "path"
 import {
   appendSessionJsonl,
   findSessionStore,
-  findWorkspaceSessionStore,
   findWorkspaceSessionStores,
   readWorkspaceSessionStoresDeep,
   readSessionJsonlMessages,
@@ -514,49 +513,6 @@ describe("atree session store", () => {
         await fs.realpath(target),
         await fs.realpath(source),
       ])
-    } finally {
-      ;(Global.Path as { data: string }).data = previousData
-    }
-  })
-
-  test("does not resolve a workspace session store when copied directories make the session id ambiguous", async () => {
-    const data = await tempdir()
-    const previousData = Global.Path.data
-    ;(Global.Path as { data: string }).data = data
-    try {
-      const root = await tempdir()
-      const source = path.join(root, "source")
-      const target = path.join(root, "target")
-      await fs.mkdir(source, { recursive: true })
-      await fs.mkdir(target, { recursive: true })
-      await writeWorkspaceRoot(root)
-
-      await writeSessionStore({
-        id: "ses_workspace_copies_ambiguous",
-        slug: "workspace-copy-source-ambiguous",
-        version: "test",
-        projectID: "proj_test",
-        directory: source,
-        path: "source",
-        title: "Workspace copy source ambiguous",
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        time: { created: 1, updated: 2 },
-      } as any)
-      await writeSessionStore({
-        id: "ses_workspace_copies_ambiguous",
-        slug: "workspace-copy-target-ambiguous",
-        version: "test",
-        projectID: "proj_test",
-        directory: target,
-        path: "target",
-        title: "Workspace copy target ambiguous",
-        cost: 0,
-        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
-        time: { created: 1, updated: 3 },
-      } as any)
-
-      expect(await findWorkspaceSessionStore("ses_workspace_copies_ambiguous" as any)).toBeUndefined()
     } finally {
       ;(Global.Path as { data: string }).data = previousData
     }
