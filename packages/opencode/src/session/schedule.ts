@@ -63,6 +63,7 @@ export type Info = Schema.Schema.Type<typeof Info>
 type FileSession = NonNullable<Awaited<ReturnType<typeof readSessionStore>>>
 type SessionLocation =
   | { type: "found"; directory: string; archived: boolean }
+  | { type: "ambiguous" }
   | { type: "missing" }
   | { type: "none" }
 
@@ -425,6 +426,12 @@ export const layer = Layer.effect(
           archived: session.time.archived !== undefined,
         } satisfies SessionLocation
       }
+      if (!fallbackDirectory) {
+        const matches = yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
+          Effect.catchCause(() => Effect.succeed([])),
+        )
+        if (matches.length > 0) return { type: "ambiguous" } satisfies SessionLocation
+      }
       return { type: "none" } satisfies SessionLocation
     })
 
@@ -580,6 +587,7 @@ export const layer = Layer.effect(
       directoryHint?: string,
     ) {
       const location = yield* resolveSessionLocation(sessionID, directoryHint)
+      if (location.type === "ambiguous") return { type: "ambiguous" } as const
       if (location.type !== "found") {
         const timer = timers.get(scheduleID)
         if (timer) {
@@ -693,7 +701,8 @@ export const layer = Layer.effect(
       const fallbackSchedule = fallback?.schedules.find((item) => item.id === scheduleID)
       const kind = row ? ((row.kind ?? "recurring") as Kind) : ((fallbackSchedule?.kind ?? "recurring") as Kind)
       const scheduleState = yield* ensureScheduleStillExists(scheduleID, sessionID, timerDirectory)
-      if (scheduleState.type === "missing" || scheduleState.type === "stale") return
+      if (scheduleState.type === "missing" || scheduleState.type === "stale" || scheduleState.type === "ambiguous")
+        return
       const directoryHint = scheduleState.directory
       if (scheduleState.type === "archived") {
         yield* recordRun(scheduleID, sessionID, "skipped", Date.now(), { directory: directoryHint })
@@ -830,7 +839,8 @@ export const layer = Layer.effect(
       }
       const sessionID = row.session_id as SessionID
       const scheduleState = yield* ensureScheduleStillExists(scheduleID, sessionID)
-      if (scheduleState.type === "missing" || scheduleState.type === "stale") return
+      if (scheduleState.type === "missing" || scheduleState.type === "stale" || scheduleState.type === "ambiguous")
+        return
       if (scheduleState.type === "archived") {
         yield* clearArchivedScheduleState(sessionID, scheduleState.directory)
         return
@@ -980,7 +990,8 @@ export const layer = Layer.effect(
       const id = row.id as ID
       const sessionID = row.session_id as SessionID
       const scheduleState = yield* ensureScheduleStillExists(id, sessionID)
-      if (scheduleState.type === "missing" || scheduleState.type === "stale") continue
+      if (scheduleState.type === "missing" || scheduleState.type === "stale" || scheduleState.type === "ambiguous")
+        continue
       if (scheduleState.type === "archived") {
         yield* clearArchivedScheduleState(sessionID, scheduleState.directory)
         continue

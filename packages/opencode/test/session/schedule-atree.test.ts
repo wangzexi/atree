@@ -2843,6 +2843,102 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not delete an ambiguous copied runtime schedule row when ticking without an explicit directory hint",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-tick-ambiguous-row-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      const sessionID = "ses_tick_ambiguous_runtime_row" as SessionID
+      const scheduleID = "sch_tick_ambiguous_runtime_row"
+      const now = Date.now()
+
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      const storedSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 60_000,
+        message: "ambiguous tick with runtime row",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+
+      for (const [directory, slug, title, projectID] of [
+        [source, "tick-ambiguous-row-source", "Tick ambiguous row source", "proj_tick_ambiguous_row_source"],
+        [target, "tick-ambiguous-row-target", "Tick ambiguous row target", "proj_tick_ambiguous_row_target"],
+      ] as const) {
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug,
+            version: "test",
+            projectID,
+            directory,
+            path: ".",
+            title,
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: now, updated: now },
+          } as any),
+        )
+        yield* Effect.promise(() => writeSessionScheduleState(directory, sessionID, [storedSchedule]))
+      }
+
+      yield* Database.Service.use(({ db }) =>
+        db
+          .insert(ScheduleTable)
+          .values({
+            id: scheduleID as never,
+            session_id: sessionID,
+            kind: "once",
+            expression: "",
+            run_at: now + 60_000,
+            message: "ambiguous tick with runtime row",
+            created_at: now,
+          })
+          .run()
+          .pipe(Effect.orDie),
+      )
+
+      const events = yield* EventV2Bridge.Service
+      const triggered: unknown[] = []
+      const unsubscribe = yield* events.listen((event) =>
+        Effect.sync(() => {
+          if (event.type === "schedule.triggered") triggered.push(event)
+        }),
+      )
+      yield* Effect.addFinalizer(() => unsubscribe)
+
+      yield* Schedule.Service.use((schedule) => schedule.tick(scheduleID as Schedule.ID))
+
+      expect(triggered).toEqual([])
+      expect(yield* Effect.promise(() => readSessionScheduleState(source, sessionID))).toEqual([storedSchedule])
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([storedSchedule])
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, scheduleID as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row?.message).toBe("ambiguous tick with runtime row")
+    }),
+  )
+
+  it.effect(
     "clears a completed once schedule from directory state after it fires",
     Effect.gen(function* () {
       const directory = yield* tempdir
