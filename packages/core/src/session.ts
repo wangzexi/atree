@@ -402,7 +402,7 @@ export const layer = Layer.effect(
               }
               // Concurrent creation lost the projection race. The existing Session identity wins.
               return store
-                .get(sessionID)
+                .get(sessionID, { directory: input.location.directory })
                 .pipe(
                   Effect.flatMap((session) =>
                     session ? Effect.succeed({ type: "existing", session } as const) : Effect.die(defect),

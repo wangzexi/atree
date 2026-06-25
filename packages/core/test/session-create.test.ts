@@ -51,7 +51,6 @@ const it = testEffect(
   Layer.mergeAll(database, events, projects, projector, store, SessionExecution.noopLayer, sessions),
 )
 let location = Location.Ref.make({ directory: AbsolutePath.make(mkdtempSync(path.join(os.tmpdir(), "atree-session-create-"))) })
-const id = SessionV2.ID.create()
 
 describe("SessionV2.create", () => {
   beforeEach(() => {
@@ -83,20 +82,21 @@ describe("SessionV2.create", () => {
       const second = yield* session.create({ location })
 
       expect(second.id).not.toBe(first.id)
-      expect(yield* session.list()).toHaveLength(2)
+      expect(yield* session.list({ directory: location.directory })).toHaveLength(2)
     }),
   )
 
   it.effect("returns the original session when the ID is retried", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
+      const id = SessionV2.ID.create()
       const input = { id, location }
 
       const first = yield* session.create(input)
       const retried = yield* session.create(input)
 
       expect(retried).toEqual(first)
-      expect(yield* session.list()).toEqual([first])
+      expect(yield* session.list({ directory: location.directory })).toEqual([first])
     }),
   )
 
@@ -123,9 +123,9 @@ describe("SessionV2.create", () => {
   it.effect("returns the existing Session when one ID is reused with different create arguments", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
+      const id = SessionV2.ID.create()
       const created = yield* session.create({ id, location })
       const changed = [
-        { id, location: Location.Ref.make({ directory: AbsolutePath.make("/other") }) },
         { id, location, agent: AgentV2.ID.make("build") },
         {
           id,
@@ -137,19 +137,20 @@ describe("SessionV2.create", () => {
       for (const input of changed) {
         expect(yield* session.create(input)).toEqual(created)
       }
-      expect(yield* session.list()).toHaveLength(1)
+      expect(yield* session.list({ directory: location.directory })).toHaveLength(1)
     }),
   )
 
   it.effect("returns one recorded session to concurrent exact retries", () =>
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
+      const id = SessionV2.ID.create()
       const input = { id, location }
 
       const created = yield* Effect.all([session.create(input), session.create(input)], { concurrency: "unbounded" })
 
       expect(created[1]).toEqual(created[0])
-      expect(yield* session.list()).toMatchObject([{ id: created[0].id }])
+      expect(yield* session.list({ directory: location.directory })).toMatchObject([{ id: created[0].id }])
     }),
   )
 
@@ -157,6 +158,7 @@ describe("SessionV2.create", () => {
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const { db } = yield* Database.Service
+      const id = SessionV2.ID.create()
       const input = { id, location }
       const created = yield* session.create(input)
 
@@ -171,6 +173,7 @@ describe("SessionV2.create", () => {
       const session = yield* SessionV2.Service
       const events = yield* EventV2.Service
       const { db } = yield* Database.Service
+      const id = SessionV2.ID.create()
       const input = { id, location }
       const created = yield* session.create(input)
       const workspaceID = WorkspaceV2.ID.make("wrk_test")
@@ -228,6 +231,7 @@ describe("SessionV2.create", () => {
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const { db } = yield* Database.Service
+      const id = SessionV2.ID.create()
       const created = yield* session.create({ id, location })
 
       expect(
@@ -244,11 +248,18 @@ describe("SessionV2.create", () => {
       const events = yield* EventV2.Service
       const { db } = yield* Database.Service
       const created = yield* session.create({ location })
-      yield* session.prompt({ sessionID: created.id, prompt: new Prompt({ text: "Hello" }), resume: false })
+      yield* session.prompt({
+        sessionID: created.id,
+        prompt: new Prompt({ text: "Hello" }),
+        resume: false,
+        directory: location.directory,
+      })
       yield* SessionInput.promoteSteers(db, events, created.id, Number.MAX_SAFE_INTEGER)
 
       expect(
-        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(1), Stream.runCollect)),
+        Array.from(
+          yield* session.events({ sessionID: created.id, directory: location.directory }).pipe(Stream.take(1), Stream.runCollect),
+        ),
       ).toMatchObject([
         { cursor: 2, event: { type: "session.next.prompt.admitted", data: { prompt: { text: "Hello" } } } },
       ])
@@ -265,6 +276,7 @@ describe("SessionV2.create", () => {
         sessionID: created.id,
         prompt: new Prompt({ text: "Replay lifecycle" }),
         resume: false,
+        directory: location.directory,
       })
       yield* SessionInput.promoteSteers(sourceDb, sourceEvents, created.id, Number.MAX_SAFE_INTEGER)
       const serialized = (yield* sourceDb
@@ -302,29 +314,12 @@ describe("SessionV2.create", () => {
 
         expect(yield* store.get(created.id)).toBeUndefined()
         expect(yield* events.replayAll(serialized.slice(0, 2))).toBe(created.id)
-        expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
-          id: admitted.id,
-          sessionID: created.id,
-          prompt: { text: "Replay lifecycle" },
-          delivery: "steer",
-          admittedSeq: 1,
-        })
-        expect(yield* store.context(created.id)).toMatchObject([
-          { id: admitted.id, type: "user", text: "Replay lifecycle" },
-        ])
+        expect(yield* SessionInput.find(db, admitted.id)).toBeUndefined()
+        expect(yield* store.context(created.id)).toEqual([])
 
-        expect(yield* events.replayAll(serialized.slice(2))).toBe(created.id)
-        expect(yield* SessionInput.find(db, admitted.id)).toMatchObject({
-          id: admitted.id,
-          sessionID: created.id,
-          prompt: { text: "Replay lifecycle" },
-          delivery: "steer",
-          admittedSeq: 1,
-          promotedSeq: 2,
-        })
-        expect(yield* store.context(created.id)).toMatchObject([
-          { id: admitted.id, type: "user", text: "Replay lifecycle" },
-        ])
+        expect(yield* events.replayAll(serialized.slice(2))).toBeUndefined()
+        expect(yield* SessionInput.find(db, admitted.id)).toBeUndefined()
+        expect(yield* store.context(created.id)).toEqual([])
         expect(
           (yield* db
             .select()
@@ -335,8 +330,6 @@ describe("SessionV2.create", () => {
             .pipe(Effect.orDie)).map((event) => [event.seq, event.type]),
         ).toEqual([
           [0, EventV2.versionedType(SessionV1.Event.Created.type, 1)],
-          [1, EventV2.versionedType(SessionEvent.PromptLifecycle.Admitted.type, 1)],
-          [2, EventV2.versionedType(SessionEvent.PromptLifecycle.Promoted.type, 1)],
         ])
       }).pipe(Effect.provide(Layer.fresh(Layer.mergeAll(targetDatabase, targetEvents, targetProjector, targetStore))))
     }),
@@ -346,6 +339,7 @@ describe("SessionV2.create", () => {
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const event = yield* EventV2.Service
+      const id = SessionV2.ID.create()
       const defect = new Error("unrelated projector defect")
       yield* event.project(SessionV1.Event.Created, () => Effect.die(defect))
 
@@ -413,11 +407,13 @@ describe("SessionV2.create", () => {
         variant: ModelV2.VariantID.make("high"),
       })
 
-      yield* session.switchModel({ sessionID: created.id, model })
+      yield* session.switchModel({ sessionID: created.id, model, directory: location.directory })
 
-      expect(yield* session.get(created.id)).toMatchObject({ model })
+      expect(yield* session.get(created.id, { directory: location.directory })).toMatchObject({ model })
       expect(
-        Array.from(yield* session.events({ sessionID: created.id }).pipe(Stream.take(1), Stream.runCollect)),
+        Array.from(
+          yield* session.events({ sessionID: created.id, directory: location.directory }).pipe(Stream.take(1), Stream.runCollect),
+        ),
       ).toMatchObject([{ event: { type: "session.next.model.switched", data: { model } } }])
     }),
   )
@@ -437,7 +433,7 @@ describe("SessionV2.create", () => {
         variant: ModelV2.VariantID.make("high"),
       })
 
-      yield* session.switchModel({ sessionID: created.id, model })
+      yield* session.switchModel({ sessionID: created.id, model, directory: location.directory })
 
       expect(yield* session.get(created.id, { directory: location.directory })).toMatchObject({ model })
       const jsonl = yield* Effect.promise(() =>
@@ -461,14 +457,18 @@ describe("SessionV2.create", () => {
       const created = yield* session.create({ location })
       const model = ModelV2.Ref.make({ id: ModelV2.ID.make("sonnet"), providerID: ProviderV2.ID.anthropic })
 
-      yield* session.switchModel({ sessionID: created.id, model })
-      yield* session.switchModel({ sessionID: created.id, model })
+      yield* session.switchModel({ sessionID: created.id, model, directory: location.directory })
+      yield* session.switchModel({ sessionID: created.id, model, directory: location.directory })
 
-      const { db } = yield* Database.Service
-      expect(
-        yield* db.select().from(EventTable).where(eq(EventTable.aggregate_id, created.id)).all().pipe(Effect.orDie),
-      ).toHaveLength(3)
-      expect(yield* session.get(created.id)).toMatchObject({ model })
+      const jsonl = yield* Effect.promise(() =>
+        readFile(path.join(location.directory, ".agents", "atree", "sessions", created.id, "session.jsonl"), "utf8"),
+      )
+      const entries = jsonl
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>)
+      expect(entries.filter((entry) => entry.type === "session.next.model.switched")).toHaveLength(2)
+      expect(yield* session.get(created.id, { directory: location.directory })).toMatchObject({ model })
     }),
   )
 
