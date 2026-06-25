@@ -13,6 +13,7 @@ import { AgentV2 } from "@opencode-ai/core/agent"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionContextEpoch } from "@opencode-ai/core/session/context-epoch"
 import { SessionTable } from "@opencode-ai/core/session/sql"
+import { SessionContextEpochTable } from "@opencode-ai/core/session/sql"
 import {
   appendSessionJsonl,
   readSessionPromptStates,
@@ -380,6 +381,24 @@ it.effect("rebinds copied file-backed context epochs to the explicit directory i
     expect(
       yield* SessionContextEpoch.current(db, sessionID, agent, targetPrepared.revision, Location.Ref.make({ directory: target })),
     ).toBe(true)
+    yield* SessionContextEpoch.requestReplacement(db, sessionID, 7, Location.Ref.make({ directory: source }))
+    expect(
+      yield* db
+        .select({ replacementSeq: SessionContextEpochTable.replacement_seq })
+        .from(SessionContextEpochTable)
+        .where(eq(SessionContextEpochTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie),
+    ).toMatchObject({ replacementSeq: null })
+    yield* SessionContextEpoch.requestReplacement(db, sessionID, 9, Location.Ref.make({ directory: target }))
+    expect(
+      yield* db
+        .select({ replacementSeq: SessionContextEpochTable.replacement_seq })
+        .from(SessionContextEpochTable)
+        .where(eq(SessionContextEpochTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie),
+    ).toMatchObject({ replacementSeq: 9 })
 
     const cached = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
     expect(cached?.directory).toBe(target)

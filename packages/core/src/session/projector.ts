@@ -398,7 +398,7 @@ export const layer = Layer.effectDiscard(
         .pipe(
           Effect.orDie,
           Effect.andThen(run(db, event)),
-          Effect.andThen(SessionContextEpoch.requestReplacement(db, event.data.sessionID, event.seq)),
+          Effect.andThen(SessionContextEpoch.requestReplacement(db, event.data.sessionID, event.seq, event.location)),
         )
     })
     yield* events.project(SessionEvent.ModelSwitched, (event) =>
@@ -412,7 +412,7 @@ export const layer = Layer.effectDiscard(
         yield* run(db, event)
         if (event.seq === undefined)
           return yield* Effect.die("Synchronized Session event is missing aggregate sequence")
-        yield* SessionContextEpoch.requestReplacement(db, event.data.sessionID, event.seq)
+        yield* SessionContextEpoch.requestReplacement(db, event.data.sessionID, event.seq, event.location)
       }),
     )
     yield* events.project(SessionEvent.Prompted, (event) =>
@@ -473,7 +473,7 @@ export const layer = Layer.effectDiscard(
     yield* events.project(SessionEvent.ContextUpdated, (event) => {
       if (!event.replay || event.seq === undefined) return run(db, event)
       return run(db, event).pipe(
-        Effect.andThen(SessionContextEpoch.requestReplacement(db, event.data.sessionID, event.seq)),
+        Effect.andThen(SessionContextEpoch.requestReplacement(db, event.data.sessionID, event.seq, event.location)),
       )
     })
     yield* events.project(SessionEvent.Synthetic, (event) => run(db, event))
@@ -499,7 +499,7 @@ export const layer = Layer.effectDiscard(
       if (seq === undefined) return Effect.die("Synchronized Session event is missing aggregate sequence")
       return Effect.gen(function* () {
         yield* run(db, event)
-        yield* SessionContextEpoch.requestReplacement(db, event.data.sessionID, seq)
+        yield* SessionContextEpoch.requestReplacement(db, event.data.sessionID, seq, event.location)
       })
     })
   }),

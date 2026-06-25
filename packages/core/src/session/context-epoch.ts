@@ -190,7 +190,20 @@ export const requestReplacement = Effect.fn("SessionContextEpoch.requestReplacem
   db: DatabaseService,
   sessionID: SessionSchema.ID,
   seq: number,
+  location?: Location.Ref,
 ) {
+  if (location) {
+    const placed = yield* db
+      .select({
+        directory: SessionTable.directory,
+        workspaceID: SessionTable.workspace_id,
+      })
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    if (!placed || !sameLocation(placed.directory, placed.workspaceID ?? undefined, location)) return 0
+  }
   return yield* db
     .update(SessionContextEpochTable)
     .set({ replacement_seq: seq, revision: sql`${SessionContextEpochTable.revision} + 1` })
