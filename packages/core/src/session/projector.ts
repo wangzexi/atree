@@ -14,6 +14,7 @@ import { SessionMessageUpdater } from "./message-updater"
 import { SessionInput } from "./input"
 import { WorkspaceV2 } from "../workspace"
 import { SessionContextEpoch } from "./context-epoch"
+import { SessionSchema } from "./schema"
 import { MessageTable, PartTable, SessionMessageTable, SessionTable } from "./sql"
 import type { DeepMutable } from "../schema"
 
@@ -251,6 +252,13 @@ function hasSessionProjection(db: DatabaseService, sessionID: (typeof SessionV1.
     .pipe(Effect.orDie, Effect.map((row) => row !== undefined))
 }
 
+
+function isFileBackedEvent(sessionID: string, location: { directory: string } | undefined) {
+  if (!location?.directory) return Effect.succeed(false)
+  return Effect.promise(() => readSessionStore(location.directory, sessionID as SessionSchema.ID))
+    .pipe(Effect.map((s) => s !== undefined), Effect.catchCause(() => Effect.succeed(false)))
+}
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
@@ -317,6 +325,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.MessageUpdated, (event) =>
       Effect.gen(function* () {
+        if (yield* isFileBackedEvent(event.data.sessionID, event.location)) return
         if (!(yield* hasSessionProjection(db, event.data.sessionID))) return
         const time_created = event.data.info.time.created
         const id = event.data.info.id
@@ -332,6 +341,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.MessageRemoved, (event) =>
       Effect.gen(function* () {
+        if (yield* isFileBackedEvent(event.data.sessionID, event.location)) return
         if (!(yield* hasSessionProjection(db, event.data.sessionID))) return
         const rows = yield* db
           .select()
@@ -352,6 +362,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.PartRemoved, (event) =>
       Effect.gen(function* () {
+        if (yield* isFileBackedEvent(event.data.sessionID, event.location)) return
         if (!(yield* hasSessionProjection(db, event.data.sessionID))) return
         const row = yield* db
           .select()
@@ -370,6 +381,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.PartUpdated, (event) =>
       Effect.gen(function* () {
+        if (yield* isFileBackedEvent(event.data.part.sessionID, event.location)) return
         if (!(yield* hasSessionProjection(db, event.data.part.sessionID))) return
         const id = event.data.part.id
         const messageID = event.data.part.messageID

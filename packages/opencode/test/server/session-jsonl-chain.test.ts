@@ -119,7 +119,6 @@ it.live(
       expect(messages.some((m) => m.info.role === "user")).toBe(true)
       expect(messages.some((m) => m.info.role === "assistant")).toBe(true)
     }).pipe(Effect.provide(TestLLMServer.layer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
-  { git: true, config: { formatter: false, lsp: false } },
 )
 
 it.live(
@@ -159,5 +158,4 @@ it.live(
       expect(messages.some((m) => m.info.role === "user")).toBe(true)
       expect(messages.some((m) => m.info.role === "assistant")).toBe(true)
     }).pipe(Effect.provide(TestLLMServer.layer), Effect.provide(CrossSpawnSpawner.defaultLayer)),
-  { git: true, config: { formatter: false, lsp: false } },
 )
