@@ -2,12 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import {
-  ensureSessionPayloadFilesByID,
-  readSessionStoresDeep,
-  readWorkspaceSessionStoresDeep,
-  touchSessionStore,
-} from "./session-store"
+import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore } from "./session-store"
 import type { SessionID } from "@/session/schema"
 
 export type StoredSchedule = {
@@ -225,27 +220,6 @@ export async function readSessionScheduleState(directory: string, sessionID: str
 export async function findSessionScheduleState(rootDirectory: string, scheduleID: string) {
   const root = await fs.realpath(rootDirectory)
   const sessions = await readSessionStoresDeep(root)
-  let found:
-    | {
-        directory: string
-        sessionID: string
-        schedules: StoredSchedule[]
-      }
-    | undefined
-  for (const session of sessions) {
-    const schedules = await readSessionScheduleState(session.directory, session.id)
-    if (!schedules.some((schedule) => schedule.id === scheduleID)) continue
-    if (!found) {
-      found = { directory: session.directory, sessionID: session.id, schedules }
-      continue
-    }
-    if (found.directory !== session.directory || found.sessionID !== session.id) return
-  }
-  return found
-}
-
-export async function findWorkspaceSessionScheduleState(scheduleID: string) {
-  const sessions = await readWorkspaceSessionStoresDeep()
   let found:
     | {
         directory: string
