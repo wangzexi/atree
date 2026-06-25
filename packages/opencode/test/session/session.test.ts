@@ -1332,7 +1332,7 @@ describe("Session", () => {
     }),
   )
 
-  it.effect("patches file-backed session metadata with an explicit directory and no instance", () =>
+  it.effect("patches file-backed session metadata with an explicit directory and no instance without recreating cache rows", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const { db } = yield* Database.Service
@@ -1365,10 +1365,7 @@ describe("Session", () => {
       expect(stored?.time.archived).toBe(1234)
 
       const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
-      expect(row?.directory).toBe(directory)
-      expect(row?.title).toBe("Explicit patched title")
-      expect(row?.metadata).toEqual({ icon: "🧪" })
-      expect(row?.time_archived).toBe(1234)
+      expect(row).toBeUndefined()
     }),
   )
 

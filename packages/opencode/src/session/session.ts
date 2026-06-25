@@ -68,62 +68,8 @@ export function isDefaultTitle(title: string) {
   ).test(title)
 }
 
-type SessionRow = typeof SessionTable.$inferSelect
-
 function sessionEventLocation(directory: string | undefined) {
   return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
-}
-
-export function fromRow(row: SessionRow): Info {
-  const summary =
-    row.summary_additions !== null || row.summary_deletions !== null || row.summary_files !== null
-      ? {
-          additions: row.summary_additions ?? 0,
-          deletions: row.summary_deletions ?? 0,
-          files: row.summary_files ?? 0,
-          diffs: row.summary_diffs ?? undefined,
-        }
-      : undefined
-  const revert = row.revert ?? undefined
-  return {
-    id: row.id,
-    slug: row.slug,
-    projectID: row.project_id,
-    workspaceID: row.workspace_id ?? undefined,
-    directory: row.directory,
-    path: row.path ?? undefined,
-    parentID: row.parent_id ?? undefined,
-    title: row.title,
-    agent: row.agent ?? undefined,
-    model: row.model
-      ? {
-          id: ModelV2.ID.make(row.model.id),
-          providerID: ProviderV2.ID.make(row.model.providerID),
-          variant: row.model.variant,
-        }
-      : undefined,
-    version: row.version,
-    summary,
-    cost: row.cost,
-    tokens: {
-      input: row.tokens_input,
-      output: row.tokens_output,
-      reasoning: row.tokens_reasoning,
-      cache: {
-        read: row.tokens_cache_read,
-        write: row.tokens_cache_write,
-      },
-    },
-    metadata: row.metadata ?? undefined,
-    revert,
-    permission: row.permission ? [...row.permission] : undefined,
-    time: {
-      created: row.time_created,
-      updated: row.time_updated,
-      compacting: row.time_compacting ?? undefined,
-      archived: row.time_archived ?? undefined,
-    },
-  }
 }
 
 export function toRow(info: Info) {
@@ -696,7 +642,7 @@ export const layer: Layer.Layer<
     const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (
       sessionID: SessionID,
       entry: Record<string, unknown>,
-      options?: DirectoryOption,
+      options?: DirectoryOption & { syncCache?: boolean },
     ) {
       const session = yield* getWithDirectory(sessionID, options?.directory).pipe(Effect.orDie)
       yield* Effect.promise(() => appendSessionJsonl(session, entry)).pipe(Effect.orDie)
@@ -705,7 +651,7 @@ export const layer: Layer.Layer<
       const base = projected ?? session
       const next = { ...base, time: { ...base.time, updated } }
       yield* Effect.promise(() => writeSessionStore(next)).pipe(Effect.orDie)
-      yield* ensureFileSessionCache(next)
+      if (options?.syncCache ?? true) yield* ensureFileSessionCache(next)
     })
 
     const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (
@@ -1032,7 +978,6 @@ export const layer: Layer.Layer<
           permission: info.permission === null ? undefined : (info.permission ?? current.permission),
         } as Info
         yield* Effect.promise(() => writeSessionStore(next))
-        yield* ensureFileSessionCache(next)
         yield* events.publish(SessionV1.Event.Updated, { sessionID, info: next }, sessionEventLocation(next.directory))
       })
 
@@ -1052,7 +997,7 @@ export const layer: Layer.Layer<
           sessionID,
           patch,
         },
-        options,
+        { ...options, syncCache: false },
       )
     })
 

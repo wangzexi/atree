@@ -493,6 +493,10 @@ Playwright 护栏
 - core `SessionStore` 的显式目录解析也继续与 opencode 对齐：
   - `get/context/runnerContext/hasPendingInput/promoteInputs` 在显式传入目录时，若浅层 `readSessionStore(directory, sessionID)` 未命中，会把该目录当作根提示继续向下深搜 nested session。
   - 这让 atree 根目录可以直接作为显式 session 解析入口，而不是只能命中“当前目录本身”的浅层会话。
+- opencode `Session` 的目录元数据 patch 也继续收紧：
+  - `recordSessionPatch(session.updated)` 现在追加目录事件时不再顺手重建 `SessionTable` cache row。
+  - `message/part removed`、`message/part updated` 等仍保留 cache 同步，因为当前 `MessageTable/PartTable` projector 还挂着 `SessionTable` 外键；这条运行态耦合后续需要继续拆。
+  - 这意味着“标题 / icon / archived / workspace / revert / permission / summary”这类目录元数据修改，在 file-backed session 丢失 SQLite row 后，也不会反向把会话补回数据库。
 
 对应新增护栏测试：
 
@@ -506,6 +510,8 @@ Playwright 护栏
   - `does not fall through to another copied session when an explicit question directory is missing`
 - `packages/core/test/atree-session-store.test.ts`
   - `loads a nested file-backed session from an explicit root directory hint`
+- `packages/opencode/test/session/session.test.ts`
+  - `patches file-backed session metadata with an explicit directory and no instance without recreating cache rows`
 
 ## 还剩的硬问题
 
