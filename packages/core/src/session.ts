@@ -21,7 +21,6 @@ import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
 import path from "path"
-import { fromRow } from "./session/info"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
 import { SessionExecution } from "./session/execution"
@@ -37,7 +36,6 @@ import {
   readSessionJsonlMessages,
   readSessionPromptStates,
   readSessionStore,
-  readWorkspaceRoot,
   writeSessionStore,
 } from "./atree/session-store"
 
@@ -433,13 +431,7 @@ export const layer = Layer.effect(
         }
         const session = yield* store.get(sessionID)
         if (session) return session
-        const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-          Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-        )
-        if (root) return yield* new NotFoundError({ sessionID })
-        const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
-        if (!row) return yield* new NotFoundError({ sessionID })
-        return fromRow(row)
+        return yield* new NotFoundError({ sessionID })
       }),
       list: Effect.fn("V2Session.list")(function* (input = {}) {
         const direction = input.anchor?.direction ?? "next"
