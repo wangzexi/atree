@@ -8,7 +8,7 @@ import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { Cron } from "croner"
-import { eq, inArray, sql as drizzleSql } from "drizzle-orm"
+import { eq, inArray } from "drizzle-orm"
 import { Context, Effect, Layer, Option, Schema } from "effect"
 import { AbsolutePath } from "@opencode-ai/core/schema"
 import { Location } from "@opencode-ai/core/location"
@@ -1076,13 +1076,8 @@ export const layer = Layer.effect(
           : [],
       )
       yield* cleanupCompletedOnceForSession(input.sessionID, directory)
-      const count = yield* db
-        .select({ c: drizzleSql<number>`COUNT(*)` })
-        .from(ScheduleTable)
-        .where(eq(ScheduleTable.session_id, input.sessionID))
-        .get()
-        .pipe(Effect.orDie)
-      if ((count?.c ?? 0) >= MAX_PER_SESSION) {
+      const active = yield* activeSchedules(input.sessionID, directory)
+      if (active.length >= MAX_PER_SESSION) {
         return yield* Effect.fail(new LimitExceeded({ sessionID: input.sessionID, limit: MAX_PER_SESSION }))
       }
       const id = Identifier.create("sch", "ascending") as ID

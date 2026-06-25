@@ -761,6 +761,123 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "does not let another directory's projected schedule block create for the current directory",
+    Effect.gen(function* () {
+      const root = yield* tempdir
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const { db } = yield* Database.Service
+      const sessionID = "ses_cross_directory_schedule_limit" as SessionID
+      const sourceScheduleID = "sch_cross_directory_source"
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(source, { recursive: true }))
+      yield* Effect.promise(() => fs.mkdir(target, { recursive: true }))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "cross-directory-source",
+          version: "test",
+          projectID: "proj_cross_directory_source",
+          directory: source,
+          path: ".",
+          title: "Cross directory source",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "cross-directory-target",
+          version: "test",
+          projectID: "proj_cross_directory_target",
+          directory: target,
+          path: ".",
+          title: "Cross directory target",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(source, sessionID, [
+          {
+            id: sourceScheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "source directory schedule",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_cross_directory_source",
+          worktree: source,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ProjectTable)
+        .values({
+          id: "proj_cross_directory_target",
+          worktree: target,
+          vcs: null,
+          name: null,
+          time_created: now,
+          time_updated: now,
+          sandboxes: [],
+        } as unknown as typeof ProjectTable.$inferInsert)
+        .run()
+        .pipe(Effect.orDie)
+      yield* db
+        .insert(ScheduleTable)
+        .values({
+          id: sourceScheduleID as never,
+          session_id: sessionID,
+          kind: "once",
+          expression: "",
+          run_at: now + 60_000,
+          message: "source projected schedule",
+          created_at: now,
+        })
+        .run()
+        .pipe(Effect.orDie)
+
+      const created = yield* Schedule.Service.use((schedule) =>
+        schedule.create({
+          sessionID,
+          directory: target,
+          kind: "once",
+          runAt: now + 120_000,
+          message: "target directory schedule",
+        }),
+      )
+
+      expect(created.message).toBe("target directory schedule")
+      expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([
+        expect.objectContaining({ id: created.id, message: "target directory schedule" }),
+      ])
+      expect(yield* Effect.promise(() => readSessionScheduleState(source, sessionID))).toEqual([
+        expect.objectContaining({ id: sourceScheduleID, message: "source directory schedule" }),
+      ])
+    }),
+  )
+
+  it.effect(
     "does not revive persisted-root schedules when the session store was removed",
     Effect.gen(function* () {
       const { db } = yield* Database.Service
