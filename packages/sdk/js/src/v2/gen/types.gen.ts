@@ -83,6 +83,10 @@ export type Event =
   | EventQuestionReplied
   | EventQuestionRejected
   | EventSessionCompacted
+  | EventScheduleCreated
+  | EventScheduleDeleted
+  | EventScheduleRan
+  | EventScheduleTriggered
   | EventVcsBranchUpdated
   | EventWorkspaceReady
   | EventWorkspaceFailed
@@ -1563,6 +1567,41 @@ export type GlobalEvent = {
       }
     | {
         id: string
+        type: "schedule.created"
+        properties: {
+          scheduleID: string
+          sessionID: string
+        }
+      }
+    | {
+        id: string
+        type: "schedule.deleted"
+        properties: {
+          scheduleID: string
+          sessionID: string
+        }
+      }
+    | {
+        id: string
+        type: "schedule.ran"
+        properties: {
+          scheduleID: string
+          sessionID: string
+          status: "ran" | "skipped"
+          ranAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+        }
+      }
+    | {
+        id: string
+        type: "schedule.triggered"
+        properties: {
+          scheduleID: string
+          sessionID: string
+          message: string
+        }
+      }
+    | {
+        id: string
         type: "vcs.branch.updated"
         properties: {
           branch?: string
@@ -2015,9 +2054,6 @@ export type Config = {
     [key: string]: boolean
   }
   attachment?: AttachmentConfig
-  enterprise?: {
-    url?: string
-  }
   tool_output?: {
     max_lines?: number
     max_bytes?: number
@@ -2562,6 +2598,19 @@ export type NotFoundError = {
   data: {
     message: string
   }
+}
+
+export type Schedule = {
+  id: string
+  sessionID: string
+  kind: "once" | "recurring"
+  expression: string
+  runAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  message: string
+  createdAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  lastRanAt: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
+  lastRunStatus: "ran" | "skipped"
+  nextRun: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN"
 }
 
 export type TextPartInput = {
@@ -5170,6 +5219,45 @@ export type EventSessionCompacted = {
   }
 }
 
+export type EventScheduleCreated = {
+  id: string
+  type: "schedule.created"
+  properties: {
+    scheduleID: string
+    sessionID: string
+  }
+}
+
+export type EventScheduleDeleted = {
+  id: string
+  type: "schedule.deleted"
+  properties: {
+    scheduleID: string
+    sessionID: string
+  }
+}
+
+export type EventScheduleRan = {
+  id: string
+  type: "schedule.ran"
+  properties: {
+    scheduleID: string
+    sessionID: string
+    status: "ran" | "skipped"
+    ranAt: number | "NaN" | "Infinity" | "-Infinity"
+  }
+}
+
+export type EventScheduleTriggered = {
+  id: string
+  type: "schedule.triggered"
+  properties: {
+    scheduleID: string
+    sessionID: string
+    message: string
+  }
+}
+
 export type EventVcsBranchUpdated = {
   id: string
   type: "vcs.branch.updated"
@@ -7618,6 +7706,7 @@ export type SessionCreateData = {
     }
     permission?: PermissionRuleset
     workspaceID?: string
+    directory?: string
   }
   path?: never
   query?: {
@@ -7854,6 +7943,114 @@ export type SessionTodoResponses = {
 
 export type SessionTodoResponse = SessionTodoResponses[keyof SessionTodoResponses]
 
+export type SessionSchedulesData = {
+  body?: never
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/schedule"
+}
+
+export type SessionSchedulesErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionSchedulesError = SessionSchedulesErrors[keyof SessionSchedulesErrors]
+
+export type SessionSchedulesResponses = {
+  /**
+   * List of scheduled tasks
+   */
+  200: Array<Schedule>
+}
+
+export type SessionSchedulesResponse = SessionSchedulesResponses[keyof SessionSchedulesResponses]
+
+export type SessionCreateScheduleData = {
+  body?: {
+    type?: "cron" | "at"
+    cron?: string
+    at?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN" | string
+    message: string
+  }
+  path: {
+    sessionID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/schedule"
+}
+
+export type SessionCreateScheduleErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionCreateScheduleError = SessionCreateScheduleErrors[keyof SessionCreateScheduleErrors]
+
+export type SessionCreateScheduleResponses = {
+  /**
+   * Created scheduled task
+   */
+  200: Schedule
+}
+
+export type SessionCreateScheduleResponse = SessionCreateScheduleResponses[keyof SessionCreateScheduleResponses]
+
+export type SessionDeleteScheduleData = {
+  body?: never
+  path: {
+    sessionID: string
+    scheduleID: string
+  }
+  query?: {
+    directory?: string
+    workspace?: string
+  }
+  url: "/session/{sessionID}/schedule/{scheduleID}"
+}
+
+export type SessionDeleteScheduleErrors = {
+  /**
+   * BadRequest | InvalidRequestError
+   */
+  400: EffectHttpApiErrorBadRequest | InvalidRequestError
+  /**
+   * NotFoundError
+   */
+  404: NotFoundError
+}
+
+export type SessionDeleteScheduleError = SessionDeleteScheduleErrors[keyof SessionDeleteScheduleErrors]
+
+export type SessionDeleteScheduleResponses = {
+  /**
+   * Successfully deleted schedule
+   */
+  200: boolean
+}
+
+export type SessionDeleteScheduleResponse = SessionDeleteScheduleResponses[keyof SessionDeleteScheduleResponses]
+
 export type SessionDiffData = {
   body?: never
   path: {
@@ -7926,6 +8123,7 @@ export type SessionMessagesResponse2 = SessionMessagesResponses[keyof SessionMes
 
 export type SessionPromptData = {
   body?: {
+    directory?: string
     messageID?: string
     model?: {
       providerID: string
@@ -8156,6 +8354,7 @@ export type SessionInitResponses = {
 }
 
 export type SessionInitResponse = SessionInitResponses[keyof SessionInitResponses]
+
 export type SessionSummarizeData = {
   body?: {
     providerID: string
@@ -8196,6 +8395,7 @@ export type SessionSummarizeResponse = SessionSummarizeResponses[keyof SessionSu
 
 export type SessionPromptAsyncData = {
   body?: {
+    directory?: string
     messageID?: string
     model?: {
       providerID: string
@@ -8246,6 +8446,7 @@ export type SessionPromptAsyncResponse = SessionPromptAsyncResponses[keyof Sessi
 export type SessionCommandData = {
   body?: {
     messageID?: string
+    directory?: string
     agent?: string
     model?: string
     arguments: string
@@ -8297,6 +8498,7 @@ export type SessionCommandResponse = SessionCommandResponses[keyof SessionComman
 
 export type SessionShellData = {
   body?: {
+    directory?: string
     messageID?: string
     agent: string
     model?: {
@@ -8346,6 +8548,7 @@ export type SessionShellResponse = SessionShellResponses[keyof SessionShellRespo
 
 export type SessionRevertData = {
   body?: {
+    directory?: string
     messageID: string
     partID?: string
   }

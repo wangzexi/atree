@@ -139,7 +139,8 @@ export function usePromptMove(input: { projectID: () => string | undefined; sess
       await sdk.client.session
         .promptAsync({
           sessionID,
-          directory,
+          query_directory: directory,
+          body_directory: directory,
           noReply: true,
           parts: [
             {

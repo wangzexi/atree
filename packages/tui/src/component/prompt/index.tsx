@@ -992,7 +992,8 @@ export function Prompt(props: PromptProps) {
       finishMoveProgress = Boolean(move.progress())
 
       const res = await sdk.client.session.create({
-        directory,
+        query_directory: directory,
+        body_directory: directory,
         workspace: workspaceID,
         agent: agent.name,
         model: {

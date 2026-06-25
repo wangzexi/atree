@@ -168,7 +168,8 @@ export function make(input: {
       () =>
         input.sdk.session.create(
           {
-            directory: params.cwd,
+            query_directory: params.cwd,
+            body_directory: params.cwd,
             ...(modeId ? { agent: modeId } : {}),
             model: {
               providerID: selected.providerID,
@@ -514,7 +515,8 @@ export function make(input: {
                 ...(variant ? { variant } : {}),
                 parts,
                 ...(modeId ? { agent: modeId } : {}),
-                directory: current.cwd,
+                query_directory: current.cwd,
+                body_directory: current.cwd,
               },
               { throwOnError: true },
             ),
@@ -536,7 +538,8 @@ export function make(input: {
                 model: `${selected.providerID}/${selected.modelID}`,
                 ...(variant ? { variant } : {}),
                 ...(modeId ? { agent: modeId } : {}),
-                directory: current.cwd,
+                query_directory: current.cwd,
+                body_directory: current.cwd,
               },
               { throwOnError: true },
             ),

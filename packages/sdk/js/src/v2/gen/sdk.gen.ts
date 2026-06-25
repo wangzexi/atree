@@ -177,10 +177,14 @@ import type {
   SessionCommandResponses,
   SessionCreateErrors,
   SessionCreateResponses,
+  SessionCreateScheduleErrors,
+  SessionCreateScheduleResponses,
   SessionDeleteErrors,
   SessionDeleteMessageErrors,
   SessionDeleteMessageResponses,
   SessionDeleteResponses,
+  SessionDeleteScheduleErrors,
+  SessionDeleteScheduleResponses,
   SessionDiffErrors,
   SessionDiffResponses,
   SessionForkErrors,
@@ -201,6 +205,8 @@ import type {
   SessionPromptResponses,
   SessionRevertErrors,
   SessionRevertResponses,
+  SessionSchedulesErrors,
+  SessionSchedulesResponses,
   SessionShellErrors,
   SessionShellResponses,
   SessionStatusErrors,
@@ -3331,7 +3337,7 @@ export class Session2 extends HeyApiClient {
    */
   public create<ThrowOnError extends boolean = false>(
     parameters?: {
-      directory?: string
+      query_directory?: string
       workspace?: string
       parentID?: string
       title?: string
@@ -3346,6 +3352,7 @@ export class Session2 extends HeyApiClient {
       }
       permission?: PermissionRuleset
       workspaceID?: string
+      body_directory?: string
     },
     options?: Options<never, ThrowOnError>,
   ) {
@@ -3354,7 +3361,11 @@ export class Session2 extends HeyApiClient {
       [
         {
           args: [
-            { in: "query", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
             { in: "query", key: "workspace" },
             { in: "body", key: "parentID" },
             { in: "body", key: "title" },
@@ -3363,6 +3374,11 @@ export class Session2 extends HeyApiClient {
             { in: "body", key: "metadata" },
             { in: "body", key: "permission" },
             { in: "body", key: "workspaceID" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
           ],
         },
       ],
@@ -3587,6 +3603,125 @@ export class Session2 extends HeyApiClient {
   }
 
   /**
+   * List session scheduled tasks
+   *
+   * Retrieve scheduled tasks configured for the specified session, including recurring cron messages and one-time at messages.
+   */
+  public schedules<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).get<SessionSchedulesResponses, SessionSchedulesErrors, ThrowOnError>({
+      url: "/session/{sessionID}/schedule",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
+   * Create session scheduled task
+   *
+   * Create a scheduled message for the specified session. Use type='cron' with cron for recurring tasks, or type='at' with at for one-time tasks.
+   */
+  public createSchedule<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      directory?: string
+      workspace?: string
+      type?: "cron" | "at"
+      cron?: string
+      at?: number | "NaN" | "Infinity" | "-Infinity" | "Infinity" | "-Infinity" | "NaN" | string
+      message?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+            { in: "body", key: "type" },
+            { in: "body", key: "cron" },
+            { in: "body", key: "at" },
+            { in: "body", key: "message" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).post<
+      SessionCreateScheduleResponses,
+      SessionCreateScheduleErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/schedule",
+      ...options,
+      ...params,
+      headers: {
+        "Content-Type": "application/json",
+        ...options?.headers,
+        ...params.headers,
+      },
+    })
+  }
+
+  /**
+   * Delete session scheduled task
+   *
+   * Remove a single scheduled task from the session by id.
+   */
+  public deleteSchedule<ThrowOnError extends boolean = false>(
+    parameters: {
+      sessionID: string
+      scheduleID: string
+      directory?: string
+      workspace?: string
+    },
+    options?: Options<never, ThrowOnError>,
+  ) {
+    const params = buildClientParams(
+      [parameters],
+      [
+        {
+          args: [
+            { in: "path", key: "sessionID" },
+            { in: "path", key: "scheduleID" },
+            { in: "query", key: "directory" },
+            { in: "query", key: "workspace" },
+          ],
+        },
+      ],
+    )
+    return (options?.client ?? this.client).delete<
+      SessionDeleteScheduleResponses,
+      SessionDeleteScheduleErrors,
+      ThrowOnError
+    >({
+      url: "/session/{sessionID}/schedule/{scheduleID}",
+      ...options,
+      ...params,
+    })
+  }
+
+  /**
    * Get message diff
    *
    * Get the file changes (diff) that resulted from a specific user message in the session.
@@ -3664,8 +3799,9 @@ export class Session2 extends HeyApiClient {
   public prompt<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
-      directory?: string
+      query_directory?: string
       workspace?: string
+      body_directory?: string
       messageID?: string
       model?: {
         providerID: string
@@ -3689,8 +3825,17 @@ export class Session2 extends HeyApiClient {
         {
           args: [
             { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
             { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
             { in: "body", key: "messageID" },
             { in: "body", key: "model" },
             { in: "body", key: "agent" },
@@ -3953,8 +4098,9 @@ export class Session2 extends HeyApiClient {
   public promptAsync<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
-      directory?: string
+      query_directory?: string
       workspace?: string
+      body_directory?: string
       messageID?: string
       model?: {
         providerID: string
@@ -3978,8 +4124,17 @@ export class Session2 extends HeyApiClient {
         {
           args: [
             { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
             { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
             { in: "body", key: "messageID" },
             { in: "body", key: "model" },
             { in: "body", key: "agent" },
@@ -4013,9 +4168,10 @@ export class Session2 extends HeyApiClient {
   public command<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
-      directory?: string
+      query_directory?: string
       workspace?: string
       messageID?: string
+      body_directory?: string
       agent?: string
       model?: string
       arguments?: string
@@ -4038,9 +4194,18 @@ export class Session2 extends HeyApiClient {
         {
           args: [
             { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
             { in: "query", key: "workspace" },
             { in: "body", key: "messageID" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
             { in: "body", key: "arguments" },
@@ -4071,8 +4236,9 @@ export class Session2 extends HeyApiClient {
   public shell<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
-      directory?: string
+      query_directory?: string
       workspace?: string
+      body_directory?: string
       messageID?: string
       agent?: string
       model?: {
@@ -4089,8 +4255,17 @@ export class Session2 extends HeyApiClient {
         {
           args: [
             { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
             { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
             { in: "body", key: "messageID" },
             { in: "body", key: "agent" },
             { in: "body", key: "model" },
@@ -4119,8 +4294,9 @@ export class Session2 extends HeyApiClient {
   public revert<ThrowOnError extends boolean = false>(
     parameters: {
       sessionID: string
-      directory?: string
+      query_directory?: string
       workspace?: string
+      body_directory?: string
       messageID?: string
       partID?: string
     },
@@ -4132,8 +4308,17 @@ export class Session2 extends HeyApiClient {
         {
           args: [
             { in: "path", key: "sessionID" },
-            { in: "query", key: "directory" },
+            {
+              in: "query",
+              key: "query_directory",
+              map: "directory",
+            },
             { in: "query", key: "workspace" },
+            {
+              in: "body",
+              key: "body_directory",
+              map: "directory",
+            },
             { in: "body", key: "messageID" },
             { in: "body", key: "partID" },
           ],
