@@ -84,6 +84,7 @@
 - core `SessionV2.prompt` 在 file-backed 会话重试已有 prompt 时，也已经开始复用目录里的 prompt lifecycle state（`delivery/admittedSeq/promotedSeq/timeCreated`），不再返回一份与 `session.jsonl` 脱节的硬编码 prompt admission。
 - file-backed session resolver 当前只按显式目录、当前 instance、持久化 atree root 解析目录事实源；它已经不再把 SQLite 中的目录缓存当作最终兜底 hint，但 core/opencode 两侧在“复制目录歧义”上的实现和测试仍需继续统一。
 - opencode 的 file-backed session resolver 现在也支持“显式目录作为一个根提示”向下深搜该目录树内的 session；因此传入 atree 根目录时，嵌套节点里的会话/schedule 已可被正确解析，但一旦同目录树内出现复制歧义，仍会返回 `undefined`，不会猜测。
+- 在这套显式根目录语义之上，opencode 的 `schedule.delete` 也已从浅层目录扫描切到对显式目录树的深搜；因此传入 atree 根目录时，删除嵌套节点里的 schedule 已可正常命中，并会把 state/event 写回真实节点目录，而不是误停在根目录层。
 - `todo` 护栏已经与当前目录歧义规则对齐：当 persisted root 下存在多个复制目录、且同一个 session id 无显式目录 hint 时，不再猜测其中一个 todo 状态，而是视为歧义；但 core/opencode 两侧的 resolver 语义仍未完全统一，这会继续影响 schedule/todo 等工具状态的无目录解析。
 
 已通过的护栏：

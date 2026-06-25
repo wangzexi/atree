@@ -540,6 +540,53 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.effect(
+    "deletes a nested file-backed schedule from an explicit root directory hint",
+    Effect.gen(function* () {
+      const root = yield* tempdir
+      const nodeDirectory = path.join(root, "projects", "ops")
+      const sessionID = "ses_nested_explicit_root_delete_schedule" as SessionID
+      const scheduleID = "sch_nested_explicit_root_delete"
+      const now = Date.now()
+
+      yield* Effect.promise(() => fs.mkdir(nodeDirectory, { recursive: true }))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "nested-explicit-root-delete-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory: nodeDirectory,
+          path: "projects/ops",
+          title: "Nested explicit root delete schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(nodeDirectory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "delete from explicit root",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.delete(scheduleID as never, { directory: root }))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(nodeDirectory, sessionID))).toEqual([])
+    }),
+  )
+
   baseIt.effect(
     "restores persisted root file-backed schedules when the service starts",
     Effect.gen(function* () {

@@ -1183,13 +1183,13 @@ export const layer = Layer.effect(
         yield* clearScheduleProjection(scheduleID)
         return true
       }
-      const fileSessions = yield* Effect.promise(() => readSessionStores(directory))
+      const fileSessions = yield* Effect.promise(() => readSessionStoresDeep(directory))
       for (const session of fileSessions) {
-        const stored = yield* Effect.promise(() => readSessionScheduleState(directory, session.id))
+        const stored = yield* Effect.promise(() => readSessionScheduleState(session.directory, session.id))
         const remaining = stored.filter((schedule) => schedule.id !== scheduleID)
         if (remaining.length === stored.length) continue
         const timer = timers.get(scheduleID)
-        if (timer && timerBelongsToDirectory(timer, directory)) {
+        if (timer && timerBelongsToDirectory(timer, session.directory)) {
           stopTimer(timer)
           timers.delete(scheduleID)
         }
@@ -1199,7 +1199,7 @@ export const layer = Layer.effect(
             scheduleID,
             sessionID: session.id,
           },
-          scheduleLocation(directory),
+          scheduleLocation(session.directory),
         )
         yield* appendScheduleSessionEventBestEffort(
           session.id,
@@ -1209,10 +1209,10 @@ export const layer = Layer.effect(
             sessionID: session.id,
             reason: "deleted",
           },
-          directory,
+          session.directory,
         )
-        yield* Effect.promise(() => writeSessionScheduleState(directory, session.id, remaining))
-        yield* clearScheduleProjection(scheduleID, directory)
+        yield* Effect.promise(() => writeSessionScheduleState(session.directory, session.id, remaining))
+        yield* clearScheduleProjection(scheduleID, session.directory)
         return true
       }
       return false
