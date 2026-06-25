@@ -563,3 +563,4 @@ Playwright 护栏
 - 目录内 `session.jsonl` / `meta` / schedule state 是唯一业务真相。
 - SQLite 只能做当前活动副本的可重建缓存。
 - 一旦目录显式切换，相关缓存必须允许重绑或直接丢弃，而不是尝试“合并多个副本”。
+- `question/permission.restorePending()` 仍会默认扫整个 workspace 的 `.agents/atree/sessions`，即使当前是嵌入式 `Location` 实例；需要改成显式优先 `location.directory`，避免 copied session 的 pending 恢复再次掉回持久根目录歧义。

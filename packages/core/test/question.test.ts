@@ -269,4 +269,70 @@ describe("QuestionV2", () => {
       expect(yield* Effect.promise(() => readQuestionStateEntries(tmp.path))).toEqual([])
     }),
   )
+
+  it.effect("reads copied pending questions from the current location tree", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const source = AbsolutePath.make(path.join(tmp.path, "source"))
+      const target = AbsolutePath.make(path.join(tmp.path, "target"))
+      const copiedSessionID = SessionV2.ID.make("ses_question_restore_target")
+      const requestID = QuestionV2.ID.ascending("que_restore_target")
+
+      const writeSession = (directory: AbsolutePath, title: string) =>
+        writeSessionStore(
+          SessionV2.Info.make({
+            id: copiedSessionID,
+            projectID: ProjectV2.ID.global,
+            title,
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            location: Location.Ref.make({ directory }),
+          }),
+        )
+
+      yield* Effect.promise(() => writeSession(source, "Question source"))
+      yield* Effect.promise(() => writeSession(target, "Question target"))
+
+      const request: QuestionV2.Request = {
+        id: requestID,
+        sessionID: copiedSessionID,
+        questions: [question],
+      }
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          SessionV2.Info.make({
+            id: copiedSessionID,
+            projectID: ProjectV2.ID.global,
+            title: "Question source",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            location: Location.Ref.make({ directory: source }),
+          }),
+          { type: QuestionV2.Event.Asked.type, ...request },
+        ),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(
+          SessionV2.Info.make({
+            id: copiedSessionID,
+            projectID: ProjectV2.ID.global,
+            title: "Question target",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            location: Location.Ref.make({ directory: target }),
+          }),
+          { type: QuestionV2.Event.Asked.type, ...request },
+        ),
+      )
+
+      expect(yield* Effect.promise(() => readQuestionStateEntries(target))).toMatchObject([{ request, directory: target }])
+    }),
+  )
 })

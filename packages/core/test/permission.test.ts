@@ -443,4 +443,57 @@ describe("PermissionV2", () => {
       expect(yield* Effect.promise(() => readPermissionStateEntries(tmp.path))).toEqual([])
     }),
   )
+
+  it.effect("reads copied pending permissions from the current location tree", () =>
+    Effect.gen(function* () {
+      const tmp = yield* Effect.acquireRelease(
+        Effect.promise(() => tmpdir()),
+        (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+      )
+      const source = AbsolutePath.make(path.join(tmp.path, "source"))
+      const target = AbsolutePath.make(path.join(tmp.path, "target"))
+      const copiedSessionID = SessionV2.ID.make("ses_permission_restore_target")
+      const requestID = PermissionV2.ID.create("per_restore_target")
+
+      const sourceSession = SessionV2.Info.make({
+        id: copiedSessionID,
+        projectID: Project.ID.global,
+        title: "Permission source",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+        location: Location.Ref.make({ directory: source }),
+        agent: AgentV2.ID.make("test"),
+      })
+      const targetSession = SessionV2.Info.make({
+        ...sourceSession,
+        title: "Permission target",
+        location: Location.Ref.make({ directory: target }),
+      })
+      yield* Effect.promise(() => writeSessionStore(sourceSession))
+      yield* Effect.promise(() => writeSessionStore(targetSession))
+
+      const request: PermissionV2.Request = {
+        id: requestID,
+        sessionID: copiedSessionID,
+        action: "read",
+        resources: ["src/index.ts"],
+      }
+
+      yield* Effect.promise(() =>
+        appendSessionJsonl(sourceSession, {
+          type: PermissionV2.Event.Asked.type,
+          ...request,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(targetSession, {
+          type: PermissionV2.Event.Asked.type,
+          ...request,
+        }),
+      )
+
+      expect(yield* Effect.promise(() => readPermissionStateEntries(target))).toMatchObject([{ request, directory: target }])
+    }),
+  )
 })

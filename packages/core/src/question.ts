@@ -136,7 +136,7 @@ export const layer = Layer.effect(
     const pending = new Map<ID, Pending>()
 
     const restorePending = Effect.fn("QuestionV2.restorePending")(function* () {
-      const restored = yield* Effect.promise(() => readQuestionStateEntries()).pipe(
+      const restored = yield* Effect.promise(() => readQuestionStateEntries(location.directory)).pipe(
         Effect.catchCause(() => Effect.succeed([] as Awaited<ReturnType<typeof readQuestionStateEntries>>)),
       )
       const restoredIDs = new Set(restored.map((entry) => entry.request.id))

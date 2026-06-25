@@ -149,7 +149,7 @@ export const layer = Layer.effect(
     const pending = new Map<ID, Pending>()
 
     const restorePending = EffectRuntime.fn("PermissionV2.restorePending")(function* () {
-      const restored = yield* EffectRuntime.promise(() => readPermissionStateEntries()).pipe(
+      const restored = yield* EffectRuntime.promise(() => readPermissionStateEntries(location.directory)).pipe(
         EffectRuntime.catchCause(() =>
           EffectRuntime.succeed([] as Awaited<ReturnType<typeof readPermissionStateEntries>>),
         ),
