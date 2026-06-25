@@ -443,6 +443,41 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not merge same-directory SQLite metadata into a file-backed session read", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const { db } = yield* Database.Service
+      const created = yield* session.create({ title: "directory truth", metadata: { icon: "🧭" } })
+
+      yield* session.setSummary({
+        sessionID: created.id,
+        summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
+      })
+
+      const stored = yield* Effect.promise(() => readSessionStore(instance.directory, created.id))
+      expect(stored?.metadata).toEqual({ icon: "🧭" })
+      expect(stored?.summary).toEqual({ additions: 1, deletions: 2, files: 3, diffs: [] })
+
+      yield* db
+        .update(SessionTable)
+        .set({
+          metadata: { icon: "🦊" },
+          summary_additions: 9,
+          summary_deletions: 8,
+          summary_files: 7,
+          summary_diffs: [{ file: "stale.txt", additions: 9, deletions: 8, status: "modified", patch: "@@" }] as any,
+        })
+        .where(eq(SessionTable.id, created.id))
+        .run()
+        .pipe(Effect.orDie)
+
+      const loaded = yield* session.get(created.id)
+      expect(loaded.metadata).toEqual({ icon: "🧭" })
+      expect(loaded.summary).toEqual({ additions: 1, deletions: 2, files: 3, diffs: [] })
+    }),
+  )
+
   it.instance("advances directory session metadata when appending message events", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

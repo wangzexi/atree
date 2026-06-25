@@ -66,6 +66,7 @@
 - opencode 的 `Schedule` 触发链路已经增加目录事实校验：`tick()`、实际 `process()` 和服务启动时的 schedule hydration 都会先确认该 schedule 仍存在于目录内 `schedule.json/session.jsonl` 投影；缺失或已删除的 stale `ScheduleTable` 行会被清掉，不会再反向触发 phantom schedule。
 - opencode 的 `schedule.list` 读模型也继续收紧：列表里的 `lastRanAt/lastRunStatus` 默认取自目录投影，不再从 stale `ScheduleRunTable` 反向回填；只有当前进程里真实存在的 timer 会覆盖瞬时 `nextRun`。
 - opencode 的 `Session` 服务也已经把 file-backed session cache sync 收紧为“只补缺失、不覆盖旧行”：`session.get`、消息事件追加和普通 patch 不再因为解析到 copied target 会话就把 `SessionTable.directory` 改写到目标目录。显式 session patch 仍会通过现有 projector 更新运行投影；同时修正了 unarchive 时 `SessionTable.time_archived` 会残留旧值的问题。
+- opencode 的 `Session.get` 主读链路现在也不再把 `SessionTable` 里的 metadata/summary/workspace/path/revert/permission 合并回目录会话；目录里的 `meta.yaml + session.jsonl` 是唯一读取结果，读取本身也不再顺手重建 `SessionTable` 行。
 - opencode 的 `session.listGlobal` 现在也已经改成纯目录事实源读取：不再先查 `SessionTable` 再用目录元数据覆盖，global/directory 作用域的会话列表直接由 `.agents/atree/sessions/*` 扫描结果决定。
 - core `SessionV2.list` 也已经改成目录扫描优先且不再混入 `SessionTable` 结果；无论是显式目录还是 persisted root，全局/目录列表都直接从 `.agents/atree/sessions/*` 推导。
 - file-backed session resolver 当前只按显式目录、当前 instance、持久化 atree root 解析目录事实源；它已经不再把 SQLite 中的目录缓存当作最终兜底 hint，但 core/opencode 两侧在“复制目录歧义”上的实现和测试仍需继续统一。

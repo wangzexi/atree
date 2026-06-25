@@ -159,24 +159,6 @@ export function toRow(info: Info) {
   }
 }
 
-function mergeFileSession(cached: Info | undefined, file: Info): Info {
-  if (!cached) return file
-  const sameCachedDirectory = sameDirectory(file.directory, cached.directory)
-  return {
-    ...file,
-    projectID: file.projectID === ProjectV2.ID.global && sameCachedDirectory ? cached.projectID : file.projectID,
-    workspaceID: file.workspaceID ?? (sameCachedDirectory ? cached.workspaceID : undefined),
-    path: file.path ?? (sameCachedDirectory ? cached.path : undefined),
-    summary: file.summary ?? (sameCachedDirectory ? cached.summary : undefined),
-    revert: file.revert ?? (sameCachedDirectory ? cached.revert : undefined),
-    permission: file.permission ?? (sameCachedDirectory ? cached.permission : undefined),
-    time: {
-      ...file.time,
-      compacting: file.time.compacting ?? (sameCachedDirectory ? cached.time.compacting : undefined),
-    },
-  }
-}
-
 function sameDirectory(left: string, right: string) {
   return path.resolve(left) === path.resolve(right)
 }
@@ -693,8 +675,6 @@ export const layer: Layer.Layer<
 
     const getWithDirectory = Effect.fn("Session.getWithDirectory")(function* (id: SessionID, directoryHint?: string) {
       if (!id) return yield* Effect.fail(new NotFoundError({ message: "Session not found" }))
-      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
-      const cached = row ? fromRow(row) : undefined
       const ctx = yield* InstanceState.context.pipe(
         Effect.catchCause(() => Effect.succeed<InstanceContext | undefined>(undefined)),
       )
@@ -704,9 +684,7 @@ export const layer: Layer.Layer<
         instanceDirectory: ctx?.directory,
       })
       if (fileSession) {
-        const merged = mergeFileSession(cached, localizeFileSession(fileSession, ctx))
-        yield* ensureFileSessionCache(merged)
-        return merged
+        return localizeFileSession(fileSession, ctx)
       }
       return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
     })
