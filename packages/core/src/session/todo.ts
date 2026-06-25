@@ -1,10 +1,11 @@
 export * as SessionTodo from "./todo"
 
 import { Context, Effect, Layer, Schema } from "effect"
-import { appendSessionJsonl, findSessionStore, readSessionStore, readWorkspaceRoot } from "../atree/session-store"
+import { appendSessionJsonl, readSessionStore } from "../atree/session-store"
 import { readSessionTodoProjection, writeSessionTodoState } from "../atree/todo-store"
 import { EventV2 } from "../event"
 import { SessionSchema } from "./schema"
+import { SessionStore } from "./store"
 
 export const Info = Schema.Struct({
   content: Schema.String.annotate({ description: "Brief description of the task" }),
@@ -43,6 +44,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const sessions = yield* SessionStore.Service
     type FileSessionResolution =
       | { type: "found"; session: NonNullable<Awaited<ReturnType<typeof readSessionStore>>> }
       | { type: "none" }
@@ -51,21 +53,14 @@ export const layer = Layer.effect(
       sessionID: SessionSchema.ID,
       directory?: string,
     ) {
-      if (directory) {
-        const session = yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
-          Effect.catchCause(() => Effect.succeed(undefined)),
-        )
-        return session ? { type: "found", session } : { type: "none" }
-      }
-      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+      const resolved = yield* sessions.get(sessionID, directory ? { directory } : undefined).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
       )
-      if (root) {
-        const session = yield* Effect.promise(() => findSessionStore(root, sessionID)).pipe(
-          Effect.catchCause(() => Effect.succeed(undefined)),
-        )
-        if (session) return { type: "found", session }
-      }
+      if (!resolved) return { type: "none" }
+      const session = yield* Effect.promise(() => readSessionStore(resolved.location.directory, sessionID)).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+      if (session) return { type: "found", session }
       return { type: "none" }
     })
 
@@ -117,4 +112,4 @@ export const layer = Layer.effect(
   }),
 )
 
-export const defaultLayer = layer.pipe(Layer.provide(EventV2.defaultLayer))
+export const defaultLayer = layer.pipe(Layer.provide(EventV2.defaultLayer), Layer.provide(SessionStore.defaultLayer))

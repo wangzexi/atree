@@ -12,6 +12,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable, TodoTable } from "@opencode-ai/core/session/sql"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
+import { SessionStore } from "@opencode-ai/core/session/store"
 import { testEffect } from "./lib/effect"
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "fs/promises"
 import os from "os"
@@ -19,8 +20,9 @@ import path from "path"
 
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
-const todos = SessionTodo.layer.pipe(Layer.provide(database), Layer.provide(events))
-const it = testEffect(Layer.mergeAll(database, events, todos))
+const store = SessionStore.layer.pipe(Layer.provide(database))
+const todos = SessionTodo.layer.pipe(Layer.provide(database), Layer.provide(events), Layer.provide(store))
+const it = testEffect(Layer.mergeAll(database, events, store, todos))
 const sessionID = SessionV2.ID.make("ses_todo_test")
 
 const setup = Effect.gen(function* () {

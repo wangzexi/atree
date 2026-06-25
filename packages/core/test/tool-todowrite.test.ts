@@ -11,6 +11,7 @@ import { AbsolutePath } from "@opencode-ai/core/schema"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionTodo } from "@opencode-ai/core/session/todo"
+import { SessionStore } from "@opencode-ai/core/session/store"
 import { TodoWriteTool } from "@opencode-ai/core/tool/todowrite"
 import { ToolRegistry } from "@opencode-ai/core/tool/registry"
 import { testEffect } from "./lib/effect"
@@ -37,10 +38,11 @@ const permission = Layer.succeed(
 )
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
-const todos = SessionTodo.layer.pipe(Layer.provide(database), Layer.provide(events))
+const store = SessionStore.layer.pipe(Layer.provide(database))
+const todos = SessionTodo.layer.pipe(Layer.provide(database), Layer.provide(events), Layer.provide(store))
 const registry = ToolRegistry.defaultLayer.pipe(Layer.provide(permission))
 const tool = TodoWriteTool.layer.pipe(Layer.provide(registry), Layer.provide(permission), Layer.provide(todos))
-const it = testEffect(Layer.mergeAll(database, events, todos, permission, registry, tool))
+const it = testEffect(Layer.mergeAll(database, events, store, todos, permission, registry, tool))
 
 const setup = Effect.gen(function* () {
   assertions.length = 0
