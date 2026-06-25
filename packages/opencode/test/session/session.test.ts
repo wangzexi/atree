@@ -1429,6 +1429,33 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not recreate a missing file-backed cache row when patching session metadata", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const info = yield* Effect.acquireRelease(
+        session.create({
+          title: "recreate-minimal-cache",
+          metadata: { icon: "🧭" },
+          permission: [{ permission: "bash", pattern: "*", action: "allow" }],
+        }),
+        (created) => session.remove(created.id).pipe(Effect.ignore),
+      )
+
+      yield* db.delete(SessionTable).where(eq(SessionTable.id, info.id)).run().pipe(Effect.orDie)
+
+      yield* session.setMetadata({ sessionID: info.id, metadata: { icon: "🦊" } })
+      yield* session.setArchived({ sessionID: info.id, time: 1234 })
+
+      const stored = yield* Effect.promise(() => readSessionStore(info.directory, info.id))
+      expect(stored?.metadata).toEqual({ icon: "🦊" })
+      expect(stored?.time.archived).toBe(1234)
+
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+    }),
+  )
+
   it.effect("patches file-backed session metadata with an explicit directory and no instance without recreating cache rows", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

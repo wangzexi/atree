@@ -105,6 +105,39 @@ export function toRow(info: Info) {
   }
 }
 
+export function toRuntimeRow(info: Info) {
+  return {
+    id: info.id,
+    project_id: info.projectID,
+    workspace_id: info.workspaceID ?? null,
+    parent_id: info.parentID ?? null,
+    slug: info.slug,
+    directory: info.directory,
+    path: info.path ?? null,
+    title: info.title,
+    agent: info.agent ?? null,
+    model: info.model ?? null,
+    version: info.version,
+    summary_additions: null,
+    summary_deletions: null,
+    summary_files: null,
+    summary_diffs: null,
+    metadata: null,
+    cost: info.cost ?? 0,
+    tokens_input: (info.tokens ?? EmptyTokens).input,
+    tokens_output: (info.tokens ?? EmptyTokens).output,
+    tokens_reasoning: (info.tokens ?? EmptyTokens).reasoning,
+    tokens_cache_read: (info.tokens ?? EmptyTokens).cache.read,
+    tokens_cache_write: (info.tokens ?? EmptyTokens).cache.write,
+    revert: null,
+    permission: null,
+    time_created: info.time.created,
+    time_updated: info.time.updated,
+    time_compacting: info.time.compacting ?? null,
+    time_archived: null,
+  }
+}
+
 function sameDirectory(left: string, right: string) {
   return path.resolve(left) === path.resolve(right)
 }
@@ -615,7 +648,7 @@ export const layer: Layer.Layer<
         .pipe(Effect.orDie)
       if (existing) return
       yield* ensureFileSessionProject(fileSession)
-      const row = toRow(fileSession)
+      const row = toRuntimeRow(fileSession)
       yield* db.insert(SessionTable).values(row).onConflictDoNothing().run().pipe(Effect.orDie)
     })
 
