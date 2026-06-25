@@ -1677,6 +1677,62 @@ describe("session HttpApi", () => {
   )
 
   it.instance(
+    "removes a one-time schedule from API state immediately after it fires",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const headers = { "x-opencode-directory": test.directory, "content-type": "application/json" }
+        const sessionID = SessionID.descending()
+        const now = Date.now()
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "file-backed-fire-schedule",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: test.directory,
+            path: ".",
+            title: "File backed fire schedule",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: now, updated: now },
+          } as any),
+        )
+
+        const created = yield* requestJson<Schedule.Info>(
+          pathFor(SessionPaths.createSchedule, { sessionID }),
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ type: "at", at: now + 1_500, message: "api fires and disappears" }),
+          },
+        )
+
+        expect(yield* requestJson<Schedule.Info[]>(pathFor(SessionPaths.schedules, { sessionID }), { headers })).toHaveLength(
+          1,
+        )
+
+        const waitUntilCleared = (attempts: number): Effect.Effect<void, Error, HttpClient.HttpClient> =>
+          Effect.gen(function* () {
+            const listed = yield* requestJson<Schedule.Info[]>(pathFor(SessionPaths.schedules, { sessionID }), { headers })
+            expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual(listed)
+            if (listed.length === 0) return
+            if (attempts <= 0) return yield* Effect.fail(new Error("schedule did not clear after firing"))
+            yield* Effect.sleep("250 millis")
+            return yield* waitUntilCleared(attempts - 1)
+          })
+
+        yield* waitUntilCleared(20)
+
+        expect(yield* requestJson<Schedule.Info[]>(pathFor(SessionPaths.schedules, { sessionID }), { headers })).toEqual([])
+        expect(yield* Effect.promise(() => readSessionScheduleState(test.directory, sessionID))).toEqual([])
+      }),
+    { git: true, config: { formatter: false, lsp: false } },
+  )
+
+  it.instance(
     "persists selected workspace id when creating a session",
     () =>
       Effect.gen(function* () {
