@@ -2839,6 +2839,68 @@ describe("atree file-backed SessionV2 discovery", () => {
     }),
   )
 
+  it.effect("does not admit an unscoped file-backed prompt when copied directories make the session id ambiguous", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-prompt-ambiguous-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-prompt-ambiguous-root-")))
+      const source = path.join(root, "source")
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      const sessionID = SessionV2.ID.make("ses_core_prompt_ambiguous")
+      const messageID = SessionMessage.ID.make("msg_core_prompt_ambiguous")
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: source,
+          sessionID,
+          title: "Source ambiguous prompt",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: target,
+          sessionID,
+          title: "Target ambiguous prompt",
+          createdAt: 11,
+          updatedAt: 21,
+        }),
+      )
+
+      const sessions = yield* SessionV2.Service
+      const failure = yield* sessions
+        .prompt({
+          sessionID,
+          id: messageID,
+          prompt: new Prompt({ text: "do not guess a copied directory" }),
+          resume: false,
+        })
+        .pipe(Effect.flip)
+
+      expect(failure).toBeInstanceOf(SessionV2.NotFoundError)
+      const { db } = yield* Database.Service
+      expect(
+        yield* db.select().from(SessionInputTable).where(eq(SessionInputTable.id, messageID)).get().pipe(Effect.orDie),
+      ).toBeUndefined()
+
+      const [sourceLog, targetLog] = yield* Effect.all([
+        Effect.promise(() =>
+          readFile(path.join(source, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8").catch(() => ""),
+        ),
+        Effect.promise(() =>
+          readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8").catch(() => ""),
+        ),
+      ])
+      expect(sourceLog).not.toContain("session.next.prompt.admitted")
+      expect(targetLog).not.toContain("session.next.prompt.admitted")
+    }),
+  )
+
   it.effect("replays text part deltas from file-backed session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-data-")))

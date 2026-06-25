@@ -87,6 +87,7 @@
 - core `SessionV2.list` 也已经改成目录扫描优先且不再混入 `SessionTable` 结果；无论是显式目录还是 persisted root，全局/目录列表都直接从 `.agents/atree/sessions/*` 推导。
 - core `SessionV2.get` 也已经继续收紧：无论 persisted root 是否存在，只要 file-backed resolver 没找到目录会话，就直接 `NotFound`；它不再在“没有 root / 目录日志已删”时回退去读 `SessionTable` 复活 SQLite-only 会话。
 - core `SessionV2.prompt` 在 file-backed 会话重试已有 prompt 时，也已经开始复用目录里的 prompt lifecycle state（`delivery/admittedSeq/promotedSeq/timeCreated`），不再返回一份与 `session.jsonl` 脱节的硬编码 prompt admission。
+- core `SessionV2.prompt` 在 persisted root 下遇到 copied 同 id 目录、且没有显式目录 hint 时，也已经有护栏保证“不猜目录、不写 prompt state、不补 `SessionInputTable`”；这让 prompt 生命周期和 question/permission 一样，继续服从目录歧义即失败的规则。
 - file-backed session resolver 当前只按显式目录、当前 instance、持久化 atree root 解析目录事实源；它已经不再把 SQLite 中的目录缓存当作最终兜底 hint，但 core/opencode 两侧在“复制目录歧义”上的实现和测试仍需继续统一。
 - opencode 的 file-backed session resolver 现在也支持“显式目录作为一个根提示”向下深搜该目录树内的 session；因此传入 atree 根目录时，嵌套节点里的会话/schedule 已可被正确解析，但一旦同目录树内出现复制歧义，仍会返回 `undefined`，不会猜测。
 - 在这套显式根目录语义之上，opencode 的 `schedule.delete` 也已从浅层目录扫描切到对显式目录树的深搜；因此传入 atree 根目录时，删除嵌套节点里的 schedule 已可正常命中，并会把 state/event 写回真实节点目录，而不是误停在根目录层。
