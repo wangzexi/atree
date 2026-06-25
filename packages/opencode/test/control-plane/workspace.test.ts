@@ -943,6 +943,52 @@ describe("workspace CRUD", () => {
   )
 
   it.instance(
+    "sessionWarp detaches directory-backed sessions without SQLite rows using file-backed workspace ownership",
+    () => {
+      return Effect.gen(function* () {
+        const { directory: dir } = yield* TestInstance
+        const instance = yield* requireInstance
+        const workspace = yield* Workspace.Service
+        const { db } = yield* Database.Service
+        const previousType = unique("warp-filebacked-detach-prev")
+        const previous = workspaceInfo(instance.project.id, previousType)
+        const sessionID = "ses_workspace_warp_filebacked_detach" as SessionID
+
+        yield* insertWorkspace(previous)
+        yield* Effect.promise(() => writeWorkspaceRoot(dir))
+        registerAdapter(instance.project.id, previousType, localAdapter(path.join(dir, "warp-filebacked-detach-prev")).adapter)
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: sessionID,
+            slug: "workspace-warp-filebacked-detach",
+            projectID: instance.project.id,
+            directory: dir,
+            workspaceID: previous.id,
+            title: "Workspace warp file-backed detach",
+            version: "test",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 1, updated: 2 },
+          } as SessionNs.Info),
+        )
+        yield* db
+          .insert(EventSequenceTable)
+          .values({ aggregate_id: sessionID, seq: 0, owner_id: previous.id })
+          .run()
+          .pipe(Effect.orDie)
+
+        expect(yield* sessionSequenceOwner(sessionID)).toBe(previous.id)
+
+        yield* workspace.sessionWarp({ workspaceID: null, sessionID })
+
+        expect((yield* Effect.promise(() => readSessionStore(dir, sessionID)))?.workspaceID).toBeUndefined()
+        expect(yield* sessionSequenceOwner(sessionID)).toBe(instance.project.id)
+      })
+    },
+    { git: true },
+  )
+
+  it.instance(
     "sessionWarp applies source workspace patch to local target workspace",
     () => {
       return Effect.gen(function* () {

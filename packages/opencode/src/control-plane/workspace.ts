@@ -637,15 +637,15 @@ export const layer = Layer.effect(
           .get()
           .pipe(Effect.orDie)
         const currentFileSession =
-          !input.copyChanges || currentRow?.workspaceID
+          currentRow?.workspaceID && currentRow?.directory
             ? undefined
             : yield* resolveFileSession({
                 sessionID: input.sessionID,
                 directory: currentRow?.directory ?? undefined,
-              })
+              }).pipe(Effect.catchCause(() => Effect.succeed(undefined)))
         const current = {
           workspaceID: currentRow?.workspaceID ?? currentFileSession?.workspaceID ?? null,
-          directory: currentRow?.directory,
+          directory: currentRow?.directory ?? currentFileSession?.directory,
         }
 
         if (current?.workspaceID) {
