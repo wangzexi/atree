@@ -91,6 +91,7 @@
 - 同时，opencode 的 `schedule.clear(sessionID)` 在“无显式目录 + persisted root 下同 id 复制目录歧义”时，也已经停止猜测并停止误删 `ScheduleTable` 投影；当前找不到唯一目录时，只要目录事实源里仍存在匹配会话，就直接 no-op，等待显式目录提示。
 - 与之对应，opencode 的 `schedule.delete(scheduleID)` 在同样的无目录歧义场景下，也已经停止回退到单条 `ScheduleTable` 行去猜测删除；目录事实源仍有匹配副本但无法唯一定位时，现在会返回 `NotFound`，要求显式目录提示。
 - 这条歧义规则也已经继续压到了运行态：`schedule.recordRun(...)` 和 `schedule.tick(...)` 在“persisted root 下存在 copied directory、且无显式目录 hint”时都只会 no-op，不会偷偷补写 `ScheduleTable/RunTable`，也不会推进任一副本目录里的 schedule 状态。
+- 对于 copied directory 下“同一个 `scheduleID` 被两个目录副本同时拥有”这一类运行态冲突，当前策略也已经继续保守化：显式读取 target 目录的 schedule 列表时，只返回 target 自己的目录投影，不再因为 restore/hydrate 抢占或覆盖 source 目录已经存在的 runtime row / timer。
 - `todo` 护栏已经与当前目录歧义规则对齐：当 persisted root 下存在多个复制目录、且同一个 session id 无显式目录 hint 时，不再猜测其中一个 todo 状态，而是视为歧义；但 core/opencode 两侧的 resolver 语义仍未完全统一，这会继续影响 schedule/todo 等工具状态的无目录解析。
 
 已通过的护栏：

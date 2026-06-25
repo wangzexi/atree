@@ -708,6 +708,87 @@ describe("atree schedule restore", () => {
     }),
   )
 
+  it.instance(
+    "does not replace a copied source runtime schedule row when listing the explicit target directory",
+    Effect.gen(function* () {
+      const schedules = yield* Schedule.Service
+      const source = yield* TestInstance
+      const target = yield* tempdir
+      const { db } = yield* Database.Service
+      const sessionID = "ses_explicit_target_list_copied_schedule" as SessionID
+      const scheduleID = "sch_explicit_target_list_copied_schedule"
+      const now = Date.now()
+
+      const sourceSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 60_000,
+        message: "source explicit target list schedule",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 60_000,
+      }
+      const targetSchedule = {
+        id: scheduleID,
+        sessionID,
+        kind: "once" as const,
+        expression: "",
+        runAt: now + 120_000,
+        message: "target explicit target list schedule",
+        createdAt: now,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: now + 120_000,
+      }
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-target-list-source",
+          version: "test",
+          projectID: "proj_explicit_target_list_source",
+          directory: source.directory,
+          path: ".",
+          title: "Explicit target list source",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(source.directory, sessionID, [sourceSchedule]))
+      yield* Effect.promise(() =>
+        fs.cp(path.join(source.directory, ".agents"), path.join(target, ".agents"), { recursive: true }),
+      )
+      yield* Effect.promise(() => writeSessionScheduleState(target, sessionID, [targetSchedule]))
+
+      // Hydrate the source schedule into the runtime projection first.
+      const sourceListed = yield* schedules.list(sessionID, { directory: source.directory })
+      expect(sourceListed).toEqual([expect.objectContaining({ id: scheduleID, message: sourceSchedule.message })])
+
+      const before = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(before?.message).toBe(sourceSchedule.message)
+
+      const targetListed = yield* schedules.list(sessionID, { directory: target })
+      expect(targetListed).toEqual([expect.objectContaining({ id: scheduleID, message: targetSchedule.message })])
+
+      const after = yield* db
+        .select()
+        .from(ScheduleTable)
+        .where(eq(ScheduleTable.id, scheduleID as never))
+        .get()
+        .pipe(Effect.orDie)
+      expect(after?.message).toBe(sourceSchedule.message)
+    }),
+  )
+
   it.effect(
     "does not read or mutate stale database schedules for a missing explicit directory session",
     Effect.gen(function* () {

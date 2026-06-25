@@ -888,6 +888,9 @@ export const layer = Layer.effect(
         const id = schedule.id as ID
         if (existingIDs.has(schedule.id)) {
           const timer = timers.get(id)
+          if (timer && !timerBelongsToDirectory(timer, directory)) {
+            continue
+          }
           if (timer) {
             stopTimer(timer)
             timers.delete(id)
