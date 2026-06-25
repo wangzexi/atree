@@ -16,6 +16,7 @@ import { SessionID } from "./schema"
 import { ScheduleRunTable, ScheduleTable } from "./schedule.sql"
 import { SessionStatus } from "./status"
 import {
+  findSessionScheduleState,
   findWorkspaceSessionScheduleState,
   readSessionScheduleProjection,
   readSessionScheduleState,
@@ -638,6 +639,20 @@ export const layer = Layer.effect(
       return { type: "found", directory: location.directory, schedule } as const
     })
 
+    const findStoredScheduleByID = Effect.fn("Schedule.findStoredScheduleByID")(function* (
+      scheduleID: ID,
+      directoryHint?: string,
+    ) {
+      if (directoryHint) {
+        return yield* Effect.promise(() => findSessionScheduleState(directoryHint, scheduleID)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+      }
+      return yield* Effect.promise(() => findWorkspaceSessionScheduleState(scheduleID)).pipe(
+        Effect.catchCause(() => Effect.succeed(undefined)),
+      )
+    })
+
     const cleanupCompletedOnceForSession = Effect.fn("Schedule.cleanupCompletedOnceForSession")(function* (
       sessionID: SessionID,
       directoryHint?: string,
@@ -665,16 +680,18 @@ export const layer = Layer.effect(
     })
 
     const process = Effect.fn("Schedule.process")(function* (scheduleID: ID) {
+      const timerDirectory = timers.get(scheduleID)?.directory
       const row = yield* db
         .select()
         .from(ScheduleTable)
         .where(eq(ScheduleTable.id, scheduleID))
         .get()
         .pipe(Effect.orDie)
-      if (!row) return
-      const sessionID = row.session_id as SessionID
-      const kind = (row.kind ?? "recurring") as Kind
-      const timerDirectory = timers.get(scheduleID)?.directory
+      const fallback = row ? undefined : yield* findStoredScheduleByID(scheduleID, timerDirectory)
+      if (!row && !fallback) return
+      const sessionID = row ? (row.session_id as SessionID) : (fallback!.sessionID as SessionID)
+      const fallbackSchedule = fallback?.schedules.find((item) => item.id === scheduleID)
+      const kind = row ? ((row.kind ?? "recurring") as Kind) : ((fallbackSchedule?.kind ?? "recurring") as Kind)
       const scheduleState = yield* ensureScheduleStillExists(scheduleID, sessionID, timerDirectory)
       if (scheduleState.type === "missing" || scheduleState.type === "stale") return
       const directoryHint = scheduleState.directory

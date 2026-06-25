@@ -90,6 +90,7 @@
 - opencode `schedule` 对 “workspace root 下是否存在同 id copied session / 当前 session 在 root 下有哪些副本” 的判断也开始共用 `atree/session-store` helper，不再在 `clearRuntimeState / reconcileDirectorySchedules / clear` 里重复手写 `readWorkspaceState() + readSessionStoresDeep(...).filter(...)`。
 - opencode 侧 persisted root 的基础读取入口也继续收口：`session.listGlobal`、`schedule` 启动恢复、`session-event`、workspace session/schedule helper 现在统一经由 `atree/state` 的 `readWorkspaceRootDirectory()` 取根目录，不再在多处重复解析 `state.json` 再手拆 `rootDirectory`。
 - opencode 侧 “persisted root 下深扫全部目录会话” 也开始经由 `atree/session-store` 的 `readWorkspaceSessionStoresDeep()` 进入；`listGlobal()` 和按 session id 查找 workspace 副本不再各自拼 `readWorkspaceRootDirectory() + readSessionStoresDeep(...)`。
+- opencode 的 schedule 运行链路也继续去 DB 依赖：已经启动过 timer 的 schedule 即使 runtime `ScheduleTable` 行被删，`process()` 现在也会回到目录里的 `schedule.json/session.jsonl` 继续执行，不再因为运行投影丢失而让真实自动化消息失效。
 - opencode 的 `session.listGlobal` 现在也已经改成纯目录事实源读取：不再先查 `SessionTable` 再用目录元数据覆盖，global/directory 作用域的会话列表直接由 `.agents/atree/sessions/*` 扫描结果决定。
 - core `SessionV2.list` 也已经改成目录扫描优先且不再混入 `SessionTable` 结果；无论是显式目录还是 persisted root，全局/目录列表都直接从 `.agents/atree/sessions/*` 推导。
 - core `SessionV2.get` 也已经继续收紧：无论 persisted root 是否存在，只要 file-backed resolver 没找到目录会话，就直接 `NotFound`；它不再在“没有 root / 目录日志已删”时回退去读 `SessionTable` 复活 SQLite-only 会话。

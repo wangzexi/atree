@@ -2670,6 +2670,90 @@ describe("atree schedule restore", () => {
   )
 
   it.effect(
+    "ticks an already-restored file-backed schedule after its runtime row is deleted",
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => fs.mkdtemp(path.join(os.tmpdir(), "atree-schedule-tick-restored-data-"))),
+        (dir) => Effect.promise(() => fs.rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* tempdir
+      const directory = path.join(root, "nodes", "tick-restored")
+      const previousData = Global.Path.data
+      const sessionID = "ses_root_tick_restored_schedule" as SessionID
+      const scheduleID = "sch_root_tick_restored_schedule"
+      const now = Date.now()
+
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* Effect.promise(() => fs.mkdir(directory, { recursive: true }))
+      yield* Effect.promise(() => writeWorkspaceRoot(root))
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "root-tick-restored-schedule",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: "nodes/tick-restored",
+          title: "Root tick restored schedule",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, sessionID, [
+          {
+            id: scheduleID,
+            sessionID,
+            kind: "once",
+            expression: "",
+            runAt: now + 60_000,
+            message: "tick restored timer",
+            createdAt: now,
+            lastRanAt: null,
+            lastRunStatus: null,
+            nextRun: now + 60_000,
+          },
+        ]),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.list(sessionID, { directory }))
+      yield* Database.Service.use(({ db }) =>
+        db.delete(ScheduleTable).where(eq(ScheduleTable.id, scheduleID as never)).run().pipe(Effect.orDie),
+      )
+
+      yield* Schedule.Service.use((schedule) => schedule.tick(scheduleID as Schedule.ID))
+
+      expect(yield* Effect.promise(() => readSessionScheduleState(directory, sessionID))).toEqual([])
+      const row = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.id, scheduleID as never))
+          .get()
+          .pipe(Effect.orDie),
+      )
+      expect(row).toBeUndefined()
+
+      const raw = yield* Effect.promise(() =>
+        fs.readFile(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+      )
+      const entries = raw
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, any>)
+      expect(entries.map((entry) => entry.type)).toContain("schedule.ran")
+      expect(entries.at(-1)).toMatchObject({
+        type: "schedule.deleted",
+        scheduleID,
+        sessionID,
+        reason: "completed",
+      })
+    }),
+  )
+
+  it.effect(
     "does not trigger ambiguous copied file-backed schedules from the persisted atree root without database rows",
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
