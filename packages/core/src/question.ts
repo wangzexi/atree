@@ -3,6 +3,7 @@ export * as QuestionV2 from "./question"
 import { Context, Deferred, Effect, Layer, Schema } from "effect"
 import { EventV2 } from "./event"
 import { Identifier } from "./id/id"
+import { Location } from "./location"
 import { withStatics } from "./schema"
 import { publishSessionEvent } from "./session/publish-session-event"
 import { SessionSchema } from "./session/schema"
@@ -130,6 +131,7 @@ export const layer = Layer.effect(
   Service,
   Effect.gen(function* () {
     const events = yield* EventV2.Service
+    const location = yield* Location.Service
     const sessions = yield* SessionStore.Service
     const pending = new Map<ID, Pending>()
 
@@ -158,7 +160,10 @@ export const layer = Layer.effect(
         ? yield* Effect.promise(() => readSessionStore(directory, sessionID)).pipe(
             Effect.catchCause(() => Effect.succeed(undefined)),
           )
-        : yield* sessions.get(sessionID)
+        : (yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )) ??
+          (yield* sessions.get(sessionID).pipe(Effect.catchCause(() => Effect.succeed(undefined))))
       return yield* publishSessionEvent(events, { sessionID, session }, definition, data, "question event")
     })
 
@@ -195,8 +200,9 @@ export const layer = Layer.effect(
           const id = ID.ascending()
           const deferred = yield* Deferred.make<ReadonlyArray<Answer>, RejectedError>()
           const request: Request = { id, ...input }
-          pending.set(id, { request, deferred, directory: input.directory })
-          return yield* publish(request.sessionID, Event.Asked, request, input.directory).pipe(
+          const directory = input.directory ?? location.directory
+          pending.set(id, { request, deferred, directory })
+          return yield* publish(request.sessionID, Event.Asked, request, directory).pipe(
             Effect.andThen(restore(Deferred.await(deferred))),
             Effect.ensuring(
               Effect.sync(() => {

@@ -181,9 +181,9 @@ describe("PermissionV2", () => {
           : Effect.void,
       )
       yield* Effect.addFinalizer(() => unsubscribe)
-      const fiber = yield* service.assert(assertion({ id: PermissionV2.ID.create("per_jsonl"), sessionID })).pipe(
-        Effect.forkScoped,
-      )
+      const fiber = yield* service
+        .assert(assertion({ id: PermissionV2.ID.create("per_jsonl"), sessionID, directory }))
+        .pipe(Effect.forkScoped)
       const request = yield* Deferred.await(asked)
       expect(request.id).toBe(PermissionV2.ID.create("per_jsonl"))
       yield* service.reply({ requestID: request.id, reply: "once" })

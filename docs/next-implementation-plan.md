@@ -486,6 +486,10 @@ Playwright 护栏
 - `question-store` / `permission-store` 现在在无显式目录作用域时，会把 copied session 中重复出现的 pending request id 视为歧义并直接忽略：
   - 不再在两个目录副本之间随机恢复其中一个 pending question / permission。
   - 这让 pending 交互状态在 copied session 场景下更接近“需要显式目录才能恢复”的行为。
+- `QuestionV2` / `PermissionV2` 现在默认继承当前 `Location` 的目录作用域：
+  - file-backed session 在未显式传 `directory` 时，会优先尝试当前 `Location.directory` 下的会话日志。
+  - 一旦显式传了 `directory`，不会再回退到 persisted root 里的其他 copied 副本。
+  - 这让交互型状态的写入与恢复都更符合“当前目录是边界，跨目录必须显式指定”的模型。
 
 对应新增护栏测试：
 
@@ -495,6 +499,8 @@ Playwright 护栏
   - `does not restore ambiguous copied pending questions across directories`
 - `packages/core/test/permission.test.ts`
   - `does not restore ambiguous copied pending permissions across directories`
+- `packages/core/test/question-atree.test.ts`
+  - `does not fall through to another copied session when an explicit question directory is missing`
 
 ## 还剩的硬问题
 

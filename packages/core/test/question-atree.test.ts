@@ -2,7 +2,10 @@ import { describe, expect } from "bun:test"
 import { Database } from "@opencode-ai/core/database/database"
 import { EventV2 } from "@opencode-ai/core/event"
 import { Global } from "@opencode-ai/core/global"
+import { Location } from "@opencode-ai/core/location"
 import { QuestionV2 } from "@opencode-ai/core/question"
+import { AbsolutePath } from "@opencode-ai/core/schema"
+import { ProjectV2 } from "@opencode-ai/core/project"
 import { SessionV2 } from "@opencode-ai/core/session"
 import { SessionStore } from "@opencode-ai/core/session/store"
 import { Context, Effect, Exit, Fiber, Layer, Scope } from "effect"
@@ -14,8 +17,16 @@ import { testEffect } from "./lib/effect"
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
 const store = SessionStore.layer.pipe(Layer.provide(database))
-const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store))
-const it = testEffect(Layer.mergeAll(database, events, store, questions))
+const current = Layer.succeed(
+  Location.Service,
+  Location.Service.of({
+    directory: AbsolutePath.make("/project"),
+    project: { id: ProjectV2.ID.global, directory: AbsolutePath.make("/project") },
+    vcs: undefined,
+  }),
+)
+const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store), Layer.provide(current))
+const it = testEffect(Layer.mergeAll(database, events, store, current, questions))
 
 async function writeAtreeSession(input: {
   data: string

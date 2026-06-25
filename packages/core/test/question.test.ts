@@ -20,8 +20,16 @@ import { tmpdir } from "./fixture/tmpdir"
 const database = Database.layerFromPath(":memory:")
 const events = EventV2.layer.pipe(Layer.provide(database))
 const store = SessionStore.layer.pipe(Layer.provide(database))
-const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store))
-const it = testEffect(Layer.mergeAll(database, events, store, questions))
+const current = Layer.succeed(
+  Location.Service,
+  Location.Service.of({
+    directory: AbsolutePath.make("/project"),
+    project: { id: ProjectV2.ID.global, directory: AbsolutePath.make("/project") },
+    vcs: undefined,
+  }),
+)
+const questions = QuestionV2.layer.pipe(Layer.provide(events), Layer.provide(store), Layer.provide(current))
+const it = testEffect(Layer.mergeAll(database, events, store, current, questions))
 
 const sessionID = SessionV2.ID.make("ses_question_test")
 const question: QuestionV2.Info = {
@@ -112,7 +120,11 @@ describe("QuestionV2", () => {
         .pipe(Effect.orDie)
 
       const service = yield* QuestionV2.Service
-      const { fiber, request } = yield* waitForAsk(service, { sessionID: fileSessionID, questions: [question] })
+      const { fiber, request } = yield* waitForAsk(service, {
+        sessionID: fileSessionID,
+        directory,
+        questions: [question],
+      })
       yield* service.reply({ requestID: request.id, answers: [["One"]] })
       expect(yield* Fiber.join(fiber)).toEqual([["One"]])
 
