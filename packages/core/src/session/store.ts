@@ -13,8 +13,8 @@ import {
   readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
-  readSessionStoresDeep,
   readWorkspaceRoot,
+  readWorkspaceSessionStoresDeep,
 } from "../atree/session-store"
 
 export interface Interface {
@@ -112,11 +112,7 @@ export const layer = Layer.effect(
           Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
         )
       }
-      const root = yield* Effect.promise(() => readWorkspaceRoot()).pipe(
-        Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
-      )
-      if (!root) return [] as SessionSchema.Info[]
-      return yield* Effect.promise(() => readSessionStoresDeep(root)).pipe(
+      return yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
         Effect.catchCause(() => Effect.succeed([] as SessionSchema.Info[])),
       )
     })

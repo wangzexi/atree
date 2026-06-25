@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import type { PermissionV2 } from "../permission"
-import { readSessionStoresDeep, readWorkspaceRoot } from "./session-store"
+import { readSessionStoresDeep, readWorkspaceSessionStoresDeep } from "./session-store"
 
 type RecordValue = Record<string, unknown>
 export type PermissionStateEntry = {
@@ -26,10 +26,10 @@ function sessionJsonlPath(directory: string, sessionID: string) {
 }
 
 export async function readPermissionStateEntries(rootDirectory?: string) {
-  const rootInput = rootDirectory ?? (await readWorkspaceRoot())
-  if (!rootInput) return [] as PermissionStateEntry[]
-
-  const sessions = await readSessionStoresDeep(rootInput)
+  const sessions = rootDirectory
+    ? await readSessionStoresDeep(rootDirectory)
+    : await readWorkspaceSessionStoresDeep()
+  if (sessions.length === 0) return [] as PermissionStateEntry[]
   const permissions = new Map<string, PermissionStateEntry>()
 
   for (const session of sessions) {
