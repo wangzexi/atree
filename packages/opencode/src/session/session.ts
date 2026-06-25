@@ -894,16 +894,6 @@ export const layer: Layer.Layer<
         return part
       }).pipe(Effect.withSpan("Session.updatePart"))
 
-    const canUseMessageProjectionCache = Effect.fn("Session.canUseMessageProjectionCache")(function* (session: Info) {
-      const row = yield* db
-        .select({ directory: SessionTable.directory })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, session.id))
-        .get()
-        .pipe(Effect.orDie)
-      return row ? sameDirectory(row.directory, session.directory) : false
-    })
-
     const hasDirectorySessionStore = Effect.fn("Session.hasDirectorySessionStore")(function* (session: Info) {
       const stored = yield* Effect.promise(() => readSessionStore(session.directory, session.id))
       return stored !== undefined
@@ -923,9 +913,8 @@ export const layer: Layer.Layer<
           .find((message) => message.info.id === input.messageID)
           ?.parts.find((part) => part.id === input.partID)
         if (filePart) return filePart
+        return
       }
-
-      if (session && !(yield* canUseMessageProjectionCache(session))) return
 
       const row = yield* db
         .select()
@@ -1182,66 +1171,10 @@ export const layer: Layer.Layer<
       return info.summary?.diffs ?? []
     })
 
-    const filterRemovedProjection = (
-      items: SessionV1.WithParts[],
-      projection: Awaited<ReturnType<typeof readSessionJsonlProjection>>,
-    ) => {
-      const fileMessages = new Map(projection.messages.map((item) => [item.info.id, item]))
-      return items
-        .filter((item) => !projection.removedMessageIDs.has(item.info.id))
-        .map((item) => {
-          const current = fileMessages.get(item.info.id) ?? item
-          return {
-            ...current,
-            parts: current.parts.filter((part) => !projection.removedPartIDs.has(`${current.info.id}:${part.id}`)),
-          }
-        })
-    }
-
     const messages: Interface["messages"] = Effect.fn("Session.messages")(function* (input) {
       const session = yield* getWithDirectory(input.sessionID, input.directory)
       const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-      if (fileProjection.hasMessageEvents) {
-        return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
-      }
-
-      if (!(yield* canUseMessageProjectionCache(session))) return []
-
-      if (input.limit) {
-        const page = yield* MessageV2.page({
-          sessionID: input.sessionID,
-          limit: input.limit,
-          directory: session.directory,
-        }).pipe(
-          Effect.provideService(Database.Service, database),
-          Effect.catchIf(NotFoundError.isInstance, () =>
-            Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
-          ),
-        )
-        return filterRemovedProjection(page.items, fileProjection)
-      }
-
-      const size = 50
-      const result = [] as SessionV1.WithParts[]
-      let before: string | undefined
-      while (true) {
-        const page = yield* MessageV2.page({
-          sessionID: input.sessionID,
-          limit: size,
-          before,
-          directory: session.directory,
-        }).pipe(Effect.provideService(Database.Service, database))
-        if (page.items.length === 0) break
-        for (let i = page.items.length - 1; i >= 0; i--) {
-          const item = page.items[i]
-          if (item) result.push(item)
-        }
-        if (!page.more || !page.cursor) break
-        before = page.cursor
-      }
-      const items = filterRemovedProjection(result.reverse(), fileProjection)
-      if (items.length > 0) return items
-      return []
+      return input.limit ? fileProjection.messages.slice(-input.limit) : fileProjection.messages
     })
 
     const removeMessage = Effect.fn("Session.removeMessage")(function* (input: {
@@ -1313,26 +1246,6 @@ export const layer: Layer.Layer<
         if (!sessionID) return Option.none<SessionV1.WithParts>()
         const session = yield* getWithDirectory(sessionID, options?.directory)
         const fileProjection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-        const canUseCache = yield* canUseMessageProjectionCache(session)
-        const size = 50
-        let before: string | undefined
-        if (canUseCache) {
-          while (true) {
-            const page = yield* MessageV2.page({ sessionID, limit: size, before, directory: session.directory }).pipe(
-              Effect.provideService(Database.Service, database),
-              Effect.catchIf(NotFoundError.isInstance, () =>
-                Effect.succeed({ items: [] as SessionV1.WithParts[], more: false, cursor: undefined }),
-              ),
-            )
-            if (page.items.length === 0) break
-            for (let i = page.items.length - 1; i >= 0; i--) {
-              const item = filterRemovedProjection(page.items[i] ? [page.items[i]] : [], fileProjection)[0]
-              if (item && predicate(item)) return Option.some(item)
-            }
-            if (!page.more || !page.cursor) break
-            before = page.cursor
-          }
-        }
         for (let i = fileProjection.messages.length - 1; i >= 0; i--) {
           const item = fileProjection.messages[i]
           if (item && predicate(item)) return Option.some(item)

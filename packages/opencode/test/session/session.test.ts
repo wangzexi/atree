@@ -1142,6 +1142,47 @@ describe("Session", () => {
     }),
   )
 
+  it.instance("does not revive stale cached messages or parts when a file-backed session log is empty", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const instance = yield* TestInstance
+      const info = yield* session.create({ title: "empty-log-stale-cache" })
+      const messageID = MessageID.ascending()
+      const partID = PartID.ascending()
+
+      yield* session.updateMessage({
+        id: messageID,
+        sessionID: info.id,
+        role: "user",
+        time: { created: Date.now() },
+        agent: "user",
+        model: { providerID: "test", modelID: "test" },
+        tools: {},
+        mode: "",
+      } as unknown as SessionV1.Info)
+      yield* session.updatePart({
+        id: partID,
+        messageID,
+        sessionID: info.id,
+        type: "text",
+        text: "stale cached entry",
+      })
+
+      yield* Effect.promise(() =>
+        fs.writeFile(path.join(instance.directory, ".agents", "atree", "sessions", info.id, "session.jsonl"), ""),
+      )
+
+      const messages = yield* session.messages({ sessionID: info.id, limit: 10 })
+      expect(messages).toEqual([])
+
+      const part = yield* session.getPart({ sessionID: info.id, messageID, partID })
+      expect(part).toBeUndefined()
+
+      const found = yield* session.findMessage(info.id, (message) => message.info.id === messageID)
+      expect(Option.isNone(found)).toBe(true)
+    }),
+  )
+
   it.instance("replays moved events without trusting stale absolute directories", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

@@ -69,6 +69,7 @@
 - opencode 的 `schedule.create` 限额判断现在也已收紧到“当前目录的活跃 schedule”，不再让别的目录里同一个 `sessionID` 的运行投影行误报 `ScheduleLimitExceeded`。
 - opencode 的 `Session` 服务也已经把 file-backed session cache sync 收紧为“只补缺失、不覆盖旧行”：`session.get`、消息事件追加和普通 patch 不再因为解析到 copied target 会话就把 `SessionTable.directory` 改写到目标目录。显式 session patch 仍会通过现有 projector 更新运行投影；同时修正了 unarchive 时 `SessionTable.time_archived` 会残留旧值的问题。
 - opencode 的 `Session.get` 主读链路现在也不再把 `SessionTable` 里的 metadata/summary/workspace/path/revert/permission 合并回目录会话；目录里的 `meta.yaml + session.jsonl` 是唯一读取结果，读取本身也不再顺手重建 `SessionTable` 行。
+- opencode 的 `Session.messages` / `findMessage` / `getPart` 现在也已经切到纯目录消息投影：只要会话是 file-backed，就只认当前目录 `session.jsonl` 里的 message/part 状态；即使同目录 SQLite 里还残留旧 `message/part` 缓存，只要目录日志为空或没有对应条目，也不会再把这些 stale rows 读回来。
 - opencode 的 `Session.children` 也已经切到纯目录事实源：父子会话关系直接从同目录 `.agents/atree/sessions/*/meta.yaml` 里的 `parentID` 推导，不再依赖 `SessionTable.parent_id` 缓存行决定子会话归属。
 - opencode 的显式目录会话列表 `Session.list({ directory })` 也已经不再先查 `SessionTable` 再 merge；它现在直接扫描目标目录下的 session store，并用目录里的 `archived/path/parentID/title/time` 过滤、排序和分页。
 - opencode 的 path-scoped 会话列表 `Session.list({ path })` 也已经切到目录扫描：它直接深度读取当前 worktree 下的 file-backed session store，再按目录里的 `path`/legacy directory 语义过滤，不再需要 `SessionTable` 参与 path list 的发现或去重。
