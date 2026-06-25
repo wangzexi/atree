@@ -246,6 +246,64 @@ it.effect("rebuilds file-backed context epochs after deleting SQLite cache rows"
   }),
 )
 
+it.effect("rebuilds only placement fields for file-backed context epochs", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const directory = AbsolutePath.make(tmp.path)
+    const sessionID = SessionV2.ID.make("ses_context_epoch_minimal_cache")
+    const agent = AgentV2.ID.make("build")
+    const location = Location.Ref.make({ directory })
+    const archivedAt = DateTime.makeUnsafe(99)
+    const session = SessionV2.Info.make({
+      id: sessionID,
+      projectID: ProjectV2.ID.global,
+      title: "Context epoch minimal cache",
+      cost: 42,
+      tokens: { input: 7, output: 8, reasoning: 9, cache: { read: 10, write: 11 } },
+      time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(2), archived: archivedAt },
+      location,
+      agent,
+    })
+    yield* Effect.promise(() => writeSessionStore(session))
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+
+    const context = () =>
+      SystemContext.make({
+        key: SystemContext.Key.make("test/context/minimal-cache"),
+        codec: Schema.String,
+        load: Effect.sync(() => "Minimal cache"),
+        baseline: (value) => value,
+        update: (_previous, current) => current,
+      })
+
+    yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent)
+
+    const cached = yield* db
+      .select()
+      .from(SessionTable)
+      .where(eq(SessionTable.id, sessionID))
+      .get()
+      .pipe(Effect.orDie)
+    expect(cached).toBeDefined()
+    expect(cached?.directory).toBe(directory)
+    expect(cached?.agent).toBe(agent)
+    expect(cached?.title).toBe("Context epoch minimal cache")
+    expect(cached?.cost).toBe(0)
+    expect(cached?.tokens_input).toBe(0)
+    expect(cached?.tokens_output).toBe(0)
+    expect(cached?.tokens_reasoning).toBe(0)
+    expect(cached?.tokens_cache_read).toBe(0)
+    expect(cached?.tokens_cache_write).toBe(0)
+    expect(cached?.time_archived).toBeNull()
+    expect(cached?.path).toBeNull()
+    expect(cached?.model).toBeNull()
+  }),
+)
+
 it.effect("rebinds copied file-backed context epochs to the explicit directory instead of reusing another copy", () =>
   Effect.gen(function* () {
     const tmp = yield* Effect.acquireRelease(

@@ -139,6 +139,7 @@
 - `SessionRunner` 的 pending-input 判断也已经加了护栏：只要当前目录下存在 file-backed session，就以该目录的 prompt state 为准，不再让脏 `SessionInputTable` 队列误触发额外 provider turn。
 - `SessionInputTable` / `SessionContextEpochTable` 可以短期保留，但要被明确标记为纯运行态；它们丢失后，不能导致会话业务事实丢失。
 - core `SessionContextEpoch` 现在也已有护栏覆盖“删除 `SessionTable` 缓存行后可从目录事实源重建 epoch”；这进一步确认了 context epoch 属于可丢弃运行态，而不是目录业务事实本身。
+- core `SessionContextEpoch` 用于重建运行态时，已经继续收紧到“只补 placement 必需字段”：它不会再把目录里的 archived/path/model/cost/tokens 等业务元数据整批镜像回 `SessionTable`，从而减少旧 SQLite 行重新长成业务事实副本的机会。
 - `ScheduleTable` / `ScheduleRunTable` 也应该逐步降级为运行投影，最终由目录内 schedule 状态和 `session.jsonl` 恢复。
 - 后续如果某个运行表无法自然重建，就说明它仍然混入了业务事实，应该继续拆。
 

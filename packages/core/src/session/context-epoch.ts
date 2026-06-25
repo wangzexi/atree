@@ -303,69 +303,13 @@ const ensurePlacedSession = Effect.fnUntraced(function* (
     .onConflictDoNothing()
     .run()
     .pipe(Effect.orDie)
-  const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
-  const insertValues = {
-    id: session.id,
-    project_id: session.projectID,
-    workspace_id: session.location.workspaceID ?? null,
-    parent_id: session.parentID ?? null,
-    slug: session.id,
-    directory: session.location.directory,
-    path: session.subpath ?? null,
-    title: session.title,
-    agent: session.agent ?? null,
-    model: session.model
-      ? {
-          id: session.model.id,
-          providerID: session.model.providerID,
-          variant: session.model.variant,
-        }
-      : null,
-    version: "core",
-    cost: session.cost ?? 0,
-    tokens_input: tokens.input,
-    tokens_output: tokens.output,
-    tokens_reasoning: tokens.reasoning,
-    tokens_cache_read: tokens.cache.read,
-    tokens_cache_write: tokens.cache.write,
-    time_created: DateTime.toEpochMillis(session.time.created),
-    time_updated: DateTime.toEpochMillis(session.time.updated),
-    time_archived: session.time.archived ? DateTime.toEpochMillis(session.time.archived) : null,
-  } as const satisfies typeof SessionTable.$inferInsert
   if (!placed) {
-    yield* db.insert(SessionTable).values(insertValues).onConflictDoNothing().run().pipe(Effect.orDie)
+    yield* db.insert(SessionTable).values(placementInsertValues(session)).onConflictDoNothing().run().pipe(Effect.orDie)
     return "inserted"
   }
-  const updateValues = {
-    project_id: session.projectID,
-    workspace_id: session.location.workspaceID ?? null,
-    parent_id: session.parentID ?? null,
-    slug: session.id,
-    directory: session.location.directory,
-    path: session.subpath ?? null,
-    title: session.title,
-    agent: session.agent ?? null,
-    model: session.model
-      ? {
-          id: session.model.id,
-          providerID: session.model.providerID,
-          variant: session.model.variant,
-        }
-      : null,
-    version: "core",
-    cost: session.cost ?? 0,
-    tokens_input: tokens.input,
-    tokens_output: tokens.output,
-    tokens_reasoning: tokens.reasoning,
-    tokens_cache_read: tokens.cache.read,
-    tokens_cache_write: tokens.cache.write,
-    time_created: DateTime.toEpochMillis(session.time.created),
-    time_updated: DateTime.toEpochMillis(session.time.updated),
-    time_archived: session.time.archived ? DateTime.toEpochMillis(session.time.archived) : null,
-  } as const satisfies Partial<typeof SessionTable.$inferInsert>
   yield* db
     .update(SessionTable)
-    .set(updateValues)
+    .set(placementUpdateValues(session))
     .where(eq(SessionTable.id, sessionID))
     .run()
     .pipe(Effect.orDie)
@@ -374,6 +318,30 @@ const ensurePlacedSession = Effect.fnUntraced(function* (
 
 const sameLocation = (directory: string, workspaceID: string | undefined, location: Location.Ref) =>
   directory === location.directory && workspaceID === location.workspaceID
+
+const placementInsertValues = (session: NonNullable<Awaited<ReturnType<typeof readSessionStore>>>) =>
+  ({
+    id: session.id,
+    project_id: session.projectID,
+    workspace_id: session.location.workspaceID ?? null,
+    slug: session.id,
+    directory: session.location.directory,
+    title: session.title,
+    version: "core",
+    agent: session.agent ?? null,
+    time_created: DateTime.toEpochMillis(session.time.created),
+    time_updated: DateTime.toEpochMillis(session.time.updated),
+  }) as const satisfies typeof SessionTable.$inferInsert
+
+const placementUpdateValues = (session: NonNullable<Awaited<ReturnType<typeof readSessionStore>>>) =>
+  ({
+    project_id: session.projectID,
+    workspace_id: session.location.workspaceID ?? null,
+    directory: session.location.directory,
+    title: session.title,
+    agent: session.agent ?? null,
+    time_updated: DateTime.toEpochMillis(session.time.updated),
+  }) as const satisfies Partial<typeof SessionTable.$inferInsert>
 
 const replace = Effect.fnUntraced(function* (
   db: DatabaseService,
