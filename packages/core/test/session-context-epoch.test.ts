@@ -374,6 +374,12 @@ it.effect("rebinds copied file-backed context epochs to the explicit directory i
     )
     expect(targetPrepared.revision).toBe(0)
     expect(targetPrepared.baseline).toBe("Target baseline")
+    expect(
+      yield* SessionContextEpoch.current(db, sessionID, agent, sourcePrepared.revision, Location.Ref.make({ directory: source })),
+    ).toBe(false)
+    expect(
+      yield* SessionContextEpoch.current(db, sessionID, agent, targetPrepared.revision, Location.Ref.make({ directory: target })),
+    ).toBe(true)
 
     const cached = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
     expect(cached?.directory).toBe(target)

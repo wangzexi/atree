@@ -405,11 +405,14 @@ export const current = Effect.fn("SessionContextEpoch.current")(function* (
   sessionID: SessionSchema.ID,
   agent: AgentV2.ID,
   revision: number,
+  location?: Location.Ref,
 ) {
   const value = yield* db
     .select({
       agent: SessionContextEpochTable.agent,
       selected: SessionTable.agent,
+      directory: SessionTable.directory,
+      workspaceID: SessionTable.workspace_id,
       revision: SessionContextEpochTable.revision,
     })
     .from(SessionContextEpochTable)
@@ -420,6 +423,7 @@ export const current = Effect.fn("SessionContextEpoch.current")(function* (
   return (
     value !== undefined &&
     value.agent === agent &&
+    (location === undefined || sameLocation(value.directory ?? "", value.workspaceID ?? undefined, location)) &&
     (value.selected === null || value.selected === agent) &&
     value.revision === revision
   )

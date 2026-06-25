@@ -288,7 +288,7 @@ export const layer = Layer.effect(
       const publish = (event: LLMEvent, outputPaths: ReadonlyArray<string> = []) =>
         withPublication(publisher.publish(event, outputPaths))
       let overflowFailure: ProviderErrorEvent | undefined
-      if (!(yield* SessionContextEpoch.current(db, session.id, agent.id, system.revision)))
+      if (!(yield* SessionContextEpoch.current(db, session.id, agent.id, system.revision, session.location)))
         return yield* Effect.die(rebuildPreparedTurn())
       const providerStream = llm.stream(request).pipe(
         Stream.runForEach((event) =>
