@@ -245,3 +245,88 @@ it.effect("rebuilds file-backed context epochs after deleting SQLite cache rows"
     expect(entries.some((entry) => entry.type === "session.next.context.updated")).toBe(false)
   }),
 )
+
+it.effect("rebinds copied file-backed context epochs to the explicit directory instead of reusing another copy", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const root = AbsolutePath.make(tmp.path)
+    const source = AbsolutePath.make(path.join(tmp.path, "source"))
+    const target = AbsolutePath.make(path.join(tmp.path, "target"))
+    const sessionID = SessionV2.ID.make("ses_context_epoch_copied")
+    const agent = AgentV2.ID.make("build")
+
+    const writeSession = (directory: AbsolutePath, title: string) =>
+      writeSessionStore(
+        SessionV2.Info.make({
+          id: sessionID,
+          projectID: ProjectV2.ID.global,
+          title,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          location: Location.Ref.make({ directory }),
+          agent,
+        }),
+      )
+
+    yield* Effect.promise(() => writeSession(source, "Context epoch source"))
+    yield* Effect.promise(() => writeSession(target, "Context epoch target"))
+
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+    yield* db
+      .insert(ProjectTable)
+      .values({ id: ProjectV2.ID.global, worktree: root, sandboxes: [] })
+      .onConflictDoNothing()
+      .run()
+      .pipe(Effect.orDie)
+
+    let contextText = "Source baseline"
+    const context = () =>
+      SystemContext.make({
+        key: SystemContext.Key.make("test/context/copied"),
+        codec: Schema.String,
+        load: Effect.sync(() => contextText),
+        baseline: (value) => value,
+        update: (_previous, current) => current,
+      })
+
+    const sourcePrepared = yield* SessionContextEpoch.prepare(
+      db,
+      events,
+      Effect.sync(context),
+      sessionID,
+      Location.Ref.make({ directory: source }),
+      agent,
+    )
+    expect(sourcePrepared.revision).toBe(0)
+    expect(sourcePrepared.baseline).toBe("Source baseline")
+
+    contextText = "Target baseline"
+    const targetPrepared = yield* SessionContextEpoch.prepare(
+      db,
+      events,
+      Effect.sync(context),
+      sessionID,
+      Location.Ref.make({ directory: target }),
+      agent,
+    )
+    expect(targetPrepared.revision).toBe(0)
+    expect(targetPrepared.baseline).toBe("Target baseline")
+
+    const cached = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+    expect(cached?.directory).toBe(target)
+
+    const raw = yield* Effect.promise(() =>
+      readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8"),
+    )
+    const trimmed = raw.trim()
+    const entries = trimmed
+      ? trimmed.split("\n").map((line) => JSON.parse(line) as Record<string, unknown>)
+      : []
+    expect(entries.some((entry) => entry.type === "session.next.context.updated")).toBe(false)
+  }),
+)

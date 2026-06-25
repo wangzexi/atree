@@ -473,3 +473,33 @@ Playwright 护栏
 ```
 
 这条路径能把当前 demo 先稳定住，再逐步减少 OpenCode 依赖，而不是一次性重写导致 UI 和核心同时失控。
+
+## 最新进展
+
+- `Session.messages/findMessage/getPart` 对 file-backed session 已经不再回退到 stale SQLite projection。
+- `SessionV2.get` 不再复活只有 SQLite 行、但目录里已不存在的 session。
+- schedule 的 `recordRun/delete/clear` 已进一步收口到目录状态，`schedule_run` 只剩兼容清理用途。
+- `SessionContextEpoch` 现在在 file-backed copied session 切换目录时会重绑定缓存位置：
+  - 如果同一个 `session_id` 被显式切到另一个目录，会先把 `SessionTable` 缓存行重绑到当前目录。
+  - 旧目录遗留的 `session_context_epoch` 会被丢弃，不再拿另一份副本的 snapshot 继续 reconcile。
+  - 这让 context epoch 在 copied session 场景下退化为“当前目录的可丢弃缓存”，而不是跨目录共享的业务真相。
+
+对应新增护栏测试：
+
+- `packages/core/test/session-context-epoch.test.ts`
+  - `rebinds copied file-backed context epochs to the explicit directory instead of reusing another copy`
+
+## 还剩的硬问题
+
+当前最值得继续处理的是 `SessionInputTable / SessionContextEpochTable` 这一类全局缓存结构。
+
+它们现在已经不该被当作业务真相，但仍有两个现实问题：
+
+1. 它们的键还是全局 `session_id`，天然不适合 copied session。
+2. runner / prompt 生命周期里还有部分逻辑要依赖这些缓存做运行态协助。
+
+短期策略应该继续保持：
+
+- 目录内 `session.jsonl` / `meta` / schedule state 是唯一业务真相。
+- SQLite 只能做当前活动副本的可重建缓存。
+- 一旦目录显式切换，相关缓存必须允许重绑或直接丢弃，而不是尝试“合并多个副本”。

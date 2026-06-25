@@ -75,6 +75,8 @@ const prepareOnce = Effect.fnUntraced(function* (
   location: Location.Ref,
   agent: AgentV2.ID,
 ) {
+  const placement = yield* ensurePlacedSession(db, sessionID, location)
+  if (placement === "rebound") yield* reset(db, sessionID)
   const [value, stored] = yield* Effect.all([context, find(db, sessionID)], { concurrency: "unbounded" })
   if (!stored) {
     const generation = yield* SystemContext.initialize(value)
@@ -125,6 +127,8 @@ const initializeOnce = Effect.fnUntraced(function* (
   location: Location.Ref,
   agent: AgentV2.ID,
 ) {
+  const placement = yield* ensurePlacedSession(db, sessionID, location)
+  if (placement === "rebound") yield* reset(db, sessionID)
   if (yield* exists(db, sessionID)) return
   const generation = yield* context.pipe(Effect.flatMap(SystemContext.initialize))
   const baselineSeq = yield* insert(db, sessionID, location, agent, generation)
@@ -271,24 +275,20 @@ const ensurePlacedSession = Effect.fnUntraced(function* (
   location: Location.Ref,
 ) {
   const placed = yield* db
-    .select({ id: SessionTable.id })
+    .select({
+      id: SessionTable.id,
+      directory: SessionTable.directory,
+      workspaceID: SessionTable.workspace_id,
+    })
     .from(SessionTable)
-    .where(
-      and(
-        eq(SessionTable.id, sessionID),
-        eq(SessionTable.directory, location.directory),
-        location.workspaceID === undefined
-          ? isNull(SessionTable.workspace_id)
-          : eq(SessionTable.workspace_id, location.workspaceID),
-      ),
-    )
+    .where(eq(SessionTable.id, sessionID))
     .get()
     .pipe(Effect.orDie)
-  if (placed) return
+  if (placed && sameLocation(placed.directory, placed.workspaceID ?? undefined, location)) return "present"
   const session = yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
     Effect.catchCause(() => Effect.succeed(undefined)),
   )
-  if (!session) return
+  if (!session) return "missing"
   yield* db
     .insert(ProjectTable)
     .values({
@@ -304,40 +304,76 @@ const ensurePlacedSession = Effect.fnUntraced(function* (
     .run()
     .pipe(Effect.orDie)
   const tokens = session.tokens ?? { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } }
+  const insertValues = {
+    id: session.id,
+    project_id: session.projectID,
+    workspace_id: session.location.workspaceID ?? null,
+    parent_id: session.parentID ?? null,
+    slug: session.id,
+    directory: session.location.directory,
+    path: session.subpath ?? null,
+    title: session.title,
+    agent: session.agent ?? null,
+    model: session.model
+      ? {
+          id: session.model.id,
+          providerID: session.model.providerID,
+          variant: session.model.variant,
+        }
+      : null,
+    version: "core",
+    cost: session.cost ?? 0,
+    tokens_input: tokens.input,
+    tokens_output: tokens.output,
+    tokens_reasoning: tokens.reasoning,
+    tokens_cache_read: tokens.cache.read,
+    tokens_cache_write: tokens.cache.write,
+    time_created: DateTime.toEpochMillis(session.time.created),
+    time_updated: DateTime.toEpochMillis(session.time.updated),
+    time_archived: session.time.archived ? DateTime.toEpochMillis(session.time.archived) : null,
+  } as const satisfies typeof SessionTable.$inferInsert
+  if (!placed) {
+    yield* db.insert(SessionTable).values(insertValues).onConflictDoNothing().run().pipe(Effect.orDie)
+    return "inserted"
+  }
+  const updateValues = {
+    project_id: session.projectID,
+    workspace_id: session.location.workspaceID ?? null,
+    parent_id: session.parentID ?? null,
+    slug: session.id,
+    directory: session.location.directory,
+    path: session.subpath ?? null,
+    title: session.title,
+    agent: session.agent ?? null,
+    model: session.model
+      ? {
+          id: session.model.id,
+          providerID: session.model.providerID,
+          variant: session.model.variant,
+        }
+      : null,
+    version: "core",
+    cost: session.cost ?? 0,
+    tokens_input: tokens.input,
+    tokens_output: tokens.output,
+    tokens_reasoning: tokens.reasoning,
+    tokens_cache_read: tokens.cache.read,
+    tokens_cache_write: tokens.cache.write,
+    time_created: DateTime.toEpochMillis(session.time.created),
+    time_updated: DateTime.toEpochMillis(session.time.updated),
+    time_archived: session.time.archived ? DateTime.toEpochMillis(session.time.archived) : null,
+  } as const satisfies Partial<typeof SessionTable.$inferInsert>
   yield* db
-    .insert(SessionTable)
-    .values({
-      id: session.id,
-      project_id: session.projectID,
-      workspace_id: session.location.workspaceID ?? null,
-      parent_id: session.parentID ?? null,
-      slug: session.id,
-      directory: session.location.directory,
-      path: session.subpath ?? null,
-      title: session.title,
-      agent: session.agent ?? null,
-      model: session.model
-        ? {
-            id: session.model.id,
-            providerID: session.model.providerID,
-            variant: session.model.variant,
-          }
-        : null,
-      version: "core",
-      cost: session.cost ?? 0,
-      tokens_input: tokens.input,
-      tokens_output: tokens.output,
-      tokens_reasoning: tokens.reasoning,
-      tokens_cache_read: tokens.cache.read,
-      tokens_cache_write: tokens.cache.write,
-      time_created: DateTime.toEpochMillis(session.time.created),
-      time_updated: DateTime.toEpochMillis(session.time.updated),
-      time_archived: session.time.archived ? DateTime.toEpochMillis(session.time.archived) : null,
-    } as typeof SessionTable.$inferInsert)
-    .onConflictDoNothing()
+    .update(SessionTable)
+    .set(updateValues)
+    .where(eq(SessionTable.id, sessionID))
     .run()
     .pipe(Effect.orDie)
+  return "rebound"
 })
+
+const sameLocation = (directory: string, workspaceID: string | undefined, location: Location.Ref) =>
+  directory === location.directory && workspaceID === location.workspaceID
 
 const replace = Effect.fnUntraced(function* (
   db: DatabaseService,
