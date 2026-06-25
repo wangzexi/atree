@@ -316,6 +316,18 @@ export async function readWorkspaceSessionStoresDeep() {
   return readSessionStoresDeep(root)
 }
 
+export async function findWorkspaceSessionStore(sessionID: SessionSchema.ID) {
+  const root = await readWorkspaceRoot()
+  if (!root) return undefined
+  return findSessionStore(root, sessionID)
+}
+
+export async function findWorkspaceSessionJsonlMessage(messageID: SessionMessage.ID) {
+  const root = await readWorkspaceRoot()
+  if (!root) return undefined
+  return findSessionJsonlMessage(root, messageID)
+}
+
 export async function hasSessionJsonlMessageEvents(info: SessionSchema.Info) {
   const raw = await fs.readFile(sessionJsonl(info), "utf8").catch((error: unknown) => {
     if (error && typeof error === "object" && "code" in error && error.code === "ENOENT") return ""

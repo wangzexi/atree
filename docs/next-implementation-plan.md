@@ -84,6 +84,7 @@
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。
 - core 的 `SessionStore` 现在开始承担目录会话列表读取，`V2Session.list` 不再自己直接读 persisted root / deep session store；会话发现规则继续收口到同一层。
 - core 的 persisted root 深度扫描入口也继续收口：`SessionStore.list`、`QuestionV2`、`PermissionV2` 现在共享 `readWorkspaceSessionStoresDeep()`，不再各自重复拼 `readWorkspaceRoot() + readSessionStoresDeep()`。
+- core `SessionStore.get/message` 对 persisted root 的未限定查找也开始共用 `atree/session-store` helper 了，不再在 store 层各自手写 `readWorkspaceRoot() + find*` 组合。
 - opencode 的 `session.listGlobal` 现在也已经改成纯目录事实源读取：不再先查 `SessionTable` 再用目录元数据覆盖，global/directory 作用域的会话列表直接由 `.agents/atree/sessions/*` 扫描结果决定。
 - core `SessionV2.list` 也已经改成目录扫描优先且不再混入 `SessionTable` 结果；无论是显式目录还是 persisted root，全局/目录列表都直接从 `.agents/atree/sessions/*` 推导。
 - core `SessionV2.get` 也已经继续收紧：无论 persisted root 是否存在，只要 file-backed resolver 没找到目录会话，就直接 `NotFound`；它不再在“没有 root / 目录日志已删”时回退去读 `SessionTable` 复活 SQLite-only 会话。

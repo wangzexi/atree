@@ -14,7 +14,13 @@ import { SessionProjector } from "@opencode-ai/core/session/projector"
 import { FileAttachment, Prompt } from "@opencode-ai/core/session/prompt"
 import { SessionInputTable, SessionMessageTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { SessionStore } from "@opencode-ai/core/session/store"
-import { readSessionStore, readSessionStoresDeep, writeSessionStore } from "@opencode-ai/core/atree/session-store"
+import {
+  findWorkspaceSessionJsonlMessage,
+  findWorkspaceSessionStore,
+  readSessionStore,
+  readSessionStoresDeep,
+  writeSessionStore,
+} from "@opencode-ai/core/atree/session-store"
 import { eq } from "drizzle-orm"
 import { DateTime, Effect, Layer, Stream } from "effect"
 import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "fs/promises"
@@ -1925,6 +1931,88 @@ describe("atree file-backed SessionV2 discovery", () => {
         id: "msg_core_store_message",
         type: "user",
         text: "message from file-backed store",
+      })
+    }),
+  )
+
+  it.effect("finds a workspace session store through the persisted atree root", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-store-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_workspace_store",
+          title: "Workspace store lookup",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+
+      const found = yield* Effect.promise(() => findWorkspaceSessionStore(SessionV2.ID.make("ses_core_workspace_store")))
+      const canonicalNode = AbsolutePath.make(yield* Effect.promise(() => realpath(node)))
+      expect(found?.id).toBe(SessionV2.ID.make("ses_core_workspace_store"))
+      expect(found?.location.directory).toBe(canonicalNode)
+    }),
+  )
+
+  it.effect("finds a workspace file-backed message through the persisted atree root", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-message-data-")))
+      const root = yield* Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-workspace-message-root-")))
+      const node = path.join(root, "inbox")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          root,
+          directory: node,
+          sessionID: "ses_core_workspace_message",
+          title: "Workspace message lookup",
+          createdAt: 10,
+          updatedAt: 20,
+        }),
+      )
+      yield* Effect.promise(() =>
+        appendSessionJsonl(node, "ses_core_workspace_message", [
+          {
+            type: "message.updated",
+            message: {
+              id: "msg_core_workspace_message",
+              role: "user",
+              time: { created: 30 },
+            },
+          },
+          {
+            type: "message.part.updated",
+            part: {
+              id: "prt_core_workspace_message",
+              messageID: "msg_core_workspace_message",
+              type: "text",
+              text: "workspace message through persisted root",
+            },
+          },
+        ]),
+      )
+
+      const found = yield* Effect.promise(() =>
+        findWorkspaceSessionJsonlMessage(SessionMessage.ID.make("msg_core_workspace_message")),
+      )
+      const canonicalNode = AbsolutePath.make(yield* Effect.promise(() => realpath(node)))
+      expect(found?.session.id).toBe(SessionV2.ID.make("ses_core_workspace_message"))
+      expect(found?.session.location.directory).toBe(canonicalNode)
+      expect(found?.message).toMatchObject({
+        id: "msg_core_workspace_message",
+        type: "user",
+        text: "workspace message through persisted root",
       })
     }),
   )
