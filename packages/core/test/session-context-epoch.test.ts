@@ -593,3 +593,66 @@ it.effect("does not request replacement without an explicit directory when copie
     ).toMatchObject({ replacementSeq: null })
   }),
 )
+
+it.effect("does not report an unscoped copied file-backed epoch as current", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const root = AbsolutePath.make(tmp.path)
+    const source = AbsolutePath.make(path.join(tmp.path, "source"))
+    const target = AbsolutePath.make(path.join(tmp.path, "target"))
+    const sessionID = SessionV2.ID.make("ses_context_epoch_unscoped_current")
+    const agent = AgentV2.ID.make("build")
+
+    const writeSession = (directory: AbsolutePath, title: string) =>
+      writeSessionStore(
+        SessionV2.Info.make({
+          id: sessionID,
+          projectID: ProjectV2.ID.global,
+          title,
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+          location: Location.Ref.make({ directory }),
+          agent,
+        }),
+      )
+
+    yield* Effect.promise(() => writeSession(source, "Context epoch current source"))
+    yield* Effect.promise(() => writeSession(target, "Context epoch current target"))
+
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+    yield* db
+      .insert(ProjectTable)
+      .values({ id: ProjectV2.ID.global, worktree: root, sandboxes: [] })
+      .onConflictDoNothing()
+      .run()
+      .pipe(Effect.orDie)
+
+    const context = () =>
+      SystemContext.make({
+        key: SystemContext.Key.make("test/context/unscoped-current"),
+        codec: Schema.String,
+        load: Effect.succeed("Target baseline"),
+        baseline: (value) => value,
+        update: (_previous, current) => current,
+      })
+
+    const prepared = yield* SessionContextEpoch.prepare(
+      db,
+      events,
+      Effect.sync(context),
+      sessionID,
+      Location.Ref.make({ directory: target }),
+      agent,
+    )
+
+    expect(
+      yield* SessionContextEpoch.current(db, sessionID, agent, prepared.revision, Location.Ref.make({ directory: target })),
+    ).toBe(true)
+    expect(yield* SessionContextEpoch.current(db, sessionID, agent, prepared.revision)).toBe(false)
+  }),
+)

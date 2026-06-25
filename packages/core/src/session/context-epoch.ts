@@ -492,6 +492,7 @@ export const current = Effect.fn("SessionContextEpoch.current")(function* (
   revision: number,
   location?: Location.Ref,
 ) {
+  if (!location && (yield* hasCopiedFileSessionAmbiguity(db, sessionID))) return false
   const value = yield* db
     .select({
       agent: SessionContextEpochTable.agent,
