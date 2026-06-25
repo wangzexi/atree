@@ -2,6 +2,7 @@ export * as SessionProjector from "./projector"
 
 import { and, desc, eq, sql } from "drizzle-orm"
 import { DateTime, Effect, Layer, Schema } from "effect"
+import { readSessionStore } from "../atree/session-store"
 import { Database } from "../database/database"
 import { EventV2 } from "../event"
 import { LayerNode } from "../effect/layer-node"
@@ -72,6 +73,39 @@ function sessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInse
     time_updated: info.time.updated,
     time_compacting: info.time.compacting,
     time_archived: info.time.archived ?? null,
+  }
+}
+
+function runtimeSessionRow(info: SessionV1.SessionInfo): typeof SessionTable.$inferInsert {
+  return {
+    id: info.id,
+    project_id: info.projectID,
+    workspace_id: info.workspaceID ?? null,
+    parent_id: info.parentID,
+    slug: info.slug,
+    directory: info.directory,
+    path: info.path,
+    title: info.title,
+    agent: info.agent,
+    model: info.model,
+    version: info.version,
+    summary_additions: null,
+    summary_deletions: null,
+    summary_files: null,
+    summary_diffs: null,
+    metadata: null,
+    cost: info.cost ?? 0,
+    tokens_input: (info.tokens ?? { input: 0 }).input,
+    tokens_output: (info.tokens ?? { output: 0 }).output,
+    tokens_reasoning: (info.tokens ?? { reasoning: 0 }).reasoning,
+    tokens_cache_read: (info.tokens ?? { cache: { read: 0 } }).cache.read,
+    tokens_cache_write: (info.tokens ?? { cache: { write: 0 } }).cache.write,
+    revert: null,
+    permission: null,
+    time_created: info.time.created,
+    time_updated: info.time.updated,
+    time_compacting: info.time.compacting,
+    time_archived: null,
   }
 }
 
@@ -243,12 +277,19 @@ export const layer = Layer.effectDiscard(
       }),
     )
     yield* events.project(SessionV1.Event.Updated, (event) =>
-      db
-        .update(SessionTable)
-        .set(sessionRow(event.data.info))
-        .where(eq(SessionTable.id, event.data.sessionID))
-        .run()
-        .pipe(Effect.orDie),
+      Effect.gen(function* () {
+        const fileBacked = yield* Effect.promise(() => readSessionStore(event.data.info.directory, event.data.sessionID))
+          .pipe(
+            Effect.map((stored) => stored !== undefined),
+            Effect.catchCause(() => Effect.succeed(false)),
+          )
+        yield* db
+          .update(SessionTable)
+          .set(fileBacked ? runtimeSessionRow(event.data.info) : sessionRow(event.data.info))
+          .where(eq(SessionTable.id, event.data.sessionID))
+          .run()
+          .pipe(Effect.orDie)
+      }),
     )
     yield* events.project(SessionEvent.Moved, (event) =>
       Effect.gen(function* () {

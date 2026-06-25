@@ -170,8 +170,10 @@ describe("SessionV2.create", () => {
     Effect.gen(function* () {
       const session = yield* SessionV2.Service
       const events = yield* EventV2.Service
+      const { db } = yield* Database.Service
       const input = { id, location }
       const created = yield* session.create(input)
+      const workspaceID = WorkspaceV2.ID.make("wrk_test")
 
       yield* events.publish(SessionV1.Event.Updated, {
         sessionID: id,
@@ -183,9 +185,28 @@ describe("SessionV2.create", () => {
           directory: created.location.directory,
           title: "updated",
           agent: "build",
+          metadata: { icon: "🧭" },
+          permission: [{ permission: "bash", pattern: "*", action: "allow" }],
           time: { created: 0, updated: 1 },
+          summary: { additions: 1, deletions: 2, files: 3, diffs: [] },
+          revert: { messageID: "msg_revert" as any },
+          workspaceID,
+          cost: 99,
+          tokens: { input: 1, output: 2, reasoning: 3, cache: { read: 4, write: 5 } },
         }),
       })
+
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, id)).get().pipe(Effect.orDie)
+      expect(row?.title).toBe("updated")
+      expect(row?.agent).toBe("build")
+      expect(row?.workspace_id).toBe(workspaceID)
+      expect(row?.metadata).toBeNull()
+      expect(row?.permission).toBeNull()
+      expect(row?.summary_additions).toBeNull()
+      expect(row?.summary_deletions).toBeNull()
+      expect(row?.summary_files).toBeNull()
+      expect(row?.summary_diffs).toBeNull()
+      expect(row?.revert).toBeNull()
 
       expect(yield* session.create(input)).toMatchObject({ id, agent: undefined })
     }),

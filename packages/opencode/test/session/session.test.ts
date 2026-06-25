@@ -1315,7 +1315,7 @@ describe("Session", () => {
     }),
   )
 
-  it.instance("persists patched session metadata to .agents and updates the runtime projection", () =>
+  it.instance("persists patched session metadata to .agents while keeping runtime projection minimal for file-backed sessions", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service
       const { db } = yield* Database.Service
@@ -1355,13 +1355,13 @@ describe("Session", () => {
 
       let row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, info.id)).get().pipe(Effect.orDie)
       expect(row?.title).toBe("Patched title")
-      expect(row?.metadata).toEqual({ icon: "🧭" })
-      expect(row?.permission).toEqual([{ permission: "bash", pattern: "*", action: "allow" }])
-      expect(row?.time_archived).toBe(1234)
-      expect(row?.summary_additions).toBe(4)
-      expect(row?.summary_deletions).toBe(5)
-      expect(row?.summary_files).toBe(6)
       expect(row?.workspace_id).toBe("wrk_patched" as any)
+      expect(row?.metadata).toBeNull()
+      expect(row?.permission).toBeNull()
+      expect(row?.time_archived).toBeNull()
+      expect(row?.summary_additions).toBeNull()
+      expect(row?.summary_deletions).toBeNull()
+      expect(row?.summary_files).toBeNull()
       expect(row?.revert).toBeNull()
 
       yield* session.setArchived({ sessionID: info.id, time: null })

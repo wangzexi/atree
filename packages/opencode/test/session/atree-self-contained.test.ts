@@ -856,6 +856,16 @@ describe("atree directory self-contained state", () => {
       expect(stored?.metadata).toEqual({ icon: "🌲" })
       expect(stored?.time.archived).toBeUndefined()
 
+      const row = yield* db
+        .select()
+        .from(SessionTable)
+        .where(and(eq(SessionTable.id, session.id), eq(SessionTable.directory, instance.directory)))
+        .get()
+        .pipe(Effect.orDie)
+      expect(row?.title).toBe("mutated from file source")
+      expect(row?.metadata).toBeNull()
+      expect(row?.time_archived).toBeNull()
+
       const raw = yield* Effect.promise(() =>
         fs.readFile(path.join(instance.directory, ".agents", "atree", "sessions", session.id, "session.jsonl"), "utf8"),
       )
