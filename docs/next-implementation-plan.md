@@ -78,6 +78,7 @@
 - opencode 的 path-scoped 会话列表 `Session.list({ path })` 也已经切到目录扫描：它直接深度读取当前 worktree 下的 file-backed session store，再按目录里的 `path`/legacy directory 语义过滤，不再需要 `SessionTable` 参与 path list 的发现或去重。
 - opencode 的普通当前项目会话列表 `Session.list()` 也已经开始直接从当前 worktree 深扫目录会话；`roots/start/search/limit/metadata` 这些过滤和展示现在都可以在不依赖 `SessionTable` 行存在的前提下工作。
 - opencode 的 `listGlobal()` 也继续收紧了展示层依赖：file-backed session 的 `project.id/worktree` 现在可以直接从目录会话本身推导，不再要求 `ProjectTable` 里还留着对应缓存行才能展示全局列表。
+- `listGlobal()` 对嵌套目录 file-backed session 的 project 展示也继续纠偏了：即使 `ProjectTable` 缓存行缺失，它现在也会重新解析真实 git root，而不是把 session 节点目录误当成 project worktree。
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。

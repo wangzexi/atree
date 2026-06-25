@@ -224,6 +224,42 @@ describe("session.listGlobal", () => {
   )
 
   it.instance(
+    "derives the git root as project worktree for nested file-backed sessions without a ProjectTable row",
+    () =>
+      Effect.gen(function* () {
+        const test = yield* TestInstance
+        const ctx = yield* InstanceState.context
+        const { db } = yield* Database.Service
+        const node = path.join(test.directory, "nested", "node")
+        yield* Effect.promise(() => fs.mkdir(node, { recursive: true }))
+        yield* Effect.promise(() => writeWorkspaceRoot(test.directory))
+
+        yield* Effect.promise(() =>
+          writeSessionStore({
+            id: "ses_global_nested_projectless_file",
+            slug: "global-nested-projectless-file",
+            version: "test",
+            projectID: ctx.project.id,
+            directory: node,
+            path: ".",
+            title: "Global nested projectless file",
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+            time: { created: 10, updated: Date.now() },
+          } as any),
+        )
+        yield* db.delete(ProjectTable).where(eq(ProjectTable.id, ctx.project.id)).run().pipe(Effect.orDie)
+
+        const sessions = yield* SessionNs.Service.use((session) => session.listGlobal({ limit: 200 }))
+        const fileOnly = sessions.find((session) => String(session.id) === "ses_global_nested_projectless_file")
+        expect(fileOnly?.directory).toBe(node)
+        expect(fileOnly?.project?.id).toBe(ctx.project.id)
+        expect(fileOnly?.project?.worktree).toBe(test.directory)
+      }),
+    { git: true },
+  )
+
+  it.instance(
     "keeps copied file-backed sessions distinct across directories in the persisted atree root",
     () =>
       Effect.gen(function* () {

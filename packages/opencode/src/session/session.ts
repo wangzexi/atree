@@ -48,6 +48,7 @@ import { InstanceState } from "@/effect/instance-state"
 import { Snapshot } from "@/snapshot"
 import { ProjectV2 } from "@opencode-ai/core/project"
 import { WorkspaceV2 } from "@opencode-ai/core/workspace"
+import { Project } from "@/project/project"
 import { SessionID, MessageID, PartID } from "./schema"
 
 import type { Provider } from "@/provider/provider"
@@ -614,6 +615,42 @@ export const layer: Layer.Layer<
       return result
     })
 
+    const resolveFileSessionProjectInfo = Effect.fn("Session.resolveFileSessionProjectInfo")(function* (fileSession: Info) {
+      const row = yield* db.select().from(ProjectTable).where(eq(ProjectTable.id, fileSession.projectID)).get().pipe(Effect.orDie)
+      if (row) {
+        const project = Project.fromRow(row)
+        return {
+          id: project.id,
+          worktree: project.worktree,
+          name: project.name,
+          vcs: project.vcs,
+        }
+      }
+      const projects = yield* Effect.serviceOption(Project.Service)
+      if (Option.isSome(projects)) {
+        const discovered = yield* projects.value
+          .fromDirectory(fileSession.directory)
+          .pipe(
+            Effect.map(({ project }) => project),
+            Effect.catchCause(() => Effect.succeed(undefined)),
+          )
+        if (discovered && discovered.id === fileSession.projectID) {
+          return {
+            id: discovered.id,
+            worktree: discovered.worktree,
+            name: discovered.name,
+            vcs: discovered.vcs,
+          }
+        }
+      }
+      return {
+        id: fileSession.projectID,
+        worktree: fileSession.directory,
+        name: undefined,
+        vcs: undefined,
+      }
+    })
+
     const ensureFileSessionProject = Effect.fn("Session.ensureFileSessionProject")(function* (fileSession: Info) {
       const existing = yield* db
         .select({ id: ProjectTable.id })
@@ -622,14 +659,15 @@ export const layer: Layer.Layer<
         .get()
         .pipe(Effect.orDie)
       if (existing) return
+      const resolved = yield* resolveFileSessionProjectInfo(fileSession)
       const now = Date.now()
       yield* db
         .insert(ProjectTable)
         .values({
           id: fileSession.projectID,
-          worktree: AbsolutePath.make(fileSession.directory),
-          vcs: null,
-          name: null,
+          worktree: AbsolutePath.make(resolved.worktree),
+          vcs: resolved.vcs ?? null,
+          name: resolved.name ?? null,
           time_created: now,
           time_updated: now,
           sandboxes: [],
@@ -794,14 +832,21 @@ export const layer: Layer.Layer<
       const sessions = [...byID.values()]
         .sort((a, b) => b.time.updated - a.time.updated || b.id.localeCompare(a.id))
         .slice(0, input?.limit ?? 100)
-      return sessions.map((session) => ({
-        ...session,
-        project: {
-          id: session.projectID,
-          name: undefined,
-          worktree: session.directory,
-        } satisfies ProjectInfo,
-      }))
+      return yield* Effect.forEach(
+        sessions,
+        (session) =>
+          resolveFileSessionProjectInfo(session).pipe(
+            Effect.map((project) => ({
+              ...session,
+              project: {
+                id: project.id,
+                name: project.name,
+                worktree: project.worktree,
+              } satisfies ProjectInfo,
+            })),
+          ),
+        { concurrency: "unbounded" },
+      )
     })
 
     const children = Effect.fn("Session.children")(function* (parentID: SessionID, options?: DirectoryOption) {
