@@ -390,4 +390,75 @@ test.describe("atree invariants", () => {
     await expect(dock).toBeHidden()
     expect(errors).toEqual([])
   })
+
+  test("creating and deleting an at automation updates the dock immediately", async ({ page }) => {
+    const errors = trackPageErrors(page)
+    let automation:
+      | {
+          sessionID: string
+          scheduleID: string
+          runAt: number
+          message: string
+        }
+      | undefined
+
+    await mockOpenCodeServer(page, {
+      directory: root,
+      project,
+      provider,
+      sessions: [],
+      pageMessages: () => ({ items: [] }),
+      files: (directory) =>
+        directory === root
+          ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }]
+          : [],
+      schedules: (sessionID) =>
+        automation?.sessionID === sessionID
+          ? [
+              {
+                id: automation.scheduleID,
+                sessionID,
+                kind: "once",
+                expression: "",
+                runAt: automation.runAt,
+                message: automation.message,
+                createdAt: automation.runAt - 60_000,
+                lastRanAt: null,
+                lastRunStatus: null,
+                nextRun: automation.runAt,
+              },
+            ]
+          : [],
+      onPromptAsync: (sessionID) => {
+        automation = {
+          sessionID,
+          scheduleID: "sch_invariant_immediate_once",
+          runAt: Date.now() + 60_000,
+          message: "一分钟后检查自动化消息即时刷新",
+        }
+      },
+    })
+
+    await openApp(page, "/")
+    await expect(page.getByText("aTree", { exact: true })).toBeVisible()
+    await page.locator(`[data-atree-new-session="${child}"]`).click()
+    await expect(page).toHaveURL(/\/(new-session\?draftId=|session)$/)
+
+    const editor = page.locator('[contenteditable="true"]').first()
+    await expect(editor).toBeVisible()
+    await editor.click()
+    await editor.fill("一分钟后检查自动化消息即时刷新")
+    await page.locator('[data-action="prompt-submit"]').first().click()
+
+    await expect(page).toHaveURL(new RegExp(`/${base64Encode(child)}/session/ses_e2e_`))
+
+    const dock = page.locator('[data-component="session-schedule-dock"]')
+    await expect(dock).toBeVisible()
+    await expect(dock).toContainText("自动化消息")
+    await expect(dock).toContainText("一分钟后检查自动化消息即时刷新")
+
+    await dock.locator('[aria-label="删除定时器"]').click()
+    await expect(dock).toBeHidden()
+    expect(errors).toEqual([])
+  })
 })

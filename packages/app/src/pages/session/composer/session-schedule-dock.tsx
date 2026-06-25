@@ -1,4 +1,4 @@
-import { For, Show, createMemo, createSignal, onCleanup } from "solid-js"
+import { For, Show, createEffect, createMemo, createSignal, onCleanup, on } from "solid-js"
 import { createStore } from "solid-js/store"
 import { createQuery, useMutation, useQueryClient } from "@tanstack/solid-query"
 import { DockTray } from "@opencode-ai/ui/dock-surface"
@@ -7,6 +7,7 @@ import { IconButton } from "@opencode-ai/ui/icon-button"
 import { Tooltip } from "@opencode-ai/ui/tooltip"
 import { useServer } from "@/context/server"
 import { useServerSDK } from "@/context/server-sdk"
+import { useSync } from "@/context/sync"
 import {
   extractSessionScheduleEventSessionID,
   type SessionScheduleSummary,
@@ -44,19 +45,57 @@ export function SessionScheduleDock(props: {
 }) {
   const server = useServer()
   const serverSDK = useServerSDK()
+  const sync = useSync()
   const queryClient = useQueryClient()
   const [store, setStore] = createStore({ collapsed: true })
   const [now, setNow] = createSignal(Date.now())
+  const retryTimers = new Set<number>()
   const clock = setInterval(() => setNow(Date.now()), 1000)
   onCleanup(() => clearInterval(clock))
+  onCleanup(() => {
+    for (const timer of retryTimers) window.clearTimeout(timer)
+    retryTimers.clear()
+  })
   const toggle = () => setStore("collapsed", (value) => !value)
   const queryKey = createMemo(() => ["session", "schedule", server.current?.http.url, props.sessionID])
   const refresh = () => queryClient.invalidateQueries({ queryKey: queryKey() })
+  const messageCount = createMemo(() => {
+    const sessionID = props.sessionID
+    if (!sessionID) return 0
+    return sync.data.message[sessionID]?.length ?? 0
+  })
   const stopScheduleEvents = serverSDK.event.listen((event) => {
     if (extractSessionScheduleEventSessionID(event.details) !== props.sessionID) return
     void refresh()
   })
   onCleanup(stopScheduleEvents)
+  createEffect(
+    on(
+      () => [props.sessionID, messageCount()] as const,
+      ([sessionID], previous) => {
+        if (!sessionID) return
+        if (!previous) return
+        void refresh()
+      },
+      { defer: true },
+    ),
+  )
+  createEffect(
+    on(
+      () => props.sessionID,
+      (sessionID) => {
+        if (!sessionID) return
+        void refresh()
+        for (const delay of [250, 1000, 3000]) {
+          const timer = window.setTimeout(() => {
+            retryTimers.delete(timer)
+            void refresh()
+          }, delay)
+          retryTimers.add(timer)
+        }
+      },
+    ),
+  )
   const query = createQuery(() => ({
     queryKey: queryKey(),
     enabled: !!server.current && !!props.sessionID,
