@@ -65,6 +65,7 @@
 - opencode 的 `Schedule` 服务仍保留 SQLite `ScheduleTable` / `ScheduleRunTable` 作为运行投影，但已经不再为了 schedule 去补 `SessionTable` / `ProjectTable` 缓存行。目录归档态和目录内自动化消息清理由文件事实源驱动，不再借 schedule 解析顺手制造或改写旧 session 元数据。
 - opencode 的 `Schedule` 触发链路已经增加目录事实校验：`tick()`、实际 `process()` 和服务启动时的 schedule hydration 都会先确认该 schedule 仍存在于目录内 `schedule.json/session.jsonl` 投影；缺失或已删除的 stale `ScheduleTable` 行会被清掉，不会再反向触发 phantom schedule。
 - opencode 的 `schedule.list` 读模型也继续收紧：列表里的 `lastRanAt/lastRunStatus` 默认取自目录投影，不再从 stale `ScheduleRunTable` 反向回填；只有当前进程里真实存在的 timer 会覆盖瞬时 `nextRun`。
+- opencode 的 `recordRun()` 现在也已经停止新增写入 `ScheduleRunTable`；新的运行记录只落目录日志和目录 schedule state，`schedule_run` 继续保留为兼容旧库与清理路径的遗留表，不再承担新业务写入。
 - opencode 的 once schedule 完成态判断也已经切到目录投影：启动恢复、`cleanupCompletedOnceForSession()` 和单次 schedule hydration 都只认目录里的 `lastRanAt/lastRunStatus`，不会再因为旧 `ScheduleRunTable` 记录把还没真正执行过的目录 schedule 提前删掉。与此同时，fresh SQLite 基线 schema 也已补齐 `schedule/schedule_run`，保证内存库和新库行为一致。
 - opencode 的 `schedule.create` 限额判断现在也已收紧到“当前目录的活跃 schedule”，不再让别的目录里同一个 `sessionID` 的运行投影行误报 `ScheduleLimitExceeded`。
 - opencode 的 `schedule.delete` / `schedule.clear` 也已经继续收紧：没有命中目录里的 schedule 事实源时，它们不再回退去删除或清空 DB-only `ScheduleTable` 行；找不到目录真相时就 `NotFound` 或 no-op，运行表不会再反过来驱动业务删除。

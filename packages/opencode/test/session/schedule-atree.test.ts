@@ -2313,6 +2313,15 @@ describe("atree schedule restore", () => {
           .pipe(Effect.orDie),
       )
       expect(row?.session_id).toBe(sessionID)
+      const runs = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleRunTable)
+          .where(eq(ScheduleRunTable.schedule_id, scheduleID as never))
+          .all()
+          .pipe(Effect.orDie),
+      )
+      expect(runs).toEqual([])
     }),
   )
 

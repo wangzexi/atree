@@ -369,19 +369,6 @@ export const layer = Layer.effect(
       function* (scheduleID, sessionID, runStatus, ranAt, options) {
         const restored = yield* ensureScheduleRowFromDirectory(scheduleID, sessionID, options?.directory)
         if (!restored) return
-        yield* db
-          .transaction((tx) =>
-            tx
-              .insert(ScheduleRunTable)
-              .values({
-                id: Identifier.create("shr", "ascending"),
-                schedule_id: scheduleID,
-                ran_at: ranAt,
-                status: runStatus,
-              })
-              .run(),
-          )
-          .pipe(Effect.orDie)
         yield* events.publish(
           Event.Ran,
           { scheduleID, sessionID, status: runStatus, ranAt },
