@@ -28,10 +28,10 @@ import {
   readSessionStore,
   readSessionStores,
   readSessionStoresDeep,
+  readWorkspaceSessionStoresDeep,
   touchSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
-import { readWorkspaceRootDirectory } from "@/atree/state"
 import { InstanceRef } from "@/effect/instance-ref"
 
 export const MAX_PER_SESSION = 1
@@ -1020,10 +1020,17 @@ export const layer = Layer.effect(
         scheduleState.directory,
       )
     }
-    const rootDirectory = yield* Effect.promise(() => readWorkspaceRootDirectory()).pipe(
-      Effect.catchCause(() => Effect.succeed<string | undefined>(undefined)),
+    const workspaceSessions = yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+      Effect.catchCause(() => Effect.succeed([] as FileSession[])),
     )
-    if (rootDirectory) yield* restoreFileBackedSchedules(rootDirectory)
+    yield* Effect.forEach(
+      workspaceSessions,
+      (session) =>
+        restoreStoredSchedules(session.id, session.directory).pipe(
+          Effect.catchCause((cause) => Effect.logWarning("failed to restore workspace file-backed schedules", { cause })),
+        ),
+      { concurrency: "unbounded", discard: true },
+    )
 
     const restoreDirectory: Interface["restoreDirectory"] = Effect.fn("Schedule.restoreDirectory")(
       function* (directory) {
