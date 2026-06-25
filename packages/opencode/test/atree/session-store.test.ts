@@ -6,6 +6,7 @@ import {
   appendSessionJsonl,
   findSessionStore,
   findWorkspaceSessionStores,
+  readWorkspaceSessionStoresDeep,
   readSessionJsonlMessages,
   readSessionJsonlProjection,
   readSessionStore,
@@ -511,6 +512,53 @@ describe("atree session store", () => {
       expect(matches.map((session) => session.directory)).toEqual([
         await fs.realpath(target),
         await fs.realpath(source),
+      ])
+    } finally {
+      ;(Global.Path as { data: string }).data = previousData
+    }
+  })
+
+  test("reads every persisted-root session store through a dedicated helper", async () => {
+    const data = await tempdir()
+    const previousData = Global.Path.data
+    ;(Global.Path as { data: string }).data = data
+    try {
+      const root = await tempdir()
+      const alpha = path.join(root, "alpha")
+      const beta = path.join(root, "nested", "beta")
+      await fs.mkdir(alpha, { recursive: true })
+      await fs.mkdir(beta, { recursive: true })
+      await writeWorkspaceRoot(root)
+
+      await writeSessionStore({
+        id: "ses_workspace_alpha",
+        slug: "workspace-alpha",
+        version: "test",
+        projectID: "proj_test",
+        directory: alpha,
+        path: "alpha",
+        title: "Workspace Alpha",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 1, updated: 2 },
+      } as any)
+      await writeSessionStore({
+        id: "ses_workspace_beta",
+        slug: "workspace-beta",
+        version: "test",
+        projectID: "proj_test",
+        directory: beta,
+        path: "nested/beta",
+        title: "Workspace Beta",
+        cost: 0,
+        tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+        time: { created: 3, updated: 4 },
+      } as any)
+
+      const sessions = await readWorkspaceSessionStoresDeep()
+      expect(sessions.map((session) => String(session.id)).sort()).toEqual([
+        "ses_workspace_alpha",
+        "ses_workspace_beta",
       ])
     } finally {
       ;(Global.Path as { data: string }).data = previousData

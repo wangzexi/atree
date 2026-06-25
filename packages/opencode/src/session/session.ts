@@ -23,6 +23,7 @@ import {
   readSessionStore,
   readSessionStores,
   readSessionStoresDeep,
+  readWorkspaceSessionStoresDeep,
   writeSessionStore,
 } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
@@ -815,7 +816,7 @@ export const layer: Layer.Layer<
       const fileSessions = directoryInput
         ? yield* Effect.promise(() => readSessionStores(directoryInput.directory!))
         : rootDirectory
-          ? yield* Effect.promise(() => readSessionStoresDeep(rootDirectory)).pipe(
+          ? yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
               Effect.catchCause(() => Effect.succeed([] as Info[])),
             )
           : undefined
