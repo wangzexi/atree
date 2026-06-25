@@ -31,9 +31,10 @@ import { isMedia } from "@/util/media"
 import type { SystemError } from "bun"
 import type { Provider } from "@/provider/provider"
 import { Effect, Schema } from "effect"
-import { readSessionJsonlProjection } from "@/atree/session-store"
+import { readSessionJsonlProjection, readSessionStoresDeep } from "@/atree/session-store"
 import { resolveFileSession } from "@/atree/session-resolver"
 import type { Session } from "./session"
+import { InstanceState } from "@/effect/instance-state"
 
 /** Error shape thrown by Bun's fetch() when gzip/br decompression fails mid-stream */
 interface FetchDecompressionError extends Error {
@@ -474,6 +475,30 @@ export function parts(messageID: MessageID, options?: { sessionID?: SessionID; d
         return projection.messages.find((message) => message.info.id === messageID)?.parts ?? []
       }
       return []
+    }
+
+    const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed<undefined>(undefined)))
+    if (ctx) {
+      const sessions = yield* Effect.promise(() => readSessionStoresDeep(ctx.directory)).pipe(
+        Effect.catchCause(() => Effect.succeed([])),
+      )
+      let found: Part[] | undefined
+      let foundKey: string | undefined
+      for (const fileSession of sessions) {
+        const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession)).pipe(
+          Effect.catchCause(() => Effect.succeed(undefined)),
+        )
+        const message = projection?.messages.find((message) => message.info.id === messageID)
+        if (!message) continue
+        const key = `${fileSession.directory}\n${fileSession.id}`
+        if (!found) {
+          found = message.parts
+          foundKey = key
+          continue
+        }
+        if (foundKey !== key) return []
+      }
+      if (found) return found
     }
 
     const rows = yield* db

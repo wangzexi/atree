@@ -470,6 +470,22 @@ describe("MessageV2.parts", () => {
       }),
     ),
   )
+
+  it.instance("reads standalone parts from file-backed session data without SQLite part rows", () =>
+    withSession(({ sessionID }) =>
+      Effect.gen(function* () {
+        const database = yield* Database.Service
+        const [id] = yield* fill(sessionID, 1)
+
+        yield* database.db.delete(PartTable).where(eq(PartTable.message_id, id)).run().pipe(Effect.orDie)
+        yield* database.db.delete(MessageTable).where(eq(MessageTable.id, id)).run().pipe(Effect.orDie)
+
+        const result = yield* MessageV2.parts(id)
+        expect(result).toHaveLength(1)
+        expect(result[0]).toMatchObject({ messageID: id, type: "text", text: "m0" })
+      }),
+    ),
+  )
 })
 
 describe("MessageV2.get", () => {
