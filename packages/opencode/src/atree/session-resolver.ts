@@ -1,8 +1,7 @@
 import path from "path"
 import { Effect } from "effect"
 import type { SessionID } from "@/session/schema"
-import { findSessionStore, readSessionStore } from "./session-store"
-import { readWorkspaceState } from "./state"
+import { findSessionStore, findWorkspaceSessionStore, readSessionStore } from "./session-store"
 
 export type FileSession = NonNullable<Awaited<ReturnType<typeof readSessionStore>>>
 
@@ -41,13 +40,8 @@ export const resolveFileSession = Effect.fn("Atree.resolveFileSession")(function
     : yield* tryDirectory(input.instanceDirectory)
   if (instance) return instance
 
-  const state = yield* Effect.promise(() => readWorkspaceState()).pipe(
-    Effect.catchCause(() => Effect.succeed({ rootDirectory: null })),
+  const found = yield* Effect.promise(() => findWorkspaceSessionStore(input.sessionID)).pipe(
+    Effect.catchCause(() => Effect.succeed(undefined)),
   )
-  if (state.rootDirectory) {
-    const found = yield* Effect.promise(() => findSessionStore(state.rootDirectory!, input.sessionID)).pipe(
-      Effect.catchCause(() => Effect.succeed(undefined)),
-    )
-    if (found) return found
-  }
+  if (found) return found
 })
