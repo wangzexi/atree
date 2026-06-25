@@ -213,6 +213,9 @@ export const layer = Layer.effect(
     })
 
     const workspaceSessions = Effect.fn("ToolOutputStore.workspaceSessions")(function* () {
+      if (Option.isSome(sessions)) {
+        return yield* sessions.value.list().pipe(Effect.catch(() => Effect.succeed([] as SessionSchema.Info[])))
+      }
       const statePath = path.join(global.data, "atree", "state.json")
       const state = yield* fs.readJson(statePath).pipe(Effect.catch(() => Effect.succeed(undefined)))
       const rootDirectory =

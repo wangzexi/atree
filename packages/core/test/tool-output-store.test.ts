@@ -655,4 +655,67 @@ describe("ToolOutputStore", () => {
       }),
     ),
   )
+
+  it.live("cleans expired session asset files via SessionStore without persisted root state", () =>
+    Effect.acquireUseRelease(
+      Effect.all({
+        data: Effect.promise(() => tmpdir()),
+        directory: Effect.promise(() => tmpdir()),
+      }),
+      ({ data, directory }) =>
+        Effect.gen(function* () {
+          const info = {
+            id: sessionID,
+            projectID: Project.ID.global,
+            title: "Cleanup via session store",
+            location: { directory: AbsolutePath.make(directory.path) },
+            time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+            cost: 0,
+            tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          }
+          const sessions = Layer.succeed(
+            SessionStore.Service,
+            SessionStore.Service.of({
+              list: () => Effect.succeed([info]),
+              get: () => Effect.succeed(info),
+              context: () => Effect.succeed([]),
+              runnerEntries: () => Effect.succeed([]),
+              runnerContext: () => Effect.succeed([]),
+              message: () => Effect.succeed(undefined),
+              hasPendingInput: () => Effect.succeed(undefined),
+              promoteInputs: () => Effect.succeed(undefined),
+            }),
+          )
+          const storeLayer = ToolOutputStore.layer.pipe(
+            Layer.provide(FSUtil.defaultLayer),
+            Layer.provide(Global.layerWith({ data: data.path })),
+            Layer.provide(sessions),
+          )
+          const managed = path.join(directory.path, ".agents", "atree", "sessions", sessionID, "assets", "tool-output")
+          const old = path.join(managed, "tool_old")
+          const recent = path.join(managed, "tool_recent")
+          const unrelated = path.join(managed, "keep.txt")
+
+          yield* Effect.gen(function* () {
+            const store = yield* ToolOutputStore.Service
+            const fs = yield* FSUtil.Service
+            yield* fs.ensureDir(managed)
+            yield* fs.writeFileString(old, "old")
+            yield* fs.writeFileString(recent, "recent")
+            yield* fs.writeFileString(unrelated, "keep")
+            const expired = new Date(Date.now() - 8 * 24 * 60 * 60 * 1_000)
+            yield* fs.utimes(old, expired, expired)
+            yield* store.cleanup()
+            expect(yield* fs.exists(old)).toBe(false)
+            expect(yield* fs.exists(recent)).toBe(true)
+            expect(yield* fs.exists(unrelated)).toBe(true)
+          }).pipe(Effect.provide(Layer.mergeAll(storeLayer, FSUtil.defaultLayer)))
+        }),
+      ({ data, directory }) =>
+        Effect.all([
+          Effect.promise(() => data[Symbol.asyncDispose]()),
+          Effect.promise(() => directory[Symbol.asyncDispose]()),
+        ]).pipe(Effect.ignore),
+    ),
+  )
 })
