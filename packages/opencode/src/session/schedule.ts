@@ -23,7 +23,6 @@ import {
 } from "@/atree/schedule-store"
 import {
   appendSessionJsonl,
-  findWorkspaceSessionStores,
   readSessionStore,
   readSessionStores,
   readSessionStoresDeep,
@@ -293,6 +292,13 @@ export const layer = Layer.effect(
 
     const currentInstance = InstanceRef.pipe(Effect.catchCause(() => Effect.succeed(undefined)))
 
+    const findWorkspaceSessionMatches = Effect.fn("Schedule.findWorkspaceSessionMatches")(function* (sessionID: SessionID) {
+      return yield* Effect.promise(() => readWorkspaceSessionStoresDeep()).pipe(
+        Effect.map((sessions) => sessions.filter((session) => session.id === sessionID)),
+        Effect.catchCause(() => Effect.succeed([])),
+      )
+    })
+
     const clearRuntimeState = Effect.fn("Schedule.clearRuntimeState")(function* (
       sessionID: SessionID,
       directory?: string,
@@ -307,11 +313,8 @@ export const layer = Layer.effect(
         .pipe(Effect.orDie)
       const hasAlternateFileSession =
         directory !== undefined
-          ? yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
-              Effect.map((sessions) =>
-                sessions.some((session) => path.resolve(session.directory) !== path.resolve(directory)),
-              ),
-              Effect.catchCause(() => Effect.succeed(false)),
+          ? yield* findWorkspaceSessionMatches(sessionID).pipe(
+              Effect.map((sessions) => sessions.some((session) => path.resolve(session.directory) !== path.resolve(directory))),
             )
           : false
       const ids = rows
@@ -426,9 +429,7 @@ export const layer = Layer.effect(
         } satisfies SessionLocation
       }
       if (!fallbackDirectory) {
-        const matches = yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
-          Effect.catchCause(() => Effect.succeed([])),
-        )
+        const matches = yield* findWorkspaceSessionMatches(sessionID)
         if (matches.length > 0) return { type: "ambiguous" } satisfies SessionLocation
       }
       return { type: "none" } satisfies SessionLocation
@@ -959,11 +960,8 @@ export const layer = Layer.effect(
       schedules: ReadonlyArray<Info>,
     ) {
       const wantedIDs = new Set(schedules.filter(canRestoreStoredSchedule).map((schedule) => schedule.id))
-      const hasAlternateFileSession = yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
-        Effect.map((sessions) =>
-          sessions.some((session) => path.resolve(session.directory) !== path.resolve(directory)),
-        ),
-        Effect.catchCause(() => Effect.succeed(false)),
+      const hasAlternateFileSession = yield* findWorkspaceSessionMatches(sessionID).pipe(
+        Effect.map((sessions) => sessions.some((session) => path.resolve(session.directory) !== path.resolve(directory))),
       )
       const rows = yield* db
         .select({ id: ScheduleTable.id })
@@ -1275,9 +1273,7 @@ export const layer = Layer.effect(
       const directory = yield* sessionDirectory(sessionID, options?.directory)
       if (options?.directory && !directory) return
       if (!options?.directory && !directory) {
-        const matches = yield* Effect.promise(() => findWorkspaceSessionStores(sessionID)).pipe(
-          Effect.catchCause(() => Effect.succeed([])),
-        )
+        const matches = yield* findWorkspaceSessionMatches(sessionID)
         if (matches.length > 0) return
       }
       const stored = directory ? yield* Effect.promise(() => readSessionScheduleState(directory, sessionID)) : []
