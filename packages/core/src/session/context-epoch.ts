@@ -93,16 +93,16 @@ const prepareOnce = Effect.fnUntraced(function* (
       ? yield* SystemContext.reconcile(value, snapshot)
       : yield* SystemContext.replace(value, snapshot)
   if (result._tag === "ReplacementBlocked" && replacingAgent) {
-    yield* fence(db, sessionID, agent, stored.revision)
+    yield* fence(db, sessionID, agent, stored.revision, location)
     return yield* new AgentReplacementBlocked({ sessionID, previous: stored.agent, current: agent })
   }
   if (result._tag === "Unchanged" || result._tag === "ReplacementBlocked") {
-    yield* fence(db, sessionID, agent, stored.revision)
+    yield* fence(db, sessionID, agent, stored.revision, location)
     return { baseline: stored.baseline, baselineSeq: stored.baseline_seq, revision: stored.revision }
   }
   if (result._tag === "ReplacementReady") {
     const replacementSeq = stored.replacement_seq ?? (yield* latestInputSeq(db, sessionID, location))
-    yield* replace(db, sessionID, agent, stored.revision, replacementSeq, result.generation)
+    yield* replace(db, sessionID, agent, stored.revision, replacementSeq, result.generation, location)
     return { baseline: result.generation.baseline, baselineSeq: replacementSeq, revision: stored.revision + 1 }
   }
 
@@ -115,7 +115,7 @@ const prepareOnce = Effect.fnUntraced(function* (
     SessionEvent.ContextUpdated,
     { sessionID, messageID: SessionMessageID.ID.create(), timestamp: yield* DateTime.now, text: result.text },
     "context update event",
-    { commit: () => advance(db, sessionID, stored.revision, result.snapshot).pipe(Effect.orDie) },
+    { commit: () => advance(db, sessionID, stored.revision, result.snapshot, location).pipe(Effect.orDie) },
   )
   return { baseline: stored.baseline, baselineSeq: stored.baseline_seq, revision: stored.revision + 1 }
 })
@@ -332,6 +332,25 @@ const ensurePlacedSession = Effect.fnUntraced(function* (
 const sameLocation = (directory: string, workspaceID: string | undefined, location: Location.Ref) =>
   directory === location.directory && workspaceID === location.workspaceID
 
+const matchesPlacedLocation = Effect.fnUntraced(function* (
+  db: DatabaseService,
+  sessionID: SessionSchema.ID,
+  location: Location.Ref | undefined,
+) {
+  if (!location) return true
+  const placed = yield* db
+    .select({
+      directory: SessionTable.directory,
+      workspaceID: SessionTable.workspace_id,
+    })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, sessionID))
+    .get()
+    .pipe(Effect.orDie)
+  if (!placed) return false
+  return sameLocation(placed.directory, placed.workspaceID ?? undefined, location)
+})
+
 const placementInsertValues = (session: NonNullable<Awaited<ReturnType<typeof readSessionStore>>>) =>
   ({
     id: session.id,
@@ -363,11 +382,13 @@ const replace = Effect.fnUntraced(function* (
   expectedRevision: number,
   baselineSeq: number,
   generation: SystemContext.Generation,
+  location?: Location.Ref,
 ) {
   yield* db
     .transaction(
       () =>
         Effect.gen(function* () {
+          if (!(yield* matchesPlacedLocation(db, sessionID, location))) return yield* Effect.die(new RevisionMismatch())
           yield* requireAgentSelection(db, sessionID, agent)
           const updated = yield* db
             .update(SessionContextEpochTable)
@@ -400,15 +421,25 @@ const fence = Effect.fnUntraced(function* (
   sessionID: SessionSchema.ID,
   agent: AgentV2.ID,
   expectedRevision: number,
+  location?: Location.Ref,
 ) {
   const current = yield* db
-    .select({ selected: SessionTable.agent, revision: SessionContextEpochTable.revision })
+    .select({
+      selected: SessionTable.agent,
+      directory: SessionTable.directory,
+      workspaceID: SessionTable.workspace_id,
+      revision: SessionContextEpochTable.revision,
+    })
     .from(SessionContextEpochTable)
     .leftJoin(SessionTable, eq(SessionTable.id, SessionContextEpochTable.session_id))
     .where(eq(SessionContextEpochTable.session_id, sessionID))
     .get()
     .pipe(Effect.orDie)
-  if (!current || (current.selected !== null && current.selected !== agent))
+  if (
+    !current ||
+    (location !== undefined && !sameLocation(current.directory ?? "", current.workspaceID ?? undefined, location)) ||
+    (current.selected !== null && current.selected !== agent)
+  )
     return yield* Effect.die(new AgentMismatch())
   if (current.revision !== expectedRevision) return yield* Effect.die(new RevisionMismatch())
 })
@@ -447,7 +478,9 @@ const advance = Effect.fnUntraced(function* (
   sessionID: SessionSchema.ID,
   expectedRevision: number,
   snapshot: SystemContext.Snapshot,
+  location?: Location.Ref,
 ) {
+  if (!(yield* matchesPlacedLocation(db, sessionID, location))) return yield* Effect.die(new RevisionMismatch())
   const updated = yield* db
     .update(SessionContextEpochTable)
     .set({ snapshot, revision: expectedRevision + 1 })

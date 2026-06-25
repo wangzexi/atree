@@ -93,6 +93,7 @@
 - opencode 的 schedule 运行链路也继续去 DB 依赖：已经启动过 timer 的 schedule 即使 runtime `ScheduleTable` 行被删，`process()` 现在也会回到目录里的 `schedule.json/session.jsonl` 继续执行，不再因为运行投影丢失而让真实自动化消息失效。
 - core 的 `SessionContextEpoch.current(...)` 也开始接受目录作用域校验：当 copied source/target 会话发生 rebind 后，旧目录上的 runner 不会再把目标目录当前的 epoch 误判成自己的 current revision。它还没有把 epoch 表真正变成目录作用域键，但已经先补上一层运行护栏。
 - 同一条运行态护栏已经继续压到 `SessionContextEpoch.requestReplacement(...)`：projector 现在会把 event payload 自带的 `location` 传进来，因此 source 目录上滞后的 agent/model/context/compaction 事件，不会再去错误推进 target 目录当前 epoch 的 `replacement_seq`。
+- 这套目录护栏现在也压到了更深的 epoch mutation 路径：`fence / replace / advance` 在提交 revision 变化前也会校验 `SessionTable.directory/workspace_id` 是否仍匹配当前 runner 的 `location`。这意味着 copied/rebound 会话在目录切换后，旧目录上的 in-flight runner 即使走到更晚的 commit 阶段，也不会继续修改新目录当前的 epoch。
 - opencode 的 `session.listGlobal` 现在也已经改成纯目录事实源读取：不再先查 `SessionTable` 再用目录元数据覆盖，global/directory 作用域的会话列表直接由 `.agents/atree/sessions/*` 扫描结果决定。
 - core `SessionV2.list` 也已经改成目录扫描优先且不再混入 `SessionTable` 结果；无论是显式目录还是 persisted root，全局/目录列表都直接从 `.agents/atree/sessions/*` 推导。
 - core `SessionV2.get` 也已经继续收紧：无论 persisted root 是否存在，只要 file-backed resolver 没找到目录会话，就直接 `NotFound`；它不再在“没有 root / 目录日志已删”时回退去读 `SessionTable` 复活 SQLite-only 会话。
