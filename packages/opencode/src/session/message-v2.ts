@@ -518,7 +518,28 @@ export const get = Effect.fn("MessageV2.get")(function* (input: {
   directory?: string
 }) {
   const { db } = yield* Database.Service
-  const fileSession = yield* resolveFileSession({ directory: input.directory, sessionID: input.sessionID })
+  const fileSession =
+    (yield* resolveFileSession({ directory: input.directory, sessionID: input.sessionID }).pipe(
+      Effect.catchCause(() => Effect.succeed(undefined)),
+    )) ??
+    (yield* Effect.gen(function* () {
+      if (input.directory) return undefined
+      const ctx = yield* InstanceState.context.pipe(Effect.catchCause(() => Effect.succeed<undefined>(undefined)))
+      if (!ctx) return undefined
+      const sessions = yield* Effect.promise(() => readSessionStoresDeep(ctx.directory)).pipe(
+        Effect.catchCause(() => Effect.succeed([])),
+      )
+      let found: (typeof sessions)[number] | undefined
+      for (const session of sessions) {
+        if (session.id !== input.sessionID) continue
+        if (!found) {
+          found = session
+          continue
+        }
+        if (found.directory !== session.directory) return undefined
+      }
+      return found
+    }))
   if (fileSession) {
     const projection = yield* Effect.promise(() => readSessionJsonlProjection(fileSession))
     const message = projection.messages.find((item) => item.info.id === input.messageID)
