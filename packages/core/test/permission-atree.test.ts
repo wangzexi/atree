@@ -442,6 +442,58 @@ describe("PermissionV2 atree state", () => {
     }),
   )
 
+  it.effect("does not borrow another copied session when no explicit permission directory is given", () =>
+    Effect.gen(function* () {
+      const data = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-data-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const root = yield* Effect.acquireRelease(
+        Effect.promise(() => mkdtemp(path.join(os.tmpdir(), "atree-core-permission-root-"))),
+        (dir) => Effect.promise(() => rm(dir, { recursive: true, force: true })).pipe(Effect.ignore),
+      )
+      const target = path.join(root, "target")
+      const previousData = Global.Path.data
+      ;(Global.Path as { data: string }).data = data
+      yield* Effect.addFinalizer(() => Effect.sync(() => ((Global.Path as { data: string }).data = previousData)))
+      yield* setRules([])
+
+      const sessionID = SessionV2.ID.make("ses_core_permission_no_explicit_directory")
+      const permissionID = PermissionV2.ID.create("per_core_permission_no_explicit_directory")
+
+      yield* Effect.promise(() =>
+        writeAtreeSession({
+          data,
+          root,
+          directory: target,
+          sessionID,
+          title: "Permission target only",
+        }),
+      )
+
+      const service = yield* PermissionV2.Service
+      const error = yield* Effect.flip(
+        service.ask({
+          id: permissionID,
+          sessionID,
+          action: "bash",
+          resources: ["echo implicit"],
+          save: ["echo implicit"],
+        }),
+      )
+      expect(error).toBeInstanceOf(SessionV2.NotFoundError)
+
+      const targetRaw = yield* Effect.promise(() =>
+        readFile(path.join(target, ".agents", "atree", "sessions", sessionID, "session.jsonl"), "utf8").catch(
+          () => "",
+        ),
+      )
+      expect(targetRaw).not.toContain("permission.v2.asked")
+      expect(targetRaw).not.toContain("permission.v2.replied")
+      expect(yield* service.list()).toEqual([])
+    }),
+  )
+
   it.effect("rejecting one restored permission records sibling rejections in session.jsonl", () =>
     Effect.gen(function* () {
       const data = yield* Effect.acquireRelease(
