@@ -660,6 +660,12 @@ export const layer: Layer.Layer<
         instanceDirectory: ctx?.directory,
       })
       if (fileSession) {
+        // When an explicit directory was given, the session must be directly in that
+        // directory. Sessions in nested subdirectories belong to their own node and
+        // should not be accessible from a parent directory context.
+        if (directoryHint && path.resolve(fileSession.directory) !== path.resolve(directoryHint)) {
+          return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
+        }
         return localizeFileSession(fileSession, ctx)
       }
       return yield* Effect.fail(new NotFoundError({ message: `Session not found: ${id}` }))
