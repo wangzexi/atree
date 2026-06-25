@@ -2068,7 +2068,8 @@ describe("atree schedule restore", () => {
 
       expect(yield* Effect.promise(() => readSessionScheduleState(target, sessionID))).toEqual([])
       expect(yield* Effect.promise(() => readSessionScheduleState(source.directory, sessionID))).toEqual(sourceBeforeDelete)
-      expect(eventDirectories).toEqual([target])
+      expect(eventDirectories).toHaveLength(1)
+      expect(yield* Effect.promise(() => fs.realpath(eventDirectories[0]!))).toBe(yield* Effect.promise(() => fs.realpath(target)))
       const row = yield* db
         .select()
         .from(ScheduleTable)
@@ -2907,6 +2908,59 @@ describe("atree schedule restore", () => {
           .pipe(Effect.orDie),
       )
       expect(row?.session_id).toBe(sessionID)
+    }),
+  )
+
+  it.effect(
+    "does not create a database runtime row when directory schedule persistence fails",
+    Effect.gen(function* () {
+      const directory = yield* tempdir
+      const sessionID = "ses_explicit_create_schedule_write_failure" as SessionID
+      const now = Date.now()
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-create-schedule-write-failure",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit create schedule write failure",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+      yield* Effect.promise(() =>
+        fs.rm(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), { force: true }),
+      )
+      yield* Effect.promise(() =>
+        fs.mkdir(path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl"), { recursive: true }),
+      )
+
+      const result = yield* Schedule.Service.use((schedule) =>
+        schedule
+          .create({
+            sessionID,
+            directory,
+            kind: "once",
+            runAt: now + 60_000,
+            message: "should not create phantom runtime schedule",
+          })
+          .pipe(Effect.exit),
+      )
+
+      expect(Exit.isFailure(result)).toBe(true)
+      const rows = yield* Database.Service.use(({ db }) =>
+        db
+          .select()
+          .from(ScheduleTable)
+          .where(eq(ScheduleTable.session_id, sessionID))
+          .all()
+          .pipe(Effect.orDie),
+      )
+      expect(rows).toEqual([])
     }),
   )
 

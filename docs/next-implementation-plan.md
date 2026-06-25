@@ -63,6 +63,7 @@
 - opencode 的 schedule 根目录查找已复用 file-backed session store 的深度扫描结果，不再维护独立目录遍历策略；schedule 继续作为会话目录内的工具状态读取。
 - opencode 的 `Todo` 服务已经停止在 `get/update` 时顺手镜像 `SessionTable`/`ProjectTable` 缓存；它现在直接依赖 file-backed session resolver 和目录内 `todo.json`/`session.jsonl`，不会再因为一次 todo 更新去改写旧的 session 缓存目录。
 - opencode 的 `Schedule` 服务仍保留 SQLite `ScheduleTable` / `ScheduleRunTable` 作为运行投影，但已经不再为了 schedule 去补 `SessionTable` / `ProjectTable` 缓存行。目录归档态和目录内自动化消息清理由文件事实源驱动，不再借 schedule 解析顺手制造或改写旧 session 元数据。
+- opencode 的 `schedule.create` 现在也已经切到“目录事实优先”顺序：先把 `session.jsonl + schedule.json` 写到当前目录，再补 `ScheduleTable` runtime row 和 timer；因此目录写失败时，不会再留下只存在于 SQLite 的 phantom schedule。
 - opencode 的 `Schedule` 触发链路已经增加目录事实校验：`tick()`、实际 `process()` 和服务启动时的 schedule hydration 都会先确认该 schedule 仍存在于目录内 `schedule.json/session.jsonl` 投影；缺失或已删除的 stale `ScheduleTable` 行会被清掉，不会再反向触发 phantom schedule。
 - opencode 的 `schedule.list` 读模型也继续收紧：列表里的 `lastRanAt/lastRunStatus` 默认取自目录投影，不再从 stale `ScheduleRunTable` 反向回填；只有当前进程里真实存在的 timer 会覆盖瞬时 `nextRun`。
 - opencode 的 `recordRun()` 现在也已经停止新增写入 `ScheduleRunTable`；新的运行记录只落目录日志和目录 schedule state，`schedule_run` 继续保留为兼容旧库与清理路径的遗留表，不再承担新业务写入。

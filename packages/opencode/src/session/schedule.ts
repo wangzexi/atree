@@ -1052,11 +1052,13 @@ export const layer = Layer.effect(
       const kind = input.kind ?? "recurring"
       const expression = kind === "recurring" ? input.expression?.trim() : input.expression?.trim() || ""
       const runAt = kind === "once" ? yield* validateRunAt(input.runAt) : null
+      let previewNextRun: number | null = runAt
       if (kind === "recurring") {
         if (!expression) {
           return yield* Effect.fail(new InvalidExpression({ expression: "", reason: "expression is required" }))
         }
-        yield* validateExpression(expression)
+        const cron = yield* validateExpression(expression)
+        previewNextRun = cron.nextRun()?.getTime() ?? null
       }
       const location = yield* resolveSessionLocation(input.sessionID, input.directory)
       if (location.type !== "found") {
@@ -1082,6 +1084,21 @@ export const layer = Layer.effect(
       }
       const id = Identifier.create("sch", "ascending") as ID
       const createdAt = Date.now()
+      const created = {
+        id,
+        sessionID: input.sessionID,
+        kind,
+        expression: expression || "",
+        runAt,
+        message: input.message,
+        createdAt,
+        lastRanAt: null,
+        lastRunStatus: null,
+        nextRun: previewNextRun,
+      } satisfies Info
+      yield* Effect.promise(() =>
+        writeSessionScheduleState(directory, input.sessionID, [...active.filter((schedule) => schedule.id !== id), created]),
+      ).pipe(Effect.orDie)
       yield* db
         .transaction((tx) =>
           tx
@@ -1101,32 +1118,6 @@ export const layer = Layer.effect(
       const bridge = yield* EffectBridge.make()
       startTimer(id, input.sessionID, kind, expression || "", runAt, bridge, directory)
       yield* events.publish(Event.Created, { scheduleID: id, sessionID: input.sessionID }, scheduleLocation(directory))
-      const createdTimer = timers.get(id)
-      const created = {
-        id,
-        sessionID: input.sessionID,
-        kind,
-        expression: expression || "",
-        runAt,
-        message: input.message,
-        createdAt,
-        lastRanAt: null,
-        lastRunStatus: null,
-        nextRun:
-          kind === "once"
-            ? runAt
-            : createdTimer?.kind === "recurring"
-              ? (createdTimer.cron.nextRun()?.getTime() ?? null)
-              : null,
-      } satisfies Info
-      yield* appendScheduleSessionEventBestEffort(
-        input.sessionID,
-        {
-          type: "schedule.created",
-          schedule: created,
-        },
-        input.directory,
-      )
       yield* syncScheduleState(input.sessionID, input.directory)
       return created
     })
