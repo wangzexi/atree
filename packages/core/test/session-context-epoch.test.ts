@@ -1,6 +1,6 @@
 import { expect } from "bun:test"
 import path from "path"
-import { readFile } from "fs/promises"
+import { readFile, rm } from "fs/promises"
 import { Effect, DateTime, Layer, Schema } from "effect"
 import { eq } from "drizzle-orm"
 import { Database } from "@opencode-ai/core/database/database"
@@ -302,6 +302,116 @@ it.effect("rebuilds only placement fields for file-backed context epochs", () =>
     expect(cached?.time_archived).toBeNull()
     expect(cached?.path).toBeNull()
     expect(cached?.model).toBeNull()
+  }),
+)
+
+it.effect("initialize clears stale same-directory context cache when the file-backed session was removed", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const directory = AbsolutePath.make(tmp.path)
+    const sessionID = SessionV2.ID.make("ses_context_epoch_missing_initialize")
+    const agent = AgentV2.ID.make("build")
+    const location = Location.Ref.make({ directory })
+    const session = SessionV2.Info.make({
+      id: sessionID,
+      projectID: ProjectV2.ID.global,
+      title: "Context epoch removed before initialize",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+      location,
+      agent,
+    })
+    yield* Effect.promise(() => writeSessionStore(session))
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+
+    const context = () =>
+      SystemContext.make({
+        key: SystemContext.Key.make("test/context/missing-initialize"),
+        codec: Schema.String,
+        load: Effect.sync(() => "Missing initialize"),
+        baseline: (value) => value,
+        update: (_previous, current) => current,
+      })
+
+    yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent)
+    yield* Effect.promise(() =>
+      rm(path.join(tmp.path, ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
+    )
+
+    const initialized = yield* SessionContextEpoch.initialize(db, Effect.sync(context), sessionID, location, agent)
+    expect(initialized).toBeUndefined()
+    expect(
+      yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+    ).toBeUndefined()
+    expect(
+      yield* db
+        .select()
+        .from(SessionContextEpochTable)
+        .where(eq(SessionContextEpochTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie),
+    ).toBeUndefined()
+  }),
+)
+
+it.effect("prepare clears stale same-directory context cache when the file-backed session was removed", () =>
+  Effect.gen(function* () {
+    const tmp = yield* Effect.acquireRelease(
+      Effect.promise(() => tmpdir()),
+      (tmp) => Effect.promise(() => tmp[Symbol.asyncDispose]()).pipe(Effect.orDie),
+    )
+    const directory = AbsolutePath.make(tmp.path)
+    const sessionID = SessionV2.ID.make("ses_context_epoch_missing_prepare")
+    const agent = AgentV2.ID.make("build")
+    const location = Location.Ref.make({ directory })
+    const session = SessionV2.Info.make({
+      id: sessionID,
+      projectID: ProjectV2.ID.global,
+      title: "Context epoch removed before prepare",
+      cost: 0,
+      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      time: { created: DateTime.makeUnsafe(1), updated: DateTime.makeUnsafe(1) },
+      location,
+      agent,
+    })
+    yield* Effect.promise(() => writeSessionStore(session))
+    const { db } = yield* Database.Service
+    const events = yield* EventV2.Service
+
+    const context = () =>
+      SystemContext.make({
+        key: SystemContext.Key.make("test/context/missing-prepare"),
+        codec: Schema.String,
+        load: Effect.sync(() => "Missing prepare"),
+        baseline: (value) => value,
+        update: (_previous, current) => current,
+      })
+
+    yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent)
+    yield* Effect.promise(() =>
+      rm(path.join(tmp.path, ".agents", "atree", "sessions", sessionID), { recursive: true, force: true }),
+    )
+
+    const exit = yield* SessionContextEpoch.prepare(db, events, Effect.sync(context), sessionID, location, agent).pipe(
+      Effect.exit,
+    )
+    expect(exit._tag).toBe("Failure")
+    expect(
+      yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie),
+    ).toBeUndefined()
+    expect(
+      yield* db
+        .select()
+        .from(SessionContextEpochTable)
+        .where(eq(SessionContextEpochTable.session_id, sessionID))
+        .get()
+        .pipe(Effect.orDie),
+    ).toBeUndefined()
   }),
 )
 

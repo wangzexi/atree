@@ -76,7 +76,8 @@ const prepareOnce = Effect.fnUntraced(function* (
   agent: AgentV2.ID,
 ) {
   const placement = yield* ensurePlacedSession(db, sessionID, location)
-  if (placement === "rebound") yield* reset(db, sessionID)
+  if (placement === "rebound" || placement === "missing") yield* reset(db, sessionID)
+  if (placement === "missing") return yield* Effect.die(new LocationMismatch())
   const [value, stored] = yield* Effect.all([context, find(db, sessionID)], { concurrency: "unbounded" })
   if (!stored) {
     const generation = yield* SystemContext.initialize(value)
@@ -128,7 +129,8 @@ const initializeOnce = Effect.fnUntraced(function* (
   agent: AgentV2.ID,
 ) {
   const placement = yield* ensurePlacedSession(db, sessionID, location)
-  if (placement === "rebound") yield* reset(db, sessionID)
+  if (placement === "rebound" || placement === "missing") yield* reset(db, sessionID)
+  if (placement === "missing") return
   if (yield* exists(db, sessionID)) return
   const generation = yield* context.pipe(Effect.flatMap(SystemContext.initialize))
   const baselineSeq = yield* insert(db, sessionID, location, agent, generation)
@@ -297,7 +299,14 @@ const ensurePlacedSession = Effect.fnUntraced(function* (
     .where(eq(SessionTable.id, sessionID))
     .get()
     .pipe(Effect.orDie)
-  if (placed && sameLocation(placed.directory, placed.workspaceID ?? undefined, location)) return "present"
+  if (placed && sameLocation(placed.directory, placed.workspaceID ?? undefined, location)) {
+    const current = yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
+      Effect.catchCause(() => Effect.succeed(undefined)),
+    )
+    if (current) return "present"
+    yield* db.delete(SessionTable).where(eq(SessionTable.id, sessionID)).run().pipe(Effect.orDie)
+    return "missing"
+  }
   const session = yield* Effect.promise(() => readSessionStore(location.directory, sessionID)).pipe(
     Effect.catchCause(() => Effect.succeed(undefined)),
   )

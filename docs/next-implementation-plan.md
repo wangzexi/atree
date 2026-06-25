@@ -82,6 +82,7 @@
 - core 的 `QuestionV2` / `PermissionV2` 在显式目录场景下也已经收紧：如果指定目录里不存在该会话，它们不会再回退到别的同 id 会话去追加 asked/replied 事件或借用对方权限配置。
 - core 的 `QuestionV2` / `PermissionV2` 在“无显式目录但当前 `Location.directory` 缺席该会话”时也已经继续收紧：它们不会再退回到 persisted root / `SessionStore.get(sessionID)` 去猜别的 copied session，隐式目录路径现在同样服从“只认当前目录”的规则。
 - core 的 `ToolOutputStore` 现在也不再围绕全局 `data/tool-output` 做 retention；超长工具输出仍然只写当前会话的 `.agents/atree/sessions/<id>/assets/tool-output/`，而定期清理也改成基于 workspace root 深扫这些会话资产目录，删除过期 `tool_*` 文件，不再依赖任何全局输出目录。
+- core 的 `SessionContextEpoch` 现在也补上了一层“目录真相优先”的 stale cache 护栏：如果 `SessionTable` 里缓存的 directory 命中当前 location，但目录里的真实 session store 已经被删除，`ensurePlacedSession()` 不会再直接信任这条缓存，而是先删掉 stale placement；`initialize()` 会返回 `undefined`，`prepare()` 会清掉旧 epoch row 后终止，不再继续借用已经失真的 context/runtime state。
 - core 的 `SessionTodo` 也已经不再自己直接扫 persisted root；它现在统一通过 `SessionStore` 解析目录会话，把“根目录扫描 / 显式目录优先 / 歧义拒绝”收口到同一套规则里。
 - core 的 `ToolOutputStore` 也已经去掉了自己直接扫 persisted root 的兜底；工具超长输出的附件落盘现在只信任 `SessionStore` 给出的目录归属。
 - core 的 `SessionStore` 现在开始承担目录会话列表读取，`V2Session.list` 不再自己直接读 persisted root / deep session store；会话发现规则继续收口到同一层。
