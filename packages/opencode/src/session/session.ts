@@ -19,7 +19,6 @@ import {
   deleteSessionStore,
   ensureSessionStore,
   readSessionJsonlProjection,
-  readSessionJsonlMessages,
   readSessionStore,
   readSessionStores,
   readSessionStoresDeep,
@@ -40,7 +39,6 @@ import { inArray } from "drizzle-orm"
 import { lt } from "drizzle-orm"
 import { or } from "drizzle-orm"
 import type { SQL } from "drizzle-orm"
-import { PartTable, SessionTable } from "@opencode-ai/core/session/sql"
 import { ProjectTable } from "@opencode-ai/core/project/sql"
 import { MessageV2 } from "./message-v2"
 import type { InstanceContext } from "../project/instance-context"
@@ -651,45 +649,6 @@ export const layer: Layer.Layer<
       }
     })
 
-    const ensureFileSessionProject = Effect.fn("Session.ensureFileSessionProject")(function* (fileSession: Info) {
-      const existing = yield* db
-        .select({ id: ProjectTable.id })
-        .from(ProjectTable)
-        .where(eq(ProjectTable.id, fileSession.projectID))
-        .get()
-        .pipe(Effect.orDie)
-      if (existing) return
-      const resolved = yield* resolveFileSessionProjectInfo(fileSession)
-      const now = Date.now()
-      yield* db
-        .insert(ProjectTable)
-        .values({
-          id: fileSession.projectID,
-          worktree: AbsolutePath.make(resolved.worktree),
-          vcs: resolved.vcs ?? null,
-          name: resolved.name ?? null,
-          time_created: now,
-          time_updated: now,
-          sandboxes: [],
-        } as typeof ProjectTable.$inferInsert)
-        .onConflictDoNothing()
-        .run()
-        .pipe(Effect.orDie)
-    })
-
-    const ensureFileSessionCache = Effect.fn("Session.ensureFileSessionCache")(function* (fileSession: Info) {
-      const existing = yield* db
-        .select({ id: SessionTable.id })
-        .from(SessionTable)
-        .where(eq(SessionTable.id, fileSession.id))
-        .get()
-        .pipe(Effect.orDie)
-      if (existing) return
-      yield* ensureFileSessionProject(fileSession)
-      const row = toRuntimeRow(fileSession)
-      yield* db.insert(SessionTable).values(row).onConflictDoNothing().run().pipe(Effect.orDie)
-    })
-
     const getWithDirectory = Effect.fn("Session.getWithDirectory")(function* (id: SessionID, directoryHint?: string) {
       if (!id) return yield* Effect.fail(new NotFoundError({ message: "Session not found" }))
       const ctx = yield* InstanceState.context.pipe(
@@ -713,7 +672,7 @@ export const layer: Layer.Layer<
     const appendSessionEvent = Effect.fn("Session.appendSessionEvent")(function* (
       sessionID: SessionID,
       entry: Record<string, unknown>,
-      options?: DirectoryOption & { syncCache?: boolean },
+      options?: DirectoryOption,
     ) {
       const session = yield* getWithDirectory(sessionID, options?.directory).pipe(Effect.orDie)
       yield* Effect.promise(() => appendSessionJsonl(session, entry)).pipe(Effect.orDie)
@@ -722,7 +681,6 @@ export const layer: Layer.Layer<
       const base = projected ?? session
       const next = { ...base, time: { ...base.time, updated } }
       yield* Effect.promise(() => writeSessionStore(next)).pipe(Effect.orDie)
-      if (options?.syncCache ?? true) yield* ensureFileSessionCache(next)
     })
 
     const mergeAtreeDirectoryIndex = Effect.fn("Session.mergeAtreeDirectoryIndex")(function* (
@@ -883,7 +841,7 @@ export const layer: Layer.Layer<
 
     const updateMessage = <T extends SessionV1.Info>(msg: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg }, { ...options, syncCache: false })
+        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg }, options)
         const session = yield* getWithDirectory(msg.sessionID, options?.directory).pipe(Effect.orDie)
         yield* events.publish(
           SessionV1.Event.MessageUpdated,
@@ -895,7 +853,7 @@ export const layer: Layer.Layer<
 
     const updatePart = <T extends SessionV1.Part>(part: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part }, { ...options, syncCache: false })
+        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part }, options)
         const session = yield* getWithDirectory(part.sessionID, options?.directory).pipe(Effect.orDie)
         yield* events.publish(
           SessionV1.Event.PartUpdated,
@@ -919,42 +877,12 @@ export const layer: Layer.Layer<
         Effect.catchIf(NotFoundError.isInstance, () => Effect.succeed(undefined)),
       )
       if (!session) return
-      let projection: Awaited<ReturnType<typeof readSessionJsonlProjection>> | undefined
-      if (session) {
-        projection = yield* Effect.promise(() => readSessionJsonlProjection(session))
-        const partKey = `${input.messageID}:${input.partID}`
-        if (projection.removedMessageIDs.has(input.messageID) || projection.removedPartIDs.has(partKey)) return
-        const filePart = projection.messages
-          .find((message) => message.info.id === input.messageID)
-          ?.parts.find((part) => part.id === input.partID)
-        if (filePart) return filePart
-        return
-      }
-
-      const row = yield* db
-        .select()
-        .from(PartTable)
-        .where(
-          and(
-            eq(PartTable.session_id, input.sessionID),
-            eq(PartTable.message_id, input.messageID),
-            eq(PartTable.id, input.partID),
-          ),
-        )
-        .get()
-        .pipe(Effect.orDie)
-      if (!row) {
-        if (!session) return
-        return (projection?.messages ?? (yield* Effect.promise(() => readSessionJsonlMessages(session))))
-          .find((message) => message.info.id === input.messageID)
-          ?.parts.find((part) => part.id === input.partID)
-      }
-      return {
-        ...row.data,
-        id: row.id,
-        sessionID: row.session_id,
-        messageID: row.message_id,
-      } as SessionV1.Part
+      const projection = yield* Effect.promise(() => readSessionJsonlProjection(session))
+      const partKey = `${input.messageID}:${input.partID}`
+      if (projection.removedMessageIDs.has(input.messageID) || projection.removedPartIDs.has(partKey)) return
+      return projection.messages
+        .find((message) => message.info.id === input.messageID)
+        ?.parts.find((part) => part.id === input.partID)
     })
 
     const create = Effect.fn("Session.create")(function* (input?: {
@@ -1066,7 +994,7 @@ export const layer: Layer.Layer<
           sessionID,
           patch,
         },
-        { ...options, syncCache: false },
+        options,
       )
     })
 
@@ -1199,7 +1127,7 @@ export const layer: Layer.Layer<
       yield* appendSessionEvent(
         input.sessionID,
         { type: "message.removed", messageID: input.messageID },
-        { ...input, syncCache: false },
+        input,
       )
       const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(Effect.orDie)
       yield* events.publish(
@@ -1226,7 +1154,7 @@ export const layer: Layer.Layer<
           messageID: input.messageID,
           partID: input.partID,
         },
-        { ...input, syncCache: false },
+        input,
       )
       const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(Effect.orDie)
       yield* events.publish(
