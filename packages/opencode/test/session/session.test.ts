@@ -443,6 +443,71 @@ describe("Session", () => {
     }),
   )
 
+  it.effect("updates file-backed messages with an explicit directory and no instance without recreating cache rows", () =>
+    Effect.gen(function* () {
+      const session = yield* SessionNs.Service
+      const { db } = yield* Database.Service
+      const directory = yield* tmpdirScoped()
+      const now = Date.now()
+      const sessionID = "ses_explicit_messages_patch" as SessionID
+      const messageID = "msg_explicit_messages_patch" as MessageID
+      const partID = "prt_explicit_messages_patch" as PartID
+
+      yield* Effect.promise(() =>
+        writeSessionStore({
+          id: sessionID,
+          slug: "explicit-messages-patch",
+          version: "test",
+          projectID: "proj_file",
+          directory,
+          path: ".",
+          title: "Explicit messages patch",
+          cost: 0,
+          tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+          time: { created: now, updated: now },
+        } as any),
+      )
+
+      yield* session.updateMessage(
+        {
+          id: messageID,
+          sessionID,
+          role: "user",
+          time: { created: now },
+          agent: "user",
+          model: { providerID: "test", modelID: "test" },
+          tools: {},
+          mode: "",
+        } as unknown as SessionV1.Info,
+        { directory },
+      )
+      yield* session.updatePart(
+        {
+          id: partID,
+          messageID,
+          sessionID,
+          type: "text",
+          text: "explicit directory updated message",
+        },
+        { directory },
+      )
+
+      const messages = yield* session.messages({ sessionID, directory, limit: 10 })
+      expect(messages.find((message) => message.info.id === messageID)?.parts[0]).toMatchObject({
+        id: partID,
+        type: "text",
+        text: "explicit directory updated message",
+      })
+
+      const row = yield* db.select().from(SessionTable).where(eq(SessionTable.id, sessionID)).get().pipe(Effect.orDie)
+      expect(row).toBeUndefined()
+      const messageRow = yield* db.select().from(MessageTable).where(eq(MessageTable.id, messageID)).get().pipe(Effect.orDie)
+      const partRow = yield* db.select().from(PartTable).where(eq(PartTable.id, partID)).get().pipe(Effect.orDie)
+      expect(messageRow).toBeUndefined()
+      expect(partRow).toBeUndefined()
+    }),
+  )
+
   it.instance("does not merge same-directory SQLite metadata into a file-backed session read", () =>
     Effect.gen(function* () {
       const session = yield* SessionNs.Service

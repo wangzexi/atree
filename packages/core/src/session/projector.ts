@@ -208,6 +208,15 @@ function insertMessage(db: DatabaseService, event: SessionEvent.Event, message: 
     .pipe(Effect.orDie)
 }
 
+function hasSessionProjection(db: DatabaseService, sessionID: (typeof SessionV1.Event.MessageUpdated.Type)["data"]["sessionID"]) {
+  return db
+    .select({ id: SessionTable.id })
+    .from(SessionTable)
+    .where(eq(SessionTable.id, sessionID))
+    .get()
+    .pipe(Effect.orDie, Effect.map((row) => row !== undefined))
+}
+
 export const layer = Layer.effectDiscard(
   Effect.gen(function* () {
     const events = yield* EventV2.Service
@@ -262,6 +271,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.MessageUpdated, (event) =>
       Effect.gen(function* () {
+        if (!(yield* hasSessionProjection(db, event.data.sessionID))) return
         const time_created = event.data.info.time.created
         const id = event.data.info.id
         const sessionID = event.data.info.sessionID
@@ -276,6 +286,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.MessageRemoved, (event) =>
       Effect.gen(function* () {
+        if (!(yield* hasSessionProjection(db, event.data.sessionID))) return
         const rows = yield* db
           .select()
           .from(PartTable)
@@ -295,6 +306,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.PartRemoved, (event) =>
       Effect.gen(function* () {
+        if (!(yield* hasSessionProjection(db, event.data.sessionID))) return
         const row = yield* db
           .select()
           .from(PartTable)
@@ -312,6 +324,7 @@ export const layer = Layer.effectDiscard(
     )
     yield* events.project(SessionV1.Event.PartUpdated, (event) =>
       Effect.gen(function* () {
+        if (!(yield* hasSessionProjection(db, event.data.part.sessionID))) return
         const id = event.data.part.id
         const messageID = event.data.part.messageID
         const sessionID = event.data.part.sessionID

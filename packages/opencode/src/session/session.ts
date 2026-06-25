@@ -814,7 +814,7 @@ export const layer: Layer.Layer<
 
     const updateMessage = <T extends SessionV1.Info>(msg: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg }, options)
+        yield* appendSessionEvent(msg.sessionID, { type: "message.updated", message: msg }, { ...options, syncCache: false })
         const session = yield* getWithDirectory(msg.sessionID, options?.directory).pipe(Effect.orDie)
         yield* events.publish(
           SessionV1.Event.MessageUpdated,
@@ -826,7 +826,7 @@ export const layer: Layer.Layer<
 
     const updatePart = <T extends SessionV1.Part>(part: T, options?: DirectoryOption): Effect.Effect<T> =>
       Effect.gen(function* () {
-        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part }, options)
+        yield* appendSessionEvent(part.sessionID, { type: "message.part.updated", part }, { ...options, syncCache: false })
         const session = yield* getWithDirectory(part.sessionID, options?.directory).pipe(Effect.orDie)
         yield* events.publish(
           SessionV1.Event.PartUpdated,
@@ -1127,7 +1127,11 @@ export const layer: Layer.Layer<
       messageID: MessageID
       directory?: string
     }) {
-      yield* appendSessionEvent(input.sessionID, { type: "message.removed", messageID: input.messageID }, input)
+      yield* appendSessionEvent(
+        input.sessionID,
+        { type: "message.removed", messageID: input.messageID },
+        { ...input, syncCache: false },
+      )
       const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(Effect.orDie)
       yield* events.publish(
         SessionV1.Event.MessageRemoved,
@@ -1153,7 +1157,7 @@ export const layer: Layer.Layer<
           messageID: input.messageID,
           partID: input.partID,
         },
-        input,
+        { ...input, syncCache: false },
       )
       const session = yield* getWithDirectory(input.sessionID, input.directory).pipe(Effect.orDie)
       yield* events.publish(
