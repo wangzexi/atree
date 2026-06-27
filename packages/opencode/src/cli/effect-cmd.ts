@@ -1,8 +1,13 @@
-import type { Argv } from "yargs"
+import type { Argv, CommandModule } from "yargs"
 import { Effect, Schema } from "effect"
 import type { AppServices } from "@/effect/app-runtime"
 import type { InstanceStore } from "@/project/instance-store"
-import { cmd, type WithDoubleDash } from "./cmd/cmd"
+
+export type WithDoubleDash<T> = T & { "--"?: string[] }
+
+export function cmd<T, U>(input: CommandModule<T, WithDoubleDash<U>>) {
+  return input
+}
 
 /**
  * User-visible command failure. Throw via `fail("...")` from an effectCmd handler
