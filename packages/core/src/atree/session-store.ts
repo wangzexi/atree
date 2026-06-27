@@ -779,8 +779,8 @@ function timestampValue(value: unknown, fallback: number) {
   return fallback
 }
 
-function eventData(entry: Record<string, unknown>) {
-  return entry.data && typeof entry.data === "object" ? (entry.data as Record<string, unknown>) : entry
+export function eventData(entry: Record<string, unknown>) {
+  return isRecord(entry.data) ? entry.data : entry
 }
 
 function modelRef(value: unknown): ModelV2.Ref | undefined {

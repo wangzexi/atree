@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
-import { ensureSessionPayloadFilesByID, touchSessionStore, sessionJsonlPath } from "./session-store"
+import { ensureSessionPayloadFilesByID, touchSessionStore, sessionJsonlPath, eventData } from "./session-store"
 import type { SessionSchema } from "../session/schema"
 import { isRecord } from "../util/record"
 
@@ -32,9 +32,6 @@ function baseEventType(value: unknown) {
 }
 
 
-function eventData(entry: Record<string, unknown>) {
-  return isRecord(entry.data) ? entry.data : entry
-}
 
 function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) {
   if (typeof entry.at === "number") return entry.at

@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import type { PermissionV2 } from "../permission"
-import { readSessionStoresDeep, readWorkspaceSessionStoresDeep, sessionJsonlPath } from "./session-store"
+import { readSessionStoresDeep, readWorkspaceSessionStoresDeep, sessionJsonlPath, eventData } from "./session-store"
 import { isRecord } from "../util/record"
 
 export type PermissionStateEntry = {
@@ -14,9 +14,6 @@ function eventType(value: unknown) {
   return typeof value === "string" ? value.replace(/\.\d+$/, "") : undefined
 }
 
-function eventData(entry: Record<string, unknown>) {
-  return isRecord(entry.data) ? entry.data : entry
-}
 
 
 export async function readPermissionStateEntries(rootDirectory?: string) {
