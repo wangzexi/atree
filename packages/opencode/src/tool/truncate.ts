@@ -4,7 +4,7 @@ import { Cause, Duration, Effect, Layer, Option, Schedule, Context } from "effec
 import path from "path"
 import type { Agent } from "../agent/agent"
 import { FSUtil } from "@opencode-ai/core/fs-util"
-import { evaluate } from "@/permission/evaluate"
+import { evaluate } from "@/permission"
 import { Config } from "@/config/config"
 import { Database } from "@opencode-ai/core/database/database"
 import { Identifier } from "../id/id"
