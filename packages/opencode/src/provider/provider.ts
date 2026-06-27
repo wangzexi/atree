@@ -18,19 +18,33 @@ import { iife } from "@/util/iife"
 import { Global } from "@opencode-ai/core/global"
 import path from "path"
 import { pathToFileURL } from "url"
-import { Effect, Layer, Context, Schema, Types } from "effect"
+import { Cause, Effect, Layer, Context, Schema, Types } from "effect"
 import { EffectBridge } from "@/effect/bridge"
 import { InstanceState } from "@/effect/instance-state"
-import { EffectPromise } from "@/effect/promise"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { isRecord } from "@/util/record"
 import { optionalOmitUndefined } from "@opencode-ai/core/schema"
 import { ProviderTransform } from "./transform"
 import { ProviderV2 } from "@opencode-ai/core/provider"
 import { ModelV2 } from "@opencode-ai/core/model"
-import { ModelStatus } from "./model-status"
+const ModelStatus = Schema.Literals(["alpha", "beta", "deprecated", "active"])
+type ModelStatus = typeof ModelStatus.Type
 import { RuntimeFlags } from "@/effect/runtime-flags"
 import { ProviderError } from "./error"
+
+function refineRejection<A, E>(
+  evaluate: (signal: AbortSignal) => PromiseLike<A>,
+  refine: (cause: unknown) => E | undefined,
+) {
+  return Effect.tryPromise(evaluate).pipe(
+    Effect.catch((error) => {
+      const cause = Cause.isUnknownError(error) ? error.cause : error
+      const refined = refine(cause)
+      if (refined !== undefined) return Effect.fail(refined)
+      return Effect.die(cause)
+    }),
+  )
+}
 
 const OPENAI_HEADER_TIMEOUT_DEFAULT = 10_000
 
@@ -1775,7 +1789,7 @@ export const layer = Layer.effect(
       if (s.models.has(key)) return s.models.get(key)!
 
       const provider = s.providers[model.providerID]
-      return yield* EffectPromise.refineRejection(
+      return yield* refineRejection(
         async () => {
           const sdk = await resolveSDK(model, s, envs)
           const language = s.modelLoaders[model.providerID]
