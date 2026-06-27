@@ -14,6 +14,7 @@ import { SessionMessage } from "../session/message"
 import { AgentAttachment, FileAttachment, Prompt } from "../session/prompt"
 import { SessionSchema } from "../session/schema"
 import { WorkspaceV2 } from "../workspace"
+import { isRecord } from "../util/record"
 
 const FindMaxDepth = 8
 const FindMaxNodes = 2_000
@@ -54,9 +55,6 @@ function baseEventType(value: unknown) {
   return value.replace(/\.\d+$/, "")
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value)
-}
 
 function isSessionMessageEvent(type: string | undefined) {
   if (!type) return false

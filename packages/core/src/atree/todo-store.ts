@@ -3,6 +3,7 @@ import path from "path"
 import { randomUUID } from "crypto"
 import { ensureSessionPayloadFilesByID, touchSessionStore } from "./session-store"
 import type { SessionSchema } from "../session/schema"
+import { isRecord } from "../util/record"
 
 export type StoredTodo = {
   content: string
@@ -33,9 +34,6 @@ function baseEventType(value: unknown) {
   return value.replace(/\.\d+$/, "")
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function eventData(entry: Record<string, unknown>) {
   return isRecord(entry.data) ? entry.data : entry

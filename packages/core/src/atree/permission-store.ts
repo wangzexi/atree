@@ -2,22 +2,19 @@ import fs from "fs/promises"
 import path from "path"
 import type { PermissionV2 } from "../permission"
 import { readSessionStoresDeep, readWorkspaceSessionStoresDeep } from "./session-store"
+import { isRecord } from "../util/record"
 
-type RecordValue = Record<string, unknown>
 export type PermissionStateEntry = {
   readonly request: PermissionV2.Request
   readonly directory: string
 }
 
-function isRecord(value: unknown): value is RecordValue {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function eventType(value: unknown) {
   return typeof value === "string" ? value.replace(/\.\d+$/, "") : undefined
 }
 
-function eventData(entry: RecordValue) {
+function eventData(entry: Record<string, unknown>) {
   return isRecord(entry.data) ? entry.data : entry
 }
 
@@ -42,9 +39,9 @@ export async function readPermissionStateEntries(rootDirectory?: string) {
 
     for (const line of raw.split(/\r?\n/)) {
       if (!line.trim()) continue
-      let entry: RecordValue
+      let entry: Record<string, unknown>
       try {
-        entry = JSON.parse(line) as RecordValue
+        entry = JSON.parse(line) as Record<string, unknown>
       } catch {
         continue
       }
