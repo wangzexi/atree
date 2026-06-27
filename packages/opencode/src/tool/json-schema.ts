@@ -2,7 +2,7 @@ import type { JSONSchema7 } from "@ai-sdk/provider"
 import { JsonSchema, Schema } from "effect"
 import type * as Tool from "./tool"
 
-type JsonObject = Record<string, unknown>
+import { isRecord } from "@/util/record"
 const cache = new WeakMap<Schema.Top, JSONSchema7>()
 
 export function fromSchema(schema: Schema.Top): JSONSchema7 {
@@ -87,9 +87,6 @@ function normalize(value: unknown, options: { stripNull?: boolean } = {}): unkno
   return schema
 }
 
-function isRecord(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function isJsonSchema(value: unknown): value is JSONSchema7 {
   return typeof value === "boolean" || isRecord(value)
@@ -107,7 +104,7 @@ function isEmptyStructUnion(items: unknown[]) {
   )
 }
 
-function canFlattenAllOf(allOf: JsonObject[], parent: JsonObject) {
+function canFlattenAllOf(allOf: Record<string, unknown>[], parent: Record<string, unknown>) {
   const keys = new Set(Object.keys(parent).filter((key) => key !== "allOf"))
   return allOf.every((item) =>
     Object.keys(item).every((key) => {
@@ -118,7 +115,7 @@ function canFlattenAllOf(allOf: JsonObject[], parent: JsonObject) {
   )
 }
 
-function inlineLocalReferences(value: unknown, definitions?: JsonObject, seen = new Set<string>()): unknown {
+function inlineLocalReferences(value: unknown, definitions?: Record<string, unknown>, seen = new Set<string>()): unknown {
   if (Array.isArray(value)) return value.map((item) => inlineLocalReferences(item, definitions, seen))
   if (!isRecord(value)) return value
 
