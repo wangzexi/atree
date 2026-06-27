@@ -174,6 +174,13 @@ export function eventData(entry: Record<string, unknown>) {
   return isRecord(entry.data) ? entry.data : entry
 }
 
+
+export function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) {
+  if (typeof entry.at === "number") return entry.at
+  if (typeof data.at === "number") return data.at
+  return undefined
+}
+
 function modelRef(value: unknown): SessionInfo["model"] | undefined {
   if (!isRecord(value) || typeof value.providerID !== "string") return
   const id = typeof value.id === "string" ? value.id : typeof value.modelID === "string" ? value.modelID : undefined

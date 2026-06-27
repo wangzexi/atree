@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import { ensureSessionPayloadFilesByID, touchSessionStore, sessionJsonlPath, baseEventType, eventData } from "./session-store"
+import { ensureSessionPayloadFilesByID, touchSessionStore, sessionJsonlPath, baseEventType, eventData, eventAt } from "./session-store"
 import { isRecord } from "@/util/record"
 import type { SessionID } from "@/session/schema"
 
@@ -30,11 +30,6 @@ function sessionStatePath(directory: string, sessionID: string) {
 
 
 
-function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) {
-  if (typeof entry.at === "number") return entry.at
-  if (typeof data.at === "number") return data.at
-  return
-}
 
 async function readSessionState(target: string) {
   try {
