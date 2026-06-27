@@ -36,11 +36,27 @@ import {
   SummarizePayload,
   UpdatePayload,
 } from "../groups/session"
-import { PermissionNotFoundError, notFound } from "../errors"
-import * as SessionError from "./session-errors"
+import { PermissionNotFoundError, notFound, SessionBusyError } from "../errors"
 import { buildScheduleCreateInput } from "@/session/schedule-input"
 import { NotFoundError } from "@/storage/storage"
 
+
+function mapStorageNotFound<A, R>(self: Effect.Effect<A, NotFoundError, R>) {
+  return self.pipe(Effect.mapError((error) => notFound(error.message)))
+}
+
+function mapBusy<A, R>(self: Effect.Effect<A, Session.BusyError, R>) {
+  return self.pipe(
+    Effect.catchTag("SessionBusyError", (error) =>
+      Effect.fail(
+        new SessionBusyError({
+          sessionID: error.sessionID,
+          message: `Session is busy: ${error.sessionID}`,
+        }),
+      ),
+    ),
+  )
+}
 const tryParseJson = (text: string) =>
   Effect.try({
     try: () => JSON.parse(text) as unknown,
@@ -110,7 +126,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         Effect.catchCause(() => Effect.succeed({ directory: undefined } as { directory?: string })),
       )
       const scoped = session.get(sessionID, { directory: context.directory })
-      const found = yield* SessionError.mapStorageNotFound(scoped)
+      const found = yield* mapStorageNotFound(scoped)
       return found
     })
 
@@ -188,7 +204,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
         })
       }
       const info = yield* requireSession(ctx.params.sessionID)
-      const allMessages = yield* SessionError.mapStorageNotFound(
+      const allMessages = yield* mapStorageNotFound(
         session.messages({ sessionID: ctx.params.sessionID, directory: info.directory }),
       )
       if (ctx.query.limit === undefined || ctx.query.limit === 0) {
@@ -217,7 +233,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
-      const result = yield* SessionError.mapStorageNotFound(
+      const result = yield* mapStorageNotFound(
         session.findMessage(ctx.params.sessionID, (item) => item.info.id === ctx.params.messageID, {
           directory: info.directory,
         }),
@@ -253,7 +269,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
 
     const remove = Effect.fn("SessionHttpApi.remove")(function* (ctx: { params: { sessionID: SessionID } }) {
       const current = yield* requireSession(ctx.params.sessionID)
-      yield* SessionError.mapStorageNotFound(session.remove(ctx.params.sessionID, { directory: current.directory }))
+      yield* mapStorageNotFound(session.remove(ctx.params.sessionID, { directory: current.directory }))
       return true
     })
 
@@ -297,7 +313,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload?: typeof ForkPayload.Type
     }) {
       const current = yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapStorageNotFound(
+      return yield* mapStorageNotFound(
         session.fork({
           sessionID: ctx.params.sessionID,
           directory: current.directory,
@@ -352,7 +368,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
       yield* revertSvc.cleanup(info)
-      const messages = yield* SessionError.mapStorageNotFound(
+      const messages = yield* mapStorageNotFound(
         session.messages({ sessionID: ctx.params.sessionID, directory: info.directory }),
       )
       const defaultAgent = yield* agentSvc.defaultAgent()
@@ -422,7 +438,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof ShellPayload.Type
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(
+      return yield* mapBusy(
         promptSvc.shell({ ...ctx.payload, sessionID: ctx.params.sessionID, directory: info.directory }),
       )
     })
@@ -432,14 +448,14 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       payload: typeof RevertPayload.Type
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(
+      return yield* mapBusy(
         revertSvc.revert({ sessionID: ctx.params.sessionID, directory: info.directory, ...ctx.payload }),
       )
     })
 
     const unrevert = Effect.fn("SessionHttpApi.unrevert")(function* (ctx: { params: { sessionID: SessionID } }) {
       const info = yield* requireSession(ctx.params.sessionID)
-      return yield* SessionError.mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID, directory: info.directory }))
+      return yield* mapBusy(revertSvc.unrevert({ sessionID: ctx.params.sessionID, directory: info.directory }))
     })
 
     const permissionRespond = Effect.fn("SessionHttpApi.permissionRespond")(function* (ctx: {
@@ -464,7 +480,7 @@ export const sessionHandlers = HttpApiBuilder.group(InstanceHttpApi, "session", 
       params: { sessionID: SessionID; messageID: MessageID }
     }) {
       const info = yield* requireSession(ctx.params.sessionID)
-      yield* SessionError.mapBusy(runState.assertNotBusy(ctx.params.sessionID, { directory: info.directory }))
+      yield* mapBusy(runState.assertNotBusy(ctx.params.sessionID, { directory: info.directory }))
       yield* session.removeMessage({ ...ctx.params, directory: info.directory })
       return true
     })

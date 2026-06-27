@@ -20,7 +20,6 @@ import { InstanceBootstrap as InstanceBootstrapService } from "../../src/project
 import { InstanceStore } from "../../src/project/instance-store"
 import { Project } from "../../src/project/project"
 import { HttpApiApp } from "../../src/server/routes/instance/httpapi/server"
-import * as HttpSessionError from "../../src/server/routes/instance/httpapi/handlers/session-errors"
 import { SessionPaths } from "../../src/server/routes/instance/httpapi/groups/session"
 import { Session } from "@/session/session"
 import { Schedule } from "@/session/schedule"
@@ -251,22 +250,6 @@ afterEach(async () => {
 })
 
 describe("session HttpApi", () => {
-  it.effect("maps busy sessions to public session busy errors", () =>
-    Effect.gen(function* () {
-      const sessionID = SessionID.descending()
-      const exit = yield* HttpSessionError.mapBusy(Effect.fail(new Session.BusyError({ sessionID }))).pipe(Effect.exit)
-
-      expect(Exit.isFailure(exit)).toBe(true)
-      if (Exit.isFailure(exit)) {
-        expect(Cause.squash(exit.cause)).toMatchObject({
-          _tag: "SessionBusyError",
-          sessionID,
-          message: `Session is busy: ${sessionID}`,
-        })
-      }
-    }),
-  )
-
   it.instance(
     "returns declared not found errors for read routes",
     () =>
