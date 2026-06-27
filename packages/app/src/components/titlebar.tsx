@@ -666,7 +666,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                         )
                       }}
                     </For>
-                    <Show when={currentDirectory() && !currentDirectoryDraft()}>
+                    <Show when={currentDirectory()}>
                       <>
                         <Show when={visibleTabs().length > 0}>
                           <div class="w-[1.5px] h-3 shrink-0 rounded-full bg-[var(--v2-background-bg-layer-02)]" />
@@ -676,6 +676,7 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                           title={language.t("command.session.new")}
                           active={false}
                           onNavigate={openCurrentDirectoryDraft}
+                          testId="atree-new-session-tab"
                         />
                       </>
                     </Show>
@@ -1241,11 +1242,13 @@ function DraftTabItem(props: {
   title: string
   active?: boolean
   onNavigate: () => void
+  testId?: string
 }) {
   return (
     <div
       ref={props.ref}
       data-active={props.active}
+      data-testid={props.testId}
       class="group relative flex h-7 w-9 shrink-0 flex-row items-center justify-start overflow-hidden whitespace-nowrap rounded-[6px] bg-[var(--tab-bg)] px-1.5 transition-[background-color] duration-150 ease-out [--tab-bg:var(--v2-background-bg-deep)] hover:[--tab-bg:var(--v2-background-bg-layer-02)] data-[active='true']:[--tab-bg:var(--v2-background-bg-layer-02)] focus-within:outline focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
     >
       <a

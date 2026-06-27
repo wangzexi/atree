@@ -461,4 +461,74 @@ test.describe("atree invariants", () => {
     await expect(dock).toBeHidden()
     expect(errors).toEqual([])
   })
+
+
+  test("hovering a directory node reveals the new-session icon on its right side", async ({ page }) => {
+    const errors = trackPageErrors(page)
+
+    await mockOpenCodeServer(page, {
+      directory: root,
+      project,
+      provider,
+      sessions: [],
+      pageMessages: () => ({ items: [] }),
+      files: (directory) =>
+        directory === root
+          ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }]
+          : [],
+    })
+
+    await openApp(page, `/${base64Encode(root)}/session`)
+    await expect(page.getByText("aTree", { exact: true })).toBeVisible()
+
+    const childNode = page.locator(`[data-atree-directory="${child}"]`)
+    await expect(childNode).toBeVisible()
+
+    // Hover the directory node — new-session icon should appear on its right.
+    await childNode.hover()
+    await expect(page.locator(`[data-atree-new-session="${child}"]`)).toBeVisible()
+
+    expect(errors).toEqual([])
+  })
+
+  test("selecting a directory always shows the new-session button in the tab bar", async ({ page }) => {
+    const errors = trackPageErrors(page)
+
+    await mockOpenCodeServer(page, {
+      directory: root,
+      project,
+      provider,
+      sessions: [
+        {
+          id: "ses_inv_tab_new",
+          slug: "inv-tab-new",
+          projectID: project.id,
+          directory: child,
+          title: "Tab new session test",
+          version: "test",
+          time: { created: 1700000000000, updated: 1700000000000 },
+        },
+      ],
+      pageMessages: () => ({ items: [] }),
+      files: (directory) =>
+        directory === root
+          ? [{ type: "directory", name: "inbox", path: "inbox", absolute: child }]
+          : [],
+    })
+
+    await openApp(page, `/${base64Encode(child)}/session/ses_inv_tab_new`)
+    await expect(page.getByText("aTree", { exact: true })).toBeVisible()
+    await expect(page.locator(`[data-atree-directory="${child}"]`)).toBeVisible()
+
+    // The new-session tab button must always be visible in the tab bar.
+    const newTabBtn = page.locator('[data-testid="atree-new-session-tab"]')
+    await expect(newTabBtn).toBeVisible()
+
+    // Even after clicking it (opening a draft tab), it should remain.
+    await newTabBtn.click()
+    await expect(newTabBtn).toBeVisible()
+
+    expect(errors).toEqual([])
+  })
+
 })
