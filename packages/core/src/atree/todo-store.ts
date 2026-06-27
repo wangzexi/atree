@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
-import { ensureSessionPayloadFilesByID, touchSessionStore, sessionJsonlPath, eventData } from "./session-store"
+import { ensureSessionPayloadFilesByID, touchSessionStore, sessionJsonlPath, eventData, baseEventType } from "./session-store"
 import type { SessionSchema } from "../session/schema"
 import { isRecord } from "../util/record"
 
@@ -26,10 +26,6 @@ function sessionStatePath(directory: string, sessionID: string) {
 }
 
 
-function baseEventType(value: unknown) {
-  if (typeof value !== "string") return
-  return value.replace(/\.\d+$/, "")
-}
 
 
 
