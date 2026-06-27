@@ -87,6 +87,4 @@ delete process.env["OTEL_RESOURCE_ATTRIBUTES"]
 process.env["OPENCODE_DB"] = ":memory:"
 
 // Now safe to import from src/
-const { initProjectors } = await import("../src/server/projectors")
 
-initProjectors()
