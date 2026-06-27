@@ -13,6 +13,7 @@ import { SessionSchema } from "../session/schema"
 import { moveSessionStore } from "../atree/session-store"
 import { AbsolutePath, RelativePath } from "../schema"
 import path from "path"
+import { sameDirectory } from "../util/path"
 
 export const Destination = Schema.Struct({
   directory: AbsolutePath,
@@ -68,9 +69,6 @@ export interface Interface {
 
 export class Service extends Context.Service<Service, Interface>()("@opencode/ControlPlaneMoveSession") {}
 
-function sameDirectory(left: string, right: string) {
-  return path.resolve(left) === path.resolve(right)
-}
 
 export const layer = Layer.effect(
   Service,

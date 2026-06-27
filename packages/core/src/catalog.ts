@@ -13,6 +13,7 @@ import { Policy } from "./policy"
 import { State } from "./state"
 import { Credential } from "./credential"
 import { IntegrationSchema } from "./integration/schema"
+import { sameDirectory } from "./util/path"
 
 export type ProviderRecord = {
   provider: ProviderV2.Info
@@ -89,11 +90,6 @@ export interface Interface {
 export class Service extends Context.Service<Service, Interface>()("@opencode/v2/Catalog") {}
 
 enableMapSet()
-
-function sameDirectory(left: string | undefined, right: string | undefined) {
-  if (!left || !right) return false
-  return path.resolve(left) === path.resolve(right)
-}
 
 export const layer = Layer.effect(
   Service,

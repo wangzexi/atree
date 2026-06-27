@@ -21,6 +21,7 @@ import { InstallationVersion } from "./installation/version"
 import { Slug } from "./util/slug"
 import { ProjectTable } from "./project/sql"
 import path from "path"
+import { sameDirectory } from "./util/path"
 import { SessionRunner } from "./session/runner/index"
 import { SessionStore } from "./session/store"
 import { SessionExecution } from "./session/execution"
@@ -125,9 +126,6 @@ function promptsMatch(input: Prompt, existing: SessionMessage.User) {
   )
 }
 
-function sameDirectory(left: string, right: string) {
-  return path.resolve(left) === path.resolve(right)
-}
 
 export interface Interface {
   readonly list: (input?: ListInput) => Effect.Effect<SessionSchema.Info[]>

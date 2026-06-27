@@ -35,3 +35,9 @@ export function truncateMiddle(text: string, maxLength: number = 20) {
   const end = Math.floor(available / 2)
   return text.slice(0, start) + "…" + text.slice(-end)
 }
+
+import nodePath from "path"
+export function sameDirectory(left: string | undefined, right: string | undefined) {
+  if (!left || !right) return false
+  return nodePath.resolve(left) === nodePath.resolve(right)
+}
