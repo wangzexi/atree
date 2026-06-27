@@ -626,21 +626,8 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                           )
 
                         if (tab.type === "draft") {
-                          return (
-                            <>
-                              {divider()}
-                              <DraftTabItem
-                                ref={ref}
-                                href={tabHref(tab)}
-                                title={language.t("command.session.new")}
-                                active={isCurrentTab(tab)}
-                                onNavigate={() => {
-                                  navigateTab(tab)
-                                  ref.scrollIntoView({ behavior: "instant" })
-                                }}
-                              />
-                            </>
-                          )
+                          // Draft tab is rendered as the permanent new-tab button at the end.
+                          return null
                         }
 
                         return (
@@ -668,21 +655,23 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                     </For>
                     <Show when={currentDirectory()}>
                       <>
-                        <Show when={visibleTabs().length > 0}>
+                        <Show when={visibleTabs().some((t) => t.type !== "draft")}>
                           <div class="w-[1.5px] h-3 shrink-0 rounded-full bg-[var(--v2-background-bg-layer-02)]" />
                         </Show>
-                        <button
-                          type="button"
-                          data-testid="atree-new-session-tab"
+                        <DraftTabItem
+                          href={
+                            currentDirectoryDraft()?.type === "draft"
+                              ? tabHref(currentDirectoryDraft()!)
+                              : "#"
+                          }
                           title={language.t("command.session.new")}
-                          aria-label={language.t("command.session.new")}
-                          onClick={openCurrentDirectoryDraft}
-                          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-v2-text-text-faint transition-[background-color,color] duration-150 hover:bg-[var(--v2-background-bg-layer-02)] hover:text-v2-text-text-base focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
-                        >
-                          <span class="flex size-4 shrink-0 items-center justify-center">
-                            <IconV2 name="plus-small" />
-                          </span>
-                        </button>
+                          active={
+                            currentDirectoryDraft()?.type === "draft" &&
+                            isCurrentTab(currentDirectoryDraft()!)
+                          }
+                          onNavigate={openCurrentDirectoryDraft}
+                          testId="atree-new-session-tab"
+                        />
                       </>
                     </Show>
                   </div>
