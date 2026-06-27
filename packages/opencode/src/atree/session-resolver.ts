@@ -5,7 +5,7 @@ import { findSessionStore, readSessionStore, readWorkspaceSessionStoresDeep } fr
 
 export type FileSession = NonNullable<Awaited<ReturnType<typeof readSessionStore>>>
 
-function sameDirectory(left: string | undefined, right: string | undefined) {
+export function sameDirectory(left: string | undefined, right: string | undefined) {
   if (!left || !right) return false
   return path.resolve(left) === path.resolve(right)
 }

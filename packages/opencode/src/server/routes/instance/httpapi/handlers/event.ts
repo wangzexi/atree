@@ -8,9 +8,10 @@ import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import * as Sse from "effect/unstable/encoding/Sse"
 import path from "path"
+import { sameDirectory } from "@/atree/session-resolver"
 import { EventApi } from "../groups/event"
 
-function eventData(data: unknown): Sse.Event {
+export function eventData(data: unknown): Sse.Event {
   return {
     _tag: "Event",
     event: "message",
@@ -21,11 +22,6 @@ function eventData(data: unknown): Sse.Event {
 
 function eventID() {
   return EventV2.ID.create()
-}
-
-function sameDirectory(left: string | undefined, right: string | undefined) {
-  if (!left || !right) return false
-  return path.resolve(left) === path.resolve(right)
 }
 
 function eventResponse(events: EventV2.Interface) {
