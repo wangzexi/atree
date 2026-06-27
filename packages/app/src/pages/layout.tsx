@@ -2849,7 +2849,7 @@ export default function Layout(props: ParentProps) {
             on:mousedown={(event) => {
               if (event.button !== 0) return
               const target = event.target
-              if (target instanceof HTMLElement && target.closest("button,a")) return
+              if (target instanceof Element && target.closest("button,a")) return
               event.stopPropagation()
               void openDirectorySessions(props.root, props.directory)
             }}
