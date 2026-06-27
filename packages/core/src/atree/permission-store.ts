@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import type { PermissionV2 } from "../permission"
-import { readSessionStoresDeep, readWorkspaceSessionStoresDeep } from "./session-store"
+import { readSessionStoresDeep, readWorkspaceSessionStoresDeep, sessionJsonlPath } from "./session-store"
 import { isRecord } from "../util/record"
 
 export type PermissionStateEntry = {
@@ -18,9 +18,6 @@ function eventData(entry: Record<string, unknown>) {
   return isRecord(entry.data) ? entry.data : entry
 }
 
-function sessionJsonlPath(directory: string, sessionID: string) {
-  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
-}
 
 export async function readPermissionStateEntries(rootDirectory?: string) {
   const sessions = rootDirectory

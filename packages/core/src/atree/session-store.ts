@@ -616,6 +616,10 @@ function sessionJsonl(info: SessionSchema.Info) {
   return path.join(sessionRoot(info), "session.jsonl")
 }
 
+export function sessionJsonlPath(directory: string, sessionID: string) {
+  return path.join(sessionRootByID(directory, sessionID), "session.jsonl")
+}
+
 function yamlValue(value: unknown) {
   return JSON.stringify(value ?? null)
 }

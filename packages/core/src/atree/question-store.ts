@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import type { QuestionV2 } from "../question"
-import { readSessionStoresDeep, readWorkspaceSessionStoresDeep } from "./session-store"
+import { readSessionStoresDeep, readWorkspaceSessionStoresDeep, sessionJsonlPath } from "./session-store"
 import { isRecord } from "../util/record"
 
 export type QuestionStateEntry = {
@@ -18,9 +18,6 @@ function eventData(entry: Record<string, unknown>) {
   return isRecord(entry.data) ? entry.data : entry
 }
 
-function sessionJsonlPath(directory: string, sessionID: string) {
-  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
-}
 
 export async function readQuestionStateEntries(rootDirectory?: string) {
   const sessions = rootDirectory
