@@ -1,1 +1,1 @@
-export * from "@opencode-ai/tui/logo"
+export const logo = { left: [], right: [] }
