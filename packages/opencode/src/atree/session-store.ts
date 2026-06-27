@@ -6,6 +6,7 @@ import { readWorkspaceRootDirectory } from "./state"
 import type { SessionID } from "@/session/schema"
 import type { Session } from "@/session/session"
 import type { SessionV1 } from "@opencode-ai/core/v1/session"
+import { isRecord } from "@/util/record"
 
 type SessionInfo = Session.Info & {
   id: SessionID
@@ -20,7 +21,7 @@ function yamlValue(value: unknown) {
   return JSON.stringify(value ?? null)
 }
 
-function baseEventType(value: unknown) {
+export function baseEventType(value: unknown) {
   if (typeof value !== "string") return
   return value.replace(/\.\d+$/, "")
 }
@@ -154,9 +155,6 @@ type MaterializedAssets = {
   assets: SessionAsset[]
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
 function timestampValue(value: unknown, fallback: number) {
   if (typeof value === "number") return value
@@ -172,7 +170,7 @@ function timestampValue(value: unknown, fallback: number) {
   return fallback
 }
 
-function eventData(entry: Record<string, unknown>) {
+export function eventData(entry: Record<string, unknown>) {
   return isRecord(entry.data) ? entry.data : entry
 }
 

@@ -2,7 +2,8 @@ import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore, sessionJsonlPath } from "./session-store"
+import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore, sessionJsonlPath, baseEventType, eventData } from "./session-store"
+import { isRecord } from "@/util/record"
 import type { SessionID } from "@/session/schema"
 
 export type StoredSchedule = {
@@ -33,18 +34,8 @@ function sessionStatePath(directory: string, sessionID: string) {
 }
 
 
-function baseEventType(value: unknown) {
-  if (typeof value !== "string") return
-  return value.replace(/\.\d+$/, "")
-}
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
-function eventData(entry: Record<string, unknown>) {
-  return isRecord(entry.data) ? entry.data : entry
-}
 
 function eventAt(entry: Record<string, unknown>, data: Record<string, unknown>) {
   if (typeof entry.at === "number") return entry.at

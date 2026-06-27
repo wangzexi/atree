@@ -2,9 +2,9 @@ import fs from "fs/promises"
 import path from "path"
 import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import type { Request as QuestionRequest } from "@/question"
-import { readSessionStoresDeep, sessionJsonlPath } from "./session-store"
+import { isRecord } from "@/util/record"
+import { readSessionStoresDeep, sessionJsonlPath, eventData, baseEventType } from "./session-store"
 
-type RecordValue = Record<string, unknown>
 
 export type InteractionState = {
   questions: QuestionRequest[]
@@ -15,17 +15,8 @@ export type DirectoryScopedInteraction = {
   directory?: string
 }
 
-function isRecord(value: unknown): value is RecordValue {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-}
 
-function eventType(value: unknown) {
-  return typeof value === "string" ? value.replace(/\.\d+$/, "") : undefined
-}
 
-function eventData(entry: RecordValue) {
-  return isRecord(entry.data) ? entry.data : entry
-}
 
 
 function pendingKey(directory: string, sessionID: string, requestID: string) {
@@ -46,14 +37,14 @@ export async function readSessionInteractionState(directory: string): Promise<In
 
     for (const line of raw.split(/\r?\n/)) {
       if (!line.trim()) continue
-      let entry: RecordValue
+      let entry: Record<string, unknown>
       try {
-        entry = JSON.parse(line) as RecordValue
+        entry = JSON.parse(line) as Record<string, unknown>
       } catch {
         continue
       }
 
-      const type = eventType(entry.type)
+      const type = baseEventType(entry.type)
       const data = eventData(entry)
 
       if (type === "question.asked") {
