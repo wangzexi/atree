@@ -41,7 +41,6 @@ import { ShellID } from "@/tool/shell/id"
 import { FSUtil } from "@opencode-ai/core/fs-util"
 import { Truncate } from "@/tool/truncate"
 import { Image } from "@/image/image"
-import { decodeDataUrl } from "@/util/data-url"
 import { Process } from "@/util/process"
 import { Cause, Effect, Exit, Latch, Layer, Option, Scope, Context, Schema, Types } from "effect"
 import { InstanceState } from "@/effect/instance-state"
@@ -60,6 +59,15 @@ import * as DateTime from "effect/DateTime"
 import { SessionReminders } from "./reminders"
 import { SessionTools } from "./tools"
 import { LLMEvent } from "@opencode-ai/llm"
+
+function decodeDataUrl(url: string) {
+  const idx = url.indexOf(",")
+  if (idx === -1) return ""
+  const head = url.slice(0, idx)
+  const body = url.slice(idx + 1)
+  if (head.includes(";base64")) return Buffer.from(body, "base64").toString("utf8")
+  return decodeURIComponent(body)
+}
 
 // @ts-ignore
 globalThis.AI_SDK_LOG_WARNINGS = false
