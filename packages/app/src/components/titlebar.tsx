@@ -671,13 +671,18 @@ export function Titlebar(props: { update?: TitlebarUpdate }) {
                         <Show when={visibleTabs().length > 0}>
                           <div class="w-[1.5px] h-3 shrink-0 rounded-full bg-[var(--v2-background-bg-layer-02)]" />
                         </Show>
-                        <DraftTabItem
-                          href="#"
+                        <button
+                          type="button"
+                          data-testid="atree-new-session-tab"
                           title={language.t("command.session.new")}
-                          active={false}
-                          onNavigate={openCurrentDirectoryDraft}
-                          testId="atree-new-session-tab"
-                        />
+                          aria-label={language.t("command.session.new")}
+                          onClick={openCurrentDirectoryDraft}
+                          class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[6px] text-v2-text-text-faint transition-[background-color,color] duration-150 hover:bg-[var(--v2-background-bg-layer-02)] hover:text-v2-text-text-base focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--v2-border-border-focus)] motion-reduce:transition-none"
+                        >
+                          <span class="flex size-4 shrink-0 items-center justify-center">
+                            <IconV2 name="plus-small" />
+                          </span>
+                        </button>
                       </>
                     </Show>
                   </div>
