@@ -175,6 +175,10 @@ function planRequest(
     const workspace = yield* resolveWorkspace(workspaceID, envWorkspaceID)
 
     if (workspaceID && workspace === undefined && !envWorkspaceID) {
+      // Workspace missing (deleted or left by tests). Fall back to session directory if available.
+      if (session?.directory) {
+        return RequestPlan.Local({ directory: session.directory, workspaceID: undefined })
+      }
       return RequestPlan.MissingWorkspace({ workspaceID })
     }
 
