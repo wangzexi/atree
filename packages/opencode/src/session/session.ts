@@ -25,7 +25,7 @@ import {
   readWorkspaceSessionStoresDeep,
   writeSessionStore,
 } from "@/atree/session-store"
-import { resolveFileSession } from "@/atree/session-resolver"
+import { resolveFileSession, sameDirectory } from "@/atree/session-resolver"
 
 import { NotFoundError } from "@/storage/storage"
 import { eq } from "drizzle-orm"
@@ -137,9 +137,6 @@ export function toRuntimeRow(info: Info) {
   }
 }
 
-function sameDirectory(left: string, right: string) {
-  return path.resolve(left) === path.resolve(right)
-}
 
 async function realpathOrResolve(input: string) {
   return fs.realpath(input).catch(() => path.resolve(input))
