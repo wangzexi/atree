@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import type { PermissionV1 } from "@opencode-ai/core/v1/permission"
 import type { Request as QuestionRequest } from "@/question"
-import { readSessionStoresDeep } from "./session-store"
+import { readSessionStoresDeep, sessionJsonlPath } from "./session-store"
 
 type RecordValue = Record<string, unknown>
 
@@ -27,9 +27,6 @@ function eventData(entry: RecordValue) {
   return isRecord(entry.data) ? entry.data : entry
 }
 
-function sessionJsonlPath(directory: string, sessionID: string) {
-  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
-}
 
 function pendingKey(directory: string, sessionID: string, requestID: string) {
   return `${path.resolve(directory)}\0${sessionID}\0${requestID}`

@@ -90,6 +90,10 @@ function sessionRootByID(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID)
 }
 
+export function sessionJsonlPath(directory: string, sessionID: string) {
+  return path.join(sessionRootByID(directory, sessionID), "session.jsonl")
+}
+
 const FindMaxDepth = 8
 const FindMaxNodes = 2_000
 const IgnoredDirectories = new Set([

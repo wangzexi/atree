@@ -67,7 +67,7 @@ export function isDefaultTitle(title: string) {
   ).test(title)
 }
 
-function sessionEventLocation(directory: string | undefined) {
+export function sessionEventLocation(directory: string | undefined) {
   return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
 }
 

@@ -6,7 +6,7 @@ import os from "os"
 import { SessionID, MessageID, PartID } from "./schema"
 import { MessageV2 } from "./message-v2"
 import { SessionRevert } from "./revert"
-import { Session } from "./session"
+import { Session, sessionEventLocation } from "./session"
 import { appendSessionJsonl } from "@/atree/session-store"
 import { Agent } from "../agent/agent"
 import { Provider } from "@/provider/provider"
@@ -52,8 +52,6 @@ import { SessionEvent } from "@opencode-ai/core/session/event"
 import { SessionMessage } from "@opencode-ai/core/session/message"
 import { ModelV2 } from "@opencode-ai/core/model"
 import { ProviderV2 } from "@opencode-ai/core/provider"
-import { Location } from "@opencode-ai/core/location"
-import { AbsolutePath } from "@opencode-ai/core/schema"
 import { AgentAttachment, FileAttachment, Prompt, Source } from "@opencode-ai/core/session/prompt"
 import * as DateTime from "effect/DateTime"
 import { SessionReminders } from "./reminders"
@@ -91,9 +89,6 @@ function isOrphanedInterruptedTool(part: SessionV1.ToolPart) {
   return part.state.status === "error" && part.state.metadata?.interrupted === true
 }
 
-function sessionEventLocation(directory: string | undefined) {
-  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
-}
 
 export interface Interface {
   readonly cancel: (sessionID: SessionID, options?: { directory?: string }) => Effect.Effect<void>

@@ -50,7 +50,7 @@ function parseValue(value: string) {
   }
 }
 
-function baseEventType(value: unknown) {
+export function baseEventType(value: unknown) {
   if (typeof value !== "string") return
   return value.replace(/\.\d+$/, "")
 }

@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import path from "path"
 import type { QuestionV2 } from "../question"
-import { readSessionStoresDeep, readWorkspaceSessionStoresDeep, sessionJsonlPath, eventData } from "./session-store"
+import { readSessionStoresDeep, readWorkspaceSessionStoresDeep, sessionJsonlPath, eventData, baseEventType } from "./session-store"
 import { isRecord } from "../util/record"
 
 export type QuestionStateEntry = {
@@ -10,9 +10,6 @@ export type QuestionStateEntry = {
 }
 
 
-function eventType(value: unknown) {
-  return typeof value === "string" ? value.replace(/\.\d+$/, "") : undefined
-}
 
 
 
@@ -40,7 +37,7 @@ export async function readQuestionStateEntries(rootDirectory?: string) {
         continue
       }
 
-      const type = eventType(entry.type)
+      const type = baseEventType(entry.type)
       const data = eventData(entry)
 
       if (type === "question.v2.asked") {

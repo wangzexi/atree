@@ -3,15 +3,10 @@ import { Effect, Layer, Context, Schema } from "effect"
 import { SessionV1 } from "@opencode-ai/core/v1/session"
 import { EventV2Bridge } from "@/event-v2-bridge"
 import { Snapshot } from "@/snapshot"
-import { Session } from "./session"
+import { Session, sessionEventLocation } from "./session"
 import { SessionID, MessageID } from "./schema"
 import { Config } from "@/config/config"
-import { Location } from "@opencode-ai/core/location"
-import { AbsolutePath } from "@opencode-ai/core/schema"
 
-function sessionEventLocation(directory: string | undefined) {
-  return directory ? { location: new Location.Ref({ directory: AbsolutePath.make(directory) }) } : undefined
-}
 
 function unquoteGitPath(input: string) {
   if (!input.startsWith('"')) return input

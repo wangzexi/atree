@@ -2,7 +2,7 @@ import fs from "fs/promises"
 import path from "path"
 import { randomUUID } from "crypto"
 import { ensureAtreeDirectoryStore } from "./directory-store"
-import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore } from "./session-store"
+import { ensureSessionPayloadFilesByID, readSessionStoresDeep, touchSessionStore, sessionJsonlPath } from "./session-store"
 import type { SessionID } from "@/session/schema"
 
 export type StoredSchedule = {
@@ -32,9 +32,6 @@ function sessionStatePath(directory: string, sessionID: string) {
   return path.join(directory, ".agents", "atree", "sessions", sessionID, "schedule.json")
 }
 
-function sessionJsonlPath(directory: string, sessionID: string) {
-  return path.join(directory, ".agents", "atree", "sessions", sessionID, "session.jsonl")
-}
 
 function baseEventType(value: unknown) {
   if (typeof value !== "string") return
